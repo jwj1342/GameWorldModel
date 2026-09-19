@@ -1,0 +1,2 @@
+ablations: {single_stage: true}
+writer: {stages: [single_stage]}

@@ -1,0 +1,3 @@
+# 用确定性的假 VLM 走通 writer / critic / loop 的管线（CPU）
+vlm:
+  provider: mock

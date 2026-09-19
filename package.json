@@ -1,0 +1,17 @@
+{
+  "name": "pwstage",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "playwright": "^1.63.0",
+    "three": "^0.186.0"
+  }
+}

@@ -36,12 +36,12 @@
 
 任务：
 
-- [ ] 固定内核：three.js + Rapier + recast-navigation + miniplex，systems 按优先级区间执行；实现 `window.__game` 的六个方法（见 `architecture.md` 5.3）。
-- [ ] 平台跳跃模板：出生点、目标体、可行走面、收集物、危险物五个槽位；Rapier KinematicCharacterController 控制角色；第三人称跟随相机。
-- [ ] 编译器：JSON Schema 校验 → 语义校验 → 生成 `scene.js` / `motions.js` / `events.js` / `binding.js` → 写 `index.html`；错误输出为结构化列表。
-- [ ] 运动节点编译：static、trajectory、revolute、prismatic、periodic_translate、periodic_rotate、spin 七种各一个纯函数 `pose(t)`。
-- [ ] 无头 harness：Playwright 加载 `game/`，按关键帧时刻调用 `render` 输出 rgb / depth / id 三张 PNG；`step` 驱动固定步长；Slurm 作业脚本按 `cluster.md` 的约定解包依赖。
-- [ ] 手写一份场景程序：地面、两面墙、一个周期升降平台、一扇定时开门、三枚旋转金币、出生点与目标体。
+- [x] 固定内核：three.js + Rapier + recast-navigation + miniplex，systems 按优先级区间执行；实现 `window.__game` 的六个方法（见 `architecture.md` 5.3）。
+- [x] 平台跳跃模板：出生点、目标体、可行走面、收集物、危险物五个槽位；Rapier KinematicCharacterController 控制角色；第三人称跟随相机。
+- [x] 编译器：JSON Schema 校验 → 语义校验 → 生成 `scene.js` / `motions.js` / `events.js` / `binding.js` → 写 `index.html`；错误输出为结构化列表。
+- [x] 运动节点编译：static、trajectory、revolute、prismatic、periodic_translate、periodic_rotate、spin 七种各一个纯函数 `pose(t)`。
+- [x] 无头 harness：Playwright 加载 `game/`，按关键帧时刻调用 `render` 输出 rgb / depth / id 三张 PNG；`step` 驱动固定步长；Slurm 作业脚本按 `cluster.md` 的约定解包依赖。
+- [x] 手写一份场景程序：地面、两面墙、一个周期升降平台、一扇定时开门、三枚旋转金币、出生点与目标体。
 
 交付物：`kernel/`、`compiler/`、`harness/`、`examples/handwritten/program.json` 及其 `game/`。
 

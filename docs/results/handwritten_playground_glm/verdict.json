@@ -1,0 +1,18 @@
+{
+ "reached_goal": true,
+ "stuck": false,
+ "fell": 0,
+ "t_goal": 7.033333333333314,
+ "deaths": 0,
+ "collected": 0,
+ "collectibles_total": 3,
+ "sim_seconds": 7.04999999999998,
+ "wall_ms": 1627,
+ "sim_fps": 259.9877074370006,
+ "playable": true,
+ "review": {
+  "related_to_video": true,
+  "playable": true,
+  "defect": "The level has inconsistent object placement and geometry changes between frames, indicating poor generation quality."
+ }
+}

@@ -1,0 +1,4 @@
+# OpenRouter 备选：Claude Opus 4.8（贵，$5 / $25；只在难例上用）
+vlm:
+  model: anthropic/claude-opus-4.8
+  reasoning: {effort: medium}

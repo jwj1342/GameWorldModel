@@ -1,0 +1,13 @@
+{
+ "reached_goal": true,
+ "stuck": false,
+ "fell": 0,
+ "t_goal": 6.9999999999999805,
+ "deaths": 0,
+ "collected": 0,
+ "collectibles_total": 0,
+ "sim_seconds": 6.9999999999999805,
+ "wall_ms": 1485,
+ "sim_fps": 282.8282828282828,
+ "playable": true
+}

@@ -1,0 +1,7 @@
+# 用源程序的真值渲染代替神经感知（仅合成片段）：在 CPU 上测试证据提取及其后的全部阶段
+perception:
+  geometry_backend: gt
+  geometry_fallbacks: []
+  segmentation_backend: gt
+  segmentation_fallbacks: []
+  gt_program: examples/handwritten/program.json

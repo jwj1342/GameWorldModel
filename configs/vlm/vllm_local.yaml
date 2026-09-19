@@ -1,0 +1,13 @@
+# 自托管 vLLM（scripts/serve_vlm.sh）时的 VLM 配置
+vlm:
+  provider: openai_compat
+  provider_kind: vllm
+  endpoint: null
+  endpoint_file: ${SCRATCH}/gwm/vlm_endpoint.txt
+  api_key: EMPTY
+  model: qwen3.5-27b-fp8
+  temperature: 0.7
+  top_p: 0.8
+  top_k: 20
+  presence_penalty: 1.5
+  enable_thinking: false

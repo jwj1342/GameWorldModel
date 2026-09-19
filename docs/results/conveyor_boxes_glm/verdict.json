@@ -1,0 +1,18 @@
+{
+ "reached_goal": true,
+ "stuck": false,
+ "fell": 0,
+ "t_goal": 4.716666666666655,
+ "deaths": 0,
+ "collected": 0,
+ "collectibles_total": 0,
+ "sim_seconds": 4.733333333333322,
+ "wall_ms": 1320,
+ "sim_fps": 215.15151515151513,
+ "playable": true,
+ "review": {
+  "related_to_video": false,
+  "playable": true,
+  "defect": "The generated 3D platformer has minimal visual connection to the source industrial machinery video, featuring a simple blue capsule and basic geometric platforms."
+ }
+}

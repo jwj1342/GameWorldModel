@@ -1,0 +1,561 @@
+{
+  "meta": {
+    "clip": "handwritten_playground",
+    "fps": 30,
+    "duration": 8.0,
+    "units": "m",
+    "up": "y",
+    "notes": "hand-written debugging scene: ground, walls, lift platform, timed door, spinning coins; goal on the ground so a straight-walking autopilot can reach it; the ledge coin is a bonus reached via the stairs"
+  },
+  "style": {
+    "background": "#8fb3d9"
+  },
+  "camera": {
+    "intrinsics": {
+      "fov_deg": 60,
+      "aspect": 1.7778,
+      "far": 80
+    },
+    "keyframes": [
+      {
+        "t": 0.0,
+        "pos": [
+          -9,
+          4.5,
+          11
+        ],
+        "look_at": [
+          0,
+          1,
+          0
+        ]
+      },
+      {
+        "t": 4.0,
+        "pos": [
+          0,
+          5.0,
+          13
+        ],
+        "look_at": [
+          0,
+          1,
+          -1
+        ]
+      },
+      {
+        "t": 8.0,
+        "pos": [
+          9,
+          4.5,
+          11
+        ],
+        "look_at": [
+          0,
+          1,
+          0
+        ]
+      }
+    ],
+    "interp": "catmull_rom"
+  },
+  "static": [
+    {
+      "id": "ground",
+      "class": "ground",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          24,
+          0.5,
+          16
+        ]
+      },
+      "pose": {
+        "pos": [
+          0,
+          -0.25,
+          0
+        ]
+      },
+      "material": "grass"
+    },
+    {
+      "id": "wall_back",
+      "class": "wall",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          24,
+          3,
+          0.4
+        ]
+      },
+      "pose": {
+        "pos": [
+          0,
+          1.5,
+          -8.2
+        ]
+      },
+      "material": "stone"
+    },
+    {
+      "id": "wall_left",
+      "class": "wall",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          0.4,
+          3,
+          16
+        ]
+      },
+      "pose": {
+        "pos": [
+          -12.2,
+          1.5,
+          0
+        ]
+      },
+      "material": "stone"
+    },
+    {
+      "id": "ledge",
+      "class": "ledge",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          5,
+          0.4,
+          4
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          2.6,
+          -5
+        ]
+      },
+      "material": "stone"
+    },
+    {
+      "id": "door_frame",
+      "class": "frame",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          0.3,
+          2.4,
+          0.3
+        ]
+      },
+      "pose": {
+        "pos": [
+          2.0,
+          1.2,
+          -3.0
+        ]
+      },
+      "material": "wood"
+    },
+    {
+      "id": "lava_pit",
+      "class": "lava",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          3,
+          0.1,
+          3
+        ]
+      },
+      "pose": {
+        "pos": [
+          4.0,
+          0.05,
+          3.0
+        ]
+      },
+      "material": "lava"
+    },
+    {
+      "id": "stair_1",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          0.4,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          0.2,
+          -0.075
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_2",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          0.8,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          0.4,
+          -0.525
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_3",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          1.2,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          0.6,
+          -0.975
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_4",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          1.6,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          0.8,
+          -1.425
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_5",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          2.0,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          1.0,
+          -1.875
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_6",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          2.4,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          1.2,
+          -2.325
+        ]
+      },
+      "material": "concrete"
+    },
+    {
+      "id": "stair_7",
+      "class": "step",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.0,
+          2.8,
+          0.45
+        ]
+      },
+      "pose": {
+        "pos": [
+          8.5,
+          1.4,
+          -2.775
+        ]
+      },
+      "material": "concrete"
+    }
+  ],
+  "objects": [
+    {
+      "id": "lift",
+      "class": "platform",
+      "geom": {
+        "kind": "primitive",
+        "shape": "box",
+        "extent": [
+          2.5,
+          0.3,
+          2.5
+        ],
+        "material": "metal"
+      },
+      "pose": {
+        "pos": [
+          4.5,
+          1.2,
+          -5
+        ]
+      },
+      "motion": {
+        "type": "periodic_translate",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "amp": 1.2,
+        "period": 4.0,
+        "phase": 0.0
+      }
+    },
+    {
+      "id": "door",
+      "class": "door",
+      "geom": {
+        "kind": "asset",
+        "query": "wooden door",
+        "extent": [
+          1.4,
+          2.4,
+          0.12
+        ]
+      },
+      "pose": {
+        "pos": [
+          2.85,
+          1.2,
+          -3.0
+        ]
+      },
+      "material": "wood",
+      "motion": {
+        "type": "revolute",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "pivot": [
+          2.15,
+          1.2,
+          -3.0
+        ],
+        "range_deg": [
+          0,
+          100
+        ],
+        "schedule": [
+          {
+            "t": 2.0,
+            "to_deg": 100,
+            "duration": 1.5
+          },
+          {
+            "t": 6.0,
+            "to_deg": 0,
+            "duration": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "id": "cart",
+      "class": "minecart",
+      "geom": {
+        "kind": "asset",
+        "query": "mine cart",
+        "extent": [
+          1.2,
+          0.8,
+          0.8
+        ]
+      },
+      "pose": {
+        "pos": [
+          -8,
+          0.4,
+          4
+        ]
+      },
+      "material": "red",
+      "motion": {
+        "type": "trajectory",
+        "interp": "linear",
+        "keyframes": [
+          {
+            "t": 0,
+            "pos": [
+              -8,
+              0.4,
+              4
+            ]
+          },
+          {
+            "t": 4,
+            "pos": [
+              -2,
+              0.4,
+              4
+            ]
+          },
+          {
+            "t": 8,
+            "pos": [
+              -8,
+              0.4,
+              4
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "coin",
+      "class": "coin",
+      "geom": {
+        "kind": "asset",
+        "query": "gold coin",
+        "extent": [
+          0.5,
+          0.5,
+          0.06
+        ]
+      },
+      "material": "gold",
+      "instances": [
+        {
+          "pos": [
+            -4,
+            1.0,
+            -2
+          ]
+        },
+        {
+          "pos": [
+            -2,
+            1.0,
+            -2
+          ]
+        },
+        {
+          "pos": [
+            0,
+            1.0,
+            -2
+          ]
+        },
+        {
+          "pos": [
+            8.5,
+            3.6,
+            -5
+          ]
+        }
+      ],
+      "motion": {
+        "type": "spin",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "rate_dps": 180
+      },
+      "events": [
+        {
+          "type": "despawn_on_contact",
+          "with": "player"
+        }
+      ]
+    }
+  ],
+  "binding": {
+    "template": "platformer_3p",
+    "slots": {
+      "player_spawn": [
+        -9,
+        1.2,
+        5
+      ],
+      "goal_volume": {
+        "pos": [
+          10.0,
+          1.0,
+          6.0
+        ],
+        "extent": [
+          1.5,
+          2.0,
+          1.5
+        ]
+      },
+      "walkable": "auto",
+      "hazards": [
+        "lava_pit"
+      ],
+      "collectibles": [
+        "coin"
+      ]
+    }
+  },
+  "residual": null
+}

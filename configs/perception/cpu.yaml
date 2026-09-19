@@ -1,0 +1,6 @@
+# CPU 上跑神经感知时缩小规模：更少的几何帧与关键帧
+frames:
+  geometry_frames: 24
+  keyframes: 8
+perception:
+  max_objects: 6

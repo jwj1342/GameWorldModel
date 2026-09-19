@@ -1,0 +1,19 @@
+# Vulcan 路径与作业参数
+paths:
+  project: /project/aip-zhouyang/jwj/GameWorldModel
+  weights: /project/aip-zhouyang/jwj/GameWorldModel/weights
+  node_tar: /project/aip-zhouyang/jwj/GameWorldModel/deps/node-playwright-three.tar
+  scratch: ${SCRATCH}/gwm
+  clips: /scratch/jwj/research/GameWorldModel/data/clips/trimmed
+  out: /scratch/jwj/research/GameWorldModel/out
+weights:
+  qwen: qwen3.5-27b-fp8
+  vggt: vggt-1b
+  sam2: sam2.1-hiera-large
+  grounding_dino: grounding-dino-tiny
+  dinov2: dinov2-base
+  depth_anything: depth-anything-v2-small
+slurm:
+  account: aip-zhouyang
+  gpu_gres: gpu:l40s:1
+  vlm_port: 8000

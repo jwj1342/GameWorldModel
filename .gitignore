@@ -1,0 +1,24 @@
+# data & outputs (large, regenerable)
+data/clips/raw/*.webm
+data/clips/raw/*.mp4
+data/clips/trimmed/
+out/
+# node
+node_modules/
+pw-browsers/
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+# slurm logs
+slurm-*.out
+logs/
+# local
+.env
+# symlinks to /project (weights, deps, venv)
+models
+deps
+venv
+
+# API keys (never commit)
+.secrets/

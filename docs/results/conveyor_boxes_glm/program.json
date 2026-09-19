@@ -1,0 +1,274 @@
+{
+ "meta": {
+  "clip": "conveyor_boxes",
+  "fps": 30,
+  "duration": 15.75,
+  "units": "m",
+  "up": "y",
+  "notes": "generated | binder: game scale x16.00",
+  "game_scale": 16.0
+ },
+ "style": {
+  "background": "#e0e0e0"
+ },
+ "camera": {
+  "intrinsics": {
+   "fov_deg": 38.2,
+   "aspect": 1.762,
+   "far": 160.0
+  },
+  "keyframes": [
+   {
+    "t": 0.0,
+    "pos": [
+     0.0,
+     19.2,
+     0.0
+    ],
+    "quat": [
+     0.742,
+     -0.0,
+     0.048,
+     -0.668
+    ]
+   },
+   {
+    "t": 1.25,
+    "pos": [
+     0.032,
+     19.2,
+     -0.08
+    ],
+    "quat": [
+     0.738,
+     0.002,
+     0.048,
+     -0.673
+    ]
+   },
+   {
+    "t": 2.75,
+    "pos": [
+     0.032,
+     19.168,
+     -0.16
+    ],
+    "quat": [
+     0.738,
+     0.003,
+     0.045,
+     -0.673
+    ]
+   },
+   {
+    "t": 4.75,
+    "pos": [
+     -0.016,
+     19.152,
+     0.032
+    ],
+    "quat": [
+     0.74,
+     0.005,
+     0.043,
+     -0.671
+    ]
+   },
+   {
+    "t": 7.5,
+    "pos": [
+     0.064,
+     19.2,
+     0.016
+    ],
+    "quat": [
+     0.738,
+     0.008,
+     0.046,
+     -0.673
+    ]
+   },
+   {
+    "t": 10.25,
+    "pos": [
+     0.048,
+     19.184,
+     0.032
+    ],
+    "quat": [
+     0.737,
+     0.009,
+     0.044,
+     -0.674
+    ]
+   },
+   {
+    "t": 13.0,
+    "pos": [
+     0.176,
+     19.2,
+     0.016
+    ],
+    "quat": [
+     0.738,
+     0.012,
+     0.046,
+     -0.674
+    ]
+   },
+   {
+    "t": 15.75,
+    "pos": [
+     0.112,
+     19.184,
+     0.016
+    ],
+    "quat": [
+     0.738,
+     0.014,
+     0.047,
+     -0.673
+    ]
+   }
+  ]
+ },
+ "static": [
+  {
+   "id": "ground",
+   "class": "ground",
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     24.0,
+     4.8,
+     19.2
+    ]
+   },
+   "pose": {
+    "pos": [
+     -2.416,
+     -2.4,
+     1.296
+    ]
+   },
+   "material": "concrete"
+  }
+ ],
+ "objects": [
+  {
+   "id": "conveyor_belt_1",
+   "class": "conveyor belt",
+   "confidence": 0.33,
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     18.912,
+     1.024,
+     1.312
+    ]
+   },
+   "pose": {
+    "pos": [
+     -4.336,
+     0.522,
+     7.968
+    ],
+    "quat": [
+     0.0,
+     0.999,
+     0.0,
+     0.034
+    ]
+   },
+   "support": "ground",
+   "material": "metal",
+   "notes": "lifted to ground"
+  },
+  {
+   "id": "metal_arm_2",
+   "class": "metal arm",
+   "confidence": 0.26,
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     9.408,
+     0.752,
+     1.808
+    ]
+   },
+   "pose": {
+    "pos": [
+     -9.904,
+     0.384,
+     5.584
+    ],
+    "quat": [
+     0.0,
+     -0.575,
+     0.0,
+     0.818
+    ]
+   },
+   "support": "ground",
+   "material": "metal"
+  },
+  {
+   "id": "cardboard_box_3",
+   "class": "cardboard box",
+   "confidence": 0.25,
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     2.08,
+     0.32,
+     0.816
+    ]
+   },
+   "pose": {
+    "pos": [
+     0.816,
+     0.16,
+     3.008
+    ],
+    "quat": [
+     0.0,
+     -0.71,
+     0.0,
+     0.704
+    ]
+   },
+   "support": "ground",
+   "material": "cardboard"
+  }
+ ],
+ "binding": {
+  "template": "platformer_3p",
+  "slots": {
+   "player_spawn": [
+    0.0010157322644040218,
+    1.2,
+    0.0005200459085144511
+   ],
+   "goal_volume": {
+    "pos": [
+     -10.816,
+     1.0,
+     8.015999999999998
+    ],
+    "extent": [
+     1.5,
+     2.0,
+     1.5
+    ]
+   },
+   "walkable": "auto",
+   "collectibles": [],
+   "hazards": []
+  }
+ },
+ "residual": null
+}
