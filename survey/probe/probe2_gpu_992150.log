@@ -1,0 +1,135 @@
+=== NODE ===
+rack05-05
+Fri Sep 18 14:53:03 MDT 2026
+SLURM_TMPDIR=/tmp
+4
+GPU 0: NVIDIA L40S (UUID: GPU-1345c503-ef2e-afce-44b1-2bc7b0fdb32c)
+GPU=1
+v20.16.0
+untar took 1s
+chrome binaries: /tmp/pwtest/pw-browsers/chromium-1243/chrome-linux64/chrome
+--- ldd /tmp/pwtest/pw-browsers/chromium-1243/chrome-linux64/chrome ---
+no missing libs
+=== HEADLESS RENDER TEST (GPU=1) ===
+      0,
+      255
+    ],
+    "depth_center_pixel": [
+      248,
+      155,
+      196,
+      0
+    ],
+    "three_ok": true,
+    "three_rev": "186",
+    "screenshot_bytes": 1860,
+    "logs": [
+      "[.WebGL-0x246c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x246c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x246c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    ],
+    "total_ms": 8645
+  },
+  "angle_vulkan": {
+    "ok": true,
+    "webgl2": true,
+    "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA L40S (0x000026B9)), NVIDIA)",
+    "vendor": "Google Inc. (NVIDIA)",
+    "ms_per_frame": 1.1733333349227906,
+    "center_pixel": [
+      163,
+      64,
+      33,
+      255
+    ],
+    "mask_center_pixel": [
+      0,
+      255,
+      0,
+      255
+    ],
+    "depth_center_pixel": [
+      248,
+      156,
+      12,
+      0
+    ],
+    "three_ok": true,
+    "three_rev": "186",
+    "screenshot_bytes": 1833,
+    "logs": [
+      "[.WebGL-0x360c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x360c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x360c00172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    ],
+    "total_ms": 899
+  },
+  "egl": {
+    "ok": true,
+    "webgl2": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+    "vendor": "Google Inc. (Google)",
+    "ms_per_frame": 0.7666666666666667,
+    "center_pixel": [
+      163,
+      64,
+      33,
+      255
+    ],
+    "mask_center_pixel": [
+      0,
+      255,
+      0,
+      255
+    ],
+    "depth_center_pixel": [
+      248,
+      155,
+      196,
+      0
+    ],
+    "three_ok": true,
+    "three_rev": "186",
+    "screenshot_bytes": 1112,
+    "logs": [
+      "[.WebGL-0x14a400171a00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x14a400171a00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x14a400171a00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost",
+      "THREE.WebGLRenderer: Context Lost."
+    ],
+    "total_ms": 592
+  },
+  "angle_gl_egl": {
+    "ok": true,
+    "webgl2": true,
+    "renderer": "ANGLE (NVIDIA Corporation, NVIDIA L40S/PCIe/SSE2, OpenGL ES 3.2)",
+    "vendor": "Google Inc. (NVIDIA Corporation)",
+    "ms_per_frame": 3.8733333349227905,
+    "center_pixel": [
+      163,
+      64,
+      33,
+      255
+    ],
+    "mask_center_pixel": [
+      0,
+      255,
+      0,
+      255
+    ],
+    "depth_center_pixel": [
+      248,
+      156,
+      12,
+      0
+    ],
+    "three_ok": true,
+    "three_rev": "186",
+    "screenshot_bytes": 1833,
+    "logs": [],
+    "total_ms": 660
+  }
+}
+=== DONE ===
+Fri Sep 18 14:53:17 MDT 2026

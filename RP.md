@@ -95,7 +95,7 @@ scene "clip_0042" {
 
 运动原语词表（可扩展）：`static`、`trajectory`、`revolute`、`prismatic`、`periodic_translate`、`periodic_rotate`、`spin`、`spawn/despawn`、`trigger`。
 
-### 2.4 程序与残差的划分规则（v0）
+### 2.4 程序与残差的划分规则（初版）
 
 表示为程序节点：有运动的物体、语义上可交互的物体（门、开关、可拾取物）、重复出现的实例、规则几何体。
 表示为残差：大面积不规则静态几何（植被、岩石细节）、远景。
@@ -245,7 +245,43 @@ three.js 不可微，精修通过执行、渲染、比对、修正的循环完�
 | 合成到真实的分布偏移 | RL 阶段混入真实无标注视频；真实评测集中有真值的部分来自开源引擎录像 |
 | DSL 表达力与可学习性的矛盾 | 先用小词表跑通，按消融结果扩展；保留通用节点（自由 mesh 加关键帧轨迹）保证编译成功率 |
 | 感知前端错误级联 | 证据 token 附带置信度；反馈闭环允许 VLM 否决证据 |
-| 9 周内无法完成全部内容 | 见第 9 节的最小可发表版本与备选方案 |
+| 9 周内无法完成全部内容 | 见第 9 节与 `docs/baseline.md` 的最小可发表版本与备选方案 |
+
+---
+
+## 9. 实施路线与文档索引
+
+第一阶段的目标是尽快跑通"视频进、游戏出"的闭环，暂不做 benchmark 与模型训练。2026-09-18 完成了五路调研（已有工作、运行时与游玩层、素材、agent 与视觉反馈、感知与模型层）和 Vulcan 集群实测，结论与实施细节按层拆到 `docs/` 目录，本节只保留路线图。
+
+### 9.1 六个问题的结论
+
+1. **已有工作**：没有系统走通"视频 → 带时序与动力学的场景程序 → Web 引擎"。最近的是 Video2Game（视频到 mesh 到 three.js，静态、无程序）、HoloScene（视频到带物理参数的场景图到 UE）、FAE（2D 游戏视频到 DSL）、Marble + Spark（视频到 3DGS 到 three.js，无动力学）。文本到游戏方向上 OpenGame 与 Mage 表明：模板库有效，先出中间表示再出代码优于直接出代码。
+2. **Three.js**：作为编译目标。vanilla three.js 加 Rapier 物理、recast 导航、miniplex ECS，免打包 ESM；Spark 渲染 Gaussian 残差。
+3. **素材库**：要，但小。参数化 primitive 兜底，一两千个 CC0 低多边形 GLB 加 CLIP 检索，hero 物体可选 TRELLIS.2 生成。
+4. **Multi-agent**：不用角色扮演式多智能体。按阶段分解加有渲染落地的验证器；脚手架 Pydantic AI，可在 Claude API 与本地 vLLM 之间切换。
+5. **游玩层**：固定内核加模板槽位，DSL 只填绑定段，状态 schema 固化在内核；试玩验收用轨迹回放加 VLM 评审。
+6. **视觉反馈**：Playwright 无头 Chromium 渲染 RGB、深度、ID 三个 pass（集群上 CPU 软渲染与 GPU 硬件加速均已实测可用）；数值层生成逐物体 pass/fail 子句，VLM 只看失败区域并输出结构化清单。
+7. **模型层**：需要。感知用 ViPE、SAM 3.1、SpatialTrackerV2；程序合成基线走 `claude-opus-5` API，自托管备选 Qwen3-VL-32B；后续微调对象 Qwen3-VL-8B 或 Qwen3.5-9B。
+
+### 9.2 六个阶段
+
+手写程序跑通 → 视频变证据 → 证据变静态程序 → 让物体动起来 → 程序变游戏 → 素材与展示。前两个阶段可并行，前五个阶段构成闭环，第六个阶段全部可选。每阶段约一周，之后三周留给第 4、5 节的数据与评测。任务清单、验收标准、备选方案见 `docs/baseline.md`。
+
+### 9.3 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| `docs/baseline.md` | 第一阶段计划：目标与验收、测试片段、六个阶段的任务清单、依赖、备选、待决 |
+| `docs/architecture.md` | 模块与数据流、产物目录、接口契约（evidence.json、`window.__game`、反馈报告） |
+| `docs/dsl.md` | 场景程序 DSL：文本形式与 JSON 形式、最小词表、校验规则、编译映射、与 Scene Spec 的对应 |
+| `docs/runtime.md` | 运行时选型、three.js 游戏栈、内核 systems、玩法模板与槽位、无头渲染、试玩验收 |
+| `docs/perception.md` | 感知模型对比、证据提取算法（OBB、螺旋拟合、接触）、资源预算 |
+| `docs/models.md` | API 与开源 VLM 对比（视觉与视频支持、部署、许可、价格）、调用方式、成本估算、训练栈与数据集 |
+| `docs/feedback.md` | 视觉反馈原则、数值层指标、VLM 批评、候选选优、编排与脚手架、多智能体证据 |
+| `docs/assets.md` | 三层回退、CC0 素材库、检索配方、生成模型、许可规则 |
+| `docs/related-work.md` | 按类别整理的相关工作与本课题定位 |
+| `docs/cluster.md` | Vulcan 登录节点与计算节点差异、网络出口、无头渲染实测、依赖打包、作业模板 |
+| `survey/` | 五份原始调研报告与集群探测脚本、日志 |
 
 ---
 
@@ -272,3 +308,5 @@ three.js 不可微，精修通过执行、渲染、比对、修正的循环完�
 - Genie 3、Matrix-Game、Hunyuan-GameCraft、GameFactory：视频式世界模型
 - VGGT、MonST3R、CUT3R、MoRe (CVPR 2026)、MoSca、Shape of Motion：前馈与动态重建
 - OpenGame、GameDevBench、GameCraft-Bench：agent 游戏开发（应用章节对比）
+
+2026-09-18 调研新增的条目（HoloScene、FAE、OpenGame、Mage、Marble/Spark、HY-World 2.0、ViPE、SAM 3、GameDevBench、GameCraft-Bench 等）已按类别整理到 `docs/related-work.md`。

@@ -1,0 +1,139 @@
+=== NODE INFO ===
+rack10-04
+Fri Sep 18 14:50:16 MDT 2026
+SLURM_TMPDIR=/tmp
+http_proxy=http://squid:3128 https_proxy=http://squid:3128 no_proxy=localhost,127.0.0.1
+XDG_CACHE_HOME=/tmp/cache
+4
+               total        used        free      shared  buff/cache   available
+Mem:             503          96          27          12         379         391
+=== GPU ===
+No devices found.
+No devices were found
+GPU=1
+=== MODULES ===
+v20.16.0
+10.8.1
+apptainer version 1.3.5
+=== NETWORK (via proxy env) ===
+proxy    CONNECT tunnel failed, response 403
+000  https://registry.npmjs.org/
+proxy    CONNECT tunnel failed, response 403
+000  https://cdn.playwright.dev/
+proxy    CONNECT tunnel failed, response 403
+000  https://playwright.download.prss.microsoft.com/
+proxy   200  https://github.com/
+proxy   200  https://huggingface.co/
+proxy   404  https://api.anthropic.com/
+proxy   421  https://api.openai.com/
+proxy    CONNECT tunnel failed, response 403
+000  https://poly.pizza/
+proxy    CONNECT tunnel failed, response 403
+000  https://sketchfab.com/
+proxy   200  https://inference.vulcan.alliancecan.ca/
+--- direct (no proxy) ---
+direct  pmjs.org port 443 after 0 ms: Couldn't connect to server
+000  https://registry.npmjs.org/
+direct  opic.com port 443 after 0 ms: Couldn't connect to server
+000  https://api.anthropic.com/
+=== CHROMIUM SHARED LIBS (system ldconfig) ===
+found   libnss3.so
+found   libnssutil3.so
+found   libsmime3.so
+found   libatk-1.0.so.0
+found   libatk-bridge-2.0.so.0
+found   libcups.so.2
+found   libdrm.so.2
+found   libxkbcommon.so.0
+found   libXcomposite.so.1
+found   libXdamage.so.1
+found   libXrandr.so.2
+found   libgbm.so.1
+found   libpango-1.0.so.0
+found   libasound.so.2
+found   libxshmfence.so.1
+found   libatspi.so.0
+found   libX11.so.6
+found   libEGL.so.1
+found   libGL.so.1
+found   libvulkan.so.1
+found   libGLESv2.so.2
+/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0
+/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.595.91.07
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-gbm.so.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-gbm.so.1.1.3
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland.so.1.1.20
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland2.so.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-wayland2.so.1.0.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-xcb.so.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-xcb.so.1.0.5
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-xlib.so.1
+/usr/lib/x86_64-linux-gnu/libnvidia-egl-xlib.so.1.0.5
+/usr/lib/x86_64-linux-gnu/libnvidia-eglcore.so.595.91.07
+
+/usr/share/glvnd/egl_vendor.d/:
+10_nvidia.json
+50_mesa.json
+
+/usr/share/vulkan/icd.d/:
+asahi_icd.json
+=== PLAYWRIGHT + THREE.JS INSTALL (in SLURM_TMPDIR) ===
+npm error 403 a package version that is forbidden by your security policy, or
+npm error 403 on a server you do not have access to.
+npm error A complete log of this run can be found in: /scratch/jwj/.npm-cache/_logs/2026-09-18T20_50_25_429Z-debug-0.log
+npm install took 0s
+node:internal/modules/cjs/loader:1148
+  throw err;
+  ^
+
+Error: Cannot find module 'playwright/package.json'
+Require stack:
+- /tmp/pwtest/[eval]
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1145:15)
+    at Module._load (node:internal/modules/cjs/loader:986:27)
+    at Module.require (node:internal/modules/cjs/loader:1233:19)
+    at require (node:internal/modules/helpers:179:18)
+    at [eval]:1:27
+    at runScriptInThisContext (node:internal/vm:209:10)
+    at node:internal/process/execution:118:14
+    at [eval]-wrapper:6:24
+    at runScript (node:internal/process/execution:101:62)
+    at evalScript (node:internal/process/execution:133:3) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/tmp/pwtest/[eval]' ]
+}
+
+Node.js v20.16.0
+npm error 403 403 Forbidden - GET https://registry.npmjs.org/playwright
+npm error 403 In most cases, you or one of your dependencies are requesting
+npm error 403 a package version that is forbidden by your security policy, or
+npm error 403 on a server you do not have access to.
+npm error A complete log of this run can be found in: /scratch/jwj/.npm-cache/_logs/2026-09-18T20_50_26_145Z-debug-0.log
+browser download took 0s
+find: ‘/tmp/pw-browsers’: No such file or directory
+chrome binary: 
+=== HEADLESS RENDER TEST ===
+node:internal/modules/esm/resolve:854
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright' imported from /tmp/pwtest/probe_render.mjs
+    at packageResolve (node:internal/modules/esm/resolve:854:9)
+    at moduleResolve (node:internal/modules/esm/resolve:927:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1169:11)
+    at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:383:12)
+    at ModuleLoader.resolve (node:internal/modules/esm/loader:352:25)
+    at ModuleLoader.getModuleJob (node:internal/modules/esm/loader:227:38)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/module_job:87:39)
+    at link (node:internal/modules/esm/module_job:86:36) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v20.16.0
+=== APPTAINER PULL TEST (small image via proxy) ===
+2026/09/18 14:50:29  info unpack layer: sha256:25f1d6b1951ac8eb3740558fe94cb83d377bdadf95fd9f98b50d2e1b96130471
+INFO:    Creating SIF file...
+apptainer docker pull+exec OK
+=== DONE ===
+Fri Sep 18 14:50:29 MDT 2026

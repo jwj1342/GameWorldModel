@@ -1,0 +1,50 @@
+=== NODE ===
+rack01-08
+Fri Sep 18 14:53:03 MDT 2026
+SLURM_TMPDIR=/tmp
+4
+GPU=0
+v20.16.0
+untar took 1s
+chrome binaries: /tmp/pwtest/pw-browsers/chromium-1243/chrome-linux64/chrome
+--- ldd /tmp/pwtest/pw-browsers/chromium-1243/chrome-linux64/chrome ---
+no missing libs
+=== HEADLESS RENDER TEST (GPU=0) ===
+PROBE_RESULTS_JSON {
+  "swiftshader": {
+    "ok": true,
+    "webgl2": true,
+    "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+    "vendor": "Google Inc. (Google)",
+    "ms_per_frame": 0.946666669845581,
+    "center_pixel": [
+      163,
+      64,
+      33,
+      255
+    ],
+    "mask_center_pixel": [
+      0,
+      255,
+      0,
+      255
+    ],
+    "depth_center_pixel": [
+      248,
+      155,
+      196,
+      0
+    ],
+    "three_ok": true,
+    "three_rev": "186",
+    "screenshot_bytes": 1860,
+    "logs": [
+      "[.WebGL-0x215400172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x215400172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+      "[.WebGL-0x215400172600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    ],
+    "total_ms": 7303
+  }
+}
+=== DONE ===
+Fri Sep 18 14:53:13 MDT 2026
