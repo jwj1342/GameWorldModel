@@ -1,6 +1,6 @@
 """Bundle a validated program into a self-contained game/ directory (buildless ESM)."""
 from __future__ import annotations
-import json, os, shutil, time
+import json, os, re, shutil, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -18,7 +18,25 @@ def _node_modules() -> Path:
         Path(root).mkdir(parents=True, exist_ok=True)
         subprocess.run(["tar", "-xf", str(tar), "-C", root], check=True)
         if (Path(root) / "node_modules").exists(): return Path(root) / "node_modules"
-    raise FileNotFoundError("node_modules not found; set GWM_NODE_ROOT/GWM_NODE_MODULES or untar deps/node-playwright-three.tar")
+    raise FileNotFoundError(
+        "找不到 node_modules。在仓库根目录执行 npm install 就行；"
+        "在没有外网的集群节点上，用 scripts/stage_node_deps.sh 打好的 tar，或设 GWM_NODE_ROOT / GWM_NODE_MODULES。")
+
+_IMPORT_RE = re.compile(r"""from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]""")
+
+def _imports(path: Path) -> list[str]:
+    return [a or b for a, b in _IMPORT_RE.findall(path.read_text())]
+
+def _addon_imports(root: Path) -> list[str]:
+    """Paths under three/examples/jsm imported by any kernel module, e.g. controls/OrbitControls.js."""
+    out = []
+    for f in root.rglob("*.js"):
+        out += [spec[len("three/addons/"):] for spec in _imports(f) if spec.startswith("three/addons/")]
+    return out
+
+def _relative_imports(src: Path, rel: str) -> list[str]:
+    """Relative imports inside an addon file, as paths relative to the jsm root."""
+    return [os.path.normpath(str(Path(rel).parent / spec)) for spec in _imports(src) if spec.startswith(".")]
 
 def _copy_vendor(dst: Path) -> None:
     nm = _node_modules()
@@ -27,9 +45,18 @@ def _copy_vendor(dst: Path) -> None:
     for f in ("three.module.js", "three.core.js"):
         src = nm / "three" / "build" / f
         if src.exists(): shutil.copy2(src, three_dst / "build" / f)
+    # three/addons: copy only the files the kernel actually imports (and what they import in turn),
+    # otherwise every game carries ~10 MB of examples it never loads
     jsm_src, jsm_dst = nm / "three" / "examples" / "jsm", three_dst / "examples" / "jsm"
-    if not jsm_dst.exists():
-        shutil.copytree(jsm_src, jsm_dst, ignore=shutil.ignore_patterns("*.d.ts", "libs", "loaders", "nodes", "tsl", "renderers", "postprocessing", "physics"))
+    wanted, seen = set(_addon_imports(KERNEL)), set()
+    while wanted:
+        rel = wanted.pop()
+        if rel in seen: continue
+        seen.add(rel)
+        src = jsm_src / rel
+        if not src.exists(): continue
+        out = jsm_dst / rel; out.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, out)
+        for nxt in _relative_imports(src, rel): wanted.add(nxt)
     rapier_dst = dst / "vendor" / "rapier"; rapier_dst.mkdir(parents=True, exist_ok=True)
     shutil.copy2(nm / "@dimforge" / "rapier3d-compat" / "dist" / "rapier.mjs", rapier_dst / "rapier.mjs")
 

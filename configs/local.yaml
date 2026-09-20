@@ -1,0 +1,12 @@
+# 在自己的机器或普通服务器上跑时用的路径。所有东西都放在仓库里面，不依赖集群。
+paths:
+  weights: models            # 权重下载到这里，用 scripts/download_weights.py
+  clips: data/clips/trimmed  # 输入视频
+  out: out                   # 每次运行的产物
+  scratch: out/.scratch      # 临时文件
+weights:
+  vggt: vggt-1b
+  sam2: sam2.1-hiera-large
+  grounding_dino: grounding-dino-tiny
+  dinov2: dinov2-base
+  depth_anything: depth-anything-v2-small

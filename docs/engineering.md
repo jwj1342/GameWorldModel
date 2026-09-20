@@ -28,8 +28,9 @@
 
 ```
 GameWorldModel/
-  RP.md  README.md  docs/  survey/
-  configs/     default.yaml（阈值与选型） vulcan.yaml（路径） perception/{cpu,gt}.yaml vlm/{openrouter_*,vllm_local,mock}.yaml ablations/*.yaml
+  RP.md  README.md  RUNNING.md  docs/  survey/
+  configs/     default.yaml（阈值与选型） local.yaml / vulcan.yaml（站点路径，按 GWM_SITE 或自动检测选）
+               perception/{cpu,gt}.yaml vlm/{openrouter_*,vllm_local,mock}.yaml ablations/*.yaml
   prompts/     common_dsl.md writer_*.md critic.md namer.md playtest_review.md fewshot/
   gwm/         Python 管线
     config.py errors.py run_clip.py
@@ -42,11 +43,13 @@ GameWorldModel/
   kernel/      固定运行时（buildless ESM）：main.js scene.js motions.js physics.js passes.js replay_camera.js templates/platformer_3p.js index.html
   harness/     Node + Playwright：common.mjs render.mjs playtest.mjs record.mjs serve.mjs
   examples/handwritten/program.json
-  scripts/     setup_env.sh env_setup.sh stage_node_deps.sh pipeline.sh smoke_kernel.sh run_tests.sh serve_vlm.sh trim_clips.sh node_harness.sh collect_results.sh
+  scripts/     setup_env.sh env_setup.sh stage_node_deps.sh download_weights.py pipeline.sh smoke_kernel.sh
+               run_tests.sh serve_vlm.sh trim_clips.sh node_harness.sh collect_results.sh make_release.sh release_files/
   tests/       单元测试（CPU 作业跑）
   data/clips/{raw,trimmed}   视频（不入 git；SOURCES.md 入 git）
   out/<clip>/<run_id>/        产物（不入 git）
   .secrets/    API 密钥（不入 git）
+  requirements.txt            通用依赖；requirements-vulcan.lock.txt 是集群上的精确版本
   models/ deps/ venv/         软链接到 /project/aip-zhouyang/jwj/GameWorldModel/{weights,deps,venv}
 ```
 

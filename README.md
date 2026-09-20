@@ -1,27 +1,63 @@
 # GameWorldModel
 
-这个项目做一件事。给它一段十几秒到一分钟的单目视频，它把视频里的场景和运动恢复成一份可执行的场景程序，再把程序编译成一个能在浏览器里玩的 three.js 小游戏。研究提案在 RP.md，设计文档在 docs 目录，目前已经有一个跑通的 MVP，两段真实视频和一段合成片段都能从视频一路走到可玩的游戏。
+这个项目做一件事。给它一段十几秒到一分钟的普通视频，它把视频里的场景和会动的东西恢复成一份可执行的场景程序，再编译成一个能在浏览器里玩的 three.js 小游戏。中间没有人工建模，场景程序也是模型看着视频写出来的。
 
-## 它是怎么工作的
+怎么把它跑起来，看 [RUNNING.md](RUNNING.md)，里面分了在自己电脑上跑和在 HPC 集群上跑两种情况，也写清楚了需要多少内存、多少磁盘和哪些依赖。想看跑出来什么样，看 [Releases](https://github.com/jwj1342/GameWorldModel/releases) 里的 demo 视频和打包好的游戏。研究提案在 [RP.md](RP.md)，设计文档在 [docs](docs/)。
 
-视频先抽帧。VGGT 估计相机位姿和深度，Grounding DINO 加 SAM 2.1 把画面里的物体分割出来并跨帧跟踪。这些结果被整理成一份证据文件，里面有地面平面、每个物体随时间的三维包围盒和运动类型猜测。然后一个视觉语言模型根据关键帧和证据分三步写出场景程序，先写相机和静态结构，再写物体，最后写运动和事件。默认用 OpenRouter 上的 GLM-4.6V，一条视频大约六次调用，费用一美分左右。程序经过 JSON Schema 和语义校验后编译成一个 game 目录，固定的 three.js 内核负责解释它，Rapier 提供物理。编译好的场景在无头浏览器里按视频的相机重新渲染，和视频逐物体比较掩码重叠、位置和轨迹误差，不合格的地方交给模型修订，最多三轮。通过之后绑定第三人称平台跳跃模板，自动试玩一遍确认能走到终点，最后产出报告。模型不可用时整条链也能走完，程序直接从证据翻译得到。
+## 流水线
+
+```mermaid
+flowchart TD
+    V["输入视频<br/>10 秒到 1 分钟"] --> F["抽帧 4fps<br/>挑 8 到 16 张关键帧"]
+
+    subgraph PERC["感知"]
+        F --> G["VGGT<br/>相机位姿 内参 深度"]
+        F --> D["Grounding DINO + SAM 2.1<br/>按名词短语分割物体<br/>跨帧跟踪"]
+        G --> E["证据提取<br/>地面平面<br/>逐帧三维包围盒<br/>运动类型判断<br/>接触关系"]
+        D --> E
+    end
+
+    E --> W["模型分三步写场景程序<br/>1 相机和静态结构<br/>2 物体几何和位置<br/>3 运动和事件"]
+
+    subgraph LOOP["生成与修订 最多三轮"]
+        W --> C{"JSON Schema<br/>和语义校验"}
+        C -- 不通过 --> W
+        C -- 通过 --> B["编译成可运行的目录<br/>three.js 内核 + Rapier 物理"]
+        B --> R["无头浏览器<br/>按视频原来的相机轨迹渲染<br/>输出 RGB 深度 物体ID 三个通道"]
+        R --> M["和视频逐物体比对<br/>掩码重叠 位置偏差 轨迹误差"]
+        M -- 有物体不达标 --> K["模型看差异图和数字<br/>给出 JSON 补丁"]
+        K --> B
+    end
+
+    M -- 通过或轮数用完 --> BD["绑定玩法<br/>出生点 目标 收集物 危险物"]
+    BD --> T["自动试玩<br/>能走到终点才算过"]
+    T --> OUT
+
+    subgraph OUT["产物"]
+        O1["game/<br/>可玩的游戏"]
+        O2["program.json<br/>场景程序 改数字就改游戏"]
+        O3["report.md<br/>运行报告"]
+        O4["overlay.mp4<br/>感知结果画回视频上"]
+        O5["playtest/<br/>试玩录像和判定"]
+    end
+```
+
+模型这一步默认走 OpenRouter 上的 GLM-4.6V，一条视频大约六次调用，一美分左右。换模型改一个配置文件就行。没有 key 也能跑，加 `--no-vlm` 就直接从感知结果翻译出场景程序，整条链一样走完。
 
 ## 目录
 
-RP.md 是研究提案。docs 放设计文档，其中 status.md 记录进展和已知问题，engineering.md 讲项目怎么组织，results 放每次跑出来的结果。survey 放前期调研的原始报告。gwm 是 Python 管线，按感知、程序生成、编译、反馈、绑定、试玩分成子包，run_clip.py 是入口。kernel 是在浏览器里运行的固定内核，harness 是用 Playwright 驱动内核做渲染、试玩和录制的脚本。configs 放所有可调参数和选型，prompts 放提示词，examples 放手写的示例程序，tests 放单元测试，scripts 放集群作业脚本。data/clips 放视频，out 放每次运行的产物，.secrets 放 API 密钥，这三个目录都不进 git。
+`gwm/` 是 Python 管线，按感知、程序生成、编译、反馈、绑定、试玩分成子包，入口是 `run_clip.py`。`kernel/` 是在浏览器里跑的固定运行时，生成侧只产出数据，从不改这里的代码。`harness/` 用 Playwright 驱动内核做渲染、试玩和录像。
 
-## 在 Vulcan 上跑
+`configs/` 放所有可调的参数和选型，`prompts/` 放提示词，`examples/` 放手写的示例场景程序，`tests/` 放单元测试，`scripts/` 放集群作业脚本和安装脚本。
 
-所有重计算都通过 Slurm 作业提交，登录节点只做安装、打包和提交。第一次使用先在登录节点执行 scripts/stage_node_deps.sh，把 Node 依赖和浏览器打包放到 project 空间，然后提交 scripts/env_setup.sh 建好 Python 环境并下载权重。OpenRouter 的密钥放在 .secrets/openrouter.key。
+`docs/` 里 `status.md` 记录进展和已知问题，`engineering.md` 讲项目怎么组织，`results/` 放跑出来的结果。`survey/` 是前期调研的原始报告。
 
-跑一条视频用下面这条命令。第一个参数是 data/clips/trimmed 里的文件名，第二个参数是给检测器的名词短语，可以留空。
+`data/clips/` 放视频，`out/` 放每次运行的产物，`.secrets/` 放 API key，这三个都不进 git。
 
-    sbatch scripts/pipeline.sh plarail_train "toy train,train track,floor" --config configs/perception/cpu.yaml
+## 现在做到什么程度
 
-感知模型在 CPU 节点上就能跑，一条视频大约三分钟加上模型调用的一两分钟。加 --no-vlm 就不调用模型，用证据直译。加 --gres=gpu:l40s:1 可以用 GPU。换模型用 --config configs/vlm/openrouter_qwen122b.yaml 这类文件，configs/vlm 下还有 Kimi、Opus、自托管 vLLM 和一个不花钱的假模型。合成片段可以用 configs/perception/gt.yaml 让感知直接取源程序的真值，用来单独测试后面的阶段。手写程序的内核冒烟用 scripts/smoke_kernel.sh，单元测试用 scripts/run_tests.sh。新加的视频先放到 data/clips/raw，在 scripts/trim_clips.sh 里加一行裁剪规则。
+三段视频都能从头走到尾，自动试玩都能走到终点。一段玩具火车在地板轨道上跑的视频，一段工厂输送线的俯拍视频，还有一段我们自己渲染的合成场景。
 
-产物在 out 下按视频名和运行编号分目录。report.md 是汇总，program.json 是场景程序，game 目录用任意静态服务器打开 index.html 就能玩，WASD 移动，空格跳，R 在回放和游玩之间切换。perception/overlay.mp4 把感知结果画回视频上，方便检查。scripts/collect_results.sh 可以把一次运行里值得看的东西复制到 docs/results。
+场景的几何还很抽象，物体都是方块和圆柱这样的替身，因为还没接素材库。运动的判断在合成场景上比较准，升降平台、定时开关的门、来回跑的矿车都认对了；在真实视频上还不稳，相机一动静止的东西容易被判成在动。模型写出来的程序目前和直接从证据翻译差不多，修订环节提得出修改但还没带来提升。
 
-## 现在做到了什么
-
-Plarail 玩具火车和一条工业输送线这两段版权干净的真实视频，加上一段合成片段，都能从视频一路跑到可玩的游戏，自动试玩都能走到终点。合成片段用真值感知时重建分数 0.71，说明感知之后的各个阶段是对的。用神经感知和真实视频时分数低很多，主要原因是几何体替身和真实画面在外观上不可比，以及运动类型的判断还不稳。模型写出来的程序目前和直接从证据翻译差不多，修订环节还没带来提升。这些数字、与设计的偏差和已知问题都写在 docs/status.md 里。
+具体数字、与设计文档的差异和已知问题都在 [docs/status.md](docs/status.md)。

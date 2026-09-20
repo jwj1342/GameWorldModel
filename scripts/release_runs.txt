@@ -1,0 +1,4 @@
+# 片段名 运行目录 标题（打包时用）
+plarail_train out/plarail_train/20260919-145647-0dd8 玩具火车
+conveyor_boxes out/conveyor_boxes/20260919-145646-5479 工业输送线
+handwritten_playground out/handwritten_playground/20260919-145307-03dc 合成场景

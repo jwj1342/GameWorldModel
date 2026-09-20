@@ -19,12 +19,23 @@ def _expand(v: Any) -> Any:
     if isinstance(v, list): return [_expand(x) for x in v]
     return v
 
+def site_name() -> str:
+    """Which machine-specific config to use. GWM_SITE wins; otherwise Vulcan is detected by its Slurm/CVMFS environment."""
+    env = os.environ.get("GWM_SITE")
+    if env: return env
+    on_cluster = os.environ.get("CC_CLUSTER") or Path("/cvmfs/soft.computecanada.ca").exists()
+    return "vulcan" if on_cluster else "local"
+
 def load_config(files: list[str | Path] | None = None, overrides: dict | None = None) -> dict:
-    files = files or [REPO / "configs" / "default.yaml", REPO / "configs" / "vulcan.yaml"]
+    files = files or [REPO / "configs" / "default.yaml", REPO / "configs" / f"{site_name()}.yaml"]
     cfg: dict = {}
     for f in files:
         p = Path(f)
         if not p.is_absolute(): p = REPO / p
         if p.exists(): cfg = _merge(cfg, yaml.safe_load(p.read_text()) or {})
     if overrides: cfg = _merge(cfg, overrides)
-    return _expand(cfg)
+    cfg = _expand(cfg)
+    for k, v in (cfg.get("paths") or {}).items():
+        if isinstance(v, str) and not Path(v).is_absolute(): cfg["paths"][k] = str(REPO / v)
+    cfg.setdefault("site", site_name())
+    return cfg

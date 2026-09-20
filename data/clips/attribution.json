@@ -1,0 +1,35 @@
+{
+  "_comment": "每段测试视频的出处和许可。打包发布时这些信息必须跟着产物走：CC BY 要署名，CC BY-SA 的衍生作品还要以相同方式共享。",
+  "plarail_train": {
+    "title": "Video of Osaka Metro 400 Series Plarail Running",
+    "author": "Darrencycheung",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Video_of_Osaka_Metro_400_Series_Plarail_Running.webm",
+    "note": "source.mp4 是原视频截取并转码的片段。overlay.mp4 和 side-by-side.mp4 含有原视频画面，属于衍生作品，按 CC BY-SA 4.0 共享。"
+  },
+  "conveyor_boxes": {
+    "title": "Gigaset Cordless Telephone Production VII - Pneumatic Conveyor Belt",
+    "author": "Inke Pickhardt（视频）, Kathinka Engels（录音）, Sounds of Changes 项目",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0/",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Gigaset_Cordless_Telephone_Production_VII_-_Pneumatic_Conveyor_Belt.webm",
+    "note": "source.mp4 是原视频截取并转码的片段。overlay.mp4 和 side-by-side.mp4 含有原视频画面，需保留本署名。"
+  },
+  "newtons_cradle": {
+    "title": "Pendolo di Newton a 5 sferette rallentato",
+    "author": "Riccardo Ottanta",
+    "license": "CC0 1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Pendolo_di_Newton_a_5_sferette_rallentato.webm",
+    "note": "公有领域，无署名要求。"
+  },
+  "handwritten_playground": {
+    "title": "合成测试场景",
+    "author": "本项目",
+    "license": "项目自有",
+    "license_url": "",
+    "source_url": "",
+    "note": "用本项目的内核渲染 examples/handwritten/program.json 得到的片段，带逐帧真值，用来在没有外部视频时测试整条管线。"
+  }
+}
