@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from typing import Protocol
 import numpy as np
 
+# OpenCV 相机（x 右 y 下 z 前）到 three.js 相机（x 右 y 上 z 后）的轴变换，整个感知栈共用
+CV2THREE = np.diag([1.0, -1.0, -1.0])
+
 @dataclass
 class Geometry:
     frame_indices: list[int]            # indices into the working frame list
@@ -39,3 +42,12 @@ class GeometryBackend(Protocol):
 class SegmentationBackend(Protocol):
     name: str
     def segment(self, frame_files: list[str], frame_indices: list[int], phrases: list[str], cfg: dict) -> Tracks: ...
+
+class NullSegmentationBackend:
+    """什么都不检出。分割后端崩掉时用它兜底，管线退化成只有静态结构的场景，而不是空手而归。"""
+    name = "none"
+    def __init__(self, cfg: dict): pass
+    def segment(self, frame_files, frame_indices, phrases, cfg) -> Tracks:
+        from PIL import Image
+        with Image.open(frame_files[0]) as im: size = im.size
+        return Tracks(objects=[], frame_size=size, backend=self.name)

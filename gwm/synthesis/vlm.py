@@ -56,7 +56,10 @@ class OpenAICompatClient:
         self.log_path = Path(log_path) if log_path else None
         self.max_image_side = v.get("max_image_side", 768)
         self.use_response_format = bool(v.get("json_schema_response_format", True))
+        self.max_calls = int((cfg.get("budget") or {}).get("max_vlm_calls", 0)) or None
     def chat(self, system, user_text, images=None, json_schema=None, temperature=None, max_tokens=None, seed=None) -> dict:
+        if self.max_calls and self.calls >= self.max_calls:
+            raise RuntimeError(f"用掉了 {self.calls} 次模型调用，超过 budget.max_vlm_calls={self.max_calls}")
         content = [{"type": "image_url", "image_url": {"url": _img_data_url(p, self.max_image_side)}} for p in (images or [])]
         content.append({"type": "text", "text": user_text})
         messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]

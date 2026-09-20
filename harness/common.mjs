@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.css': 'text/css', '.map': 'application/json' };
 
-export function serveDir(root) {
+export function serveDir(root, port = 0) {
   root = path.resolve(root);
   const server = http.createServer((req, res) => {
     let p = decodeURIComponent(req.url.split('?')[0]); if (p === '/') p = '/index.html';
@@ -15,7 +15,8 @@ export function serveDir(root) {
     res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
     fs.createReadStream(file).pipe(res);
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${server.address().port}` })));
+  const host = port ? '0.0.0.0' : '127.0.0.1';   // 指定端口通常是给人用的，绑全网卡方便远程访问
+  return new Promise((resolve) => server.listen(port, host, () => resolve({ server, url: `http://localhost:${server.address().port}` })));
 }
 
 export function chromiumArgs() {

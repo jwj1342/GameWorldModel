@@ -4,12 +4,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
+from ..taxonomy import slug
 from .base import Tracks, TrackedObject
-
-def _slug(s: str) -> str:
-    import re
-    s = re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
-    return (s or "obj")[:24]
 
 class GroundedSAM2Backend:
     name = "grounded_sam2"
@@ -53,7 +49,7 @@ class GroundedSAM2Backend:
         for cand in (0, len(frames) // 2):
             dets = self.detect(frames[cand], phrases, pc["grounding_box_threshold"], pc["grounding_text_threshold"], pc["max_objects"])
             if dets: det_frame = cand; break
-        objs = [TrackedObject(id=f"{_slug(l)}_{i+1}", phrase=l, score=s) for i, (s, b, l) in enumerate(dets)]
+        objs = [TrackedObject(id=f"{slug(l.lower(), 24)}_{i+1}", phrase=l, score=s) for i, (s, b, l) in enumerate(dets)]
         if not objs:
             return Tracks(objects=[], frame_size=(W, H), backend=self.name)
         dtype = torch.bfloat16 if device == "cuda" else torch.float32

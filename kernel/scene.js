@@ -95,13 +95,14 @@ function guessMaterial(cls) {
   return 'default';
 }
 
+// 物体 ID 颜色由编译器写进 kernel_config.json（唯一来源在 gwm/compiler/ids.py）。
+// 这里只在缺少该文件时兜底自算，公式必须和 Python 那份保持一致。
 export function idToColor(i) {
-  // i in [1, 2^24-1]; spread ids so neighbours differ visibly: multiply by a large odd constant mod 2^24
   const v = ((i * 2654435) % 0xffffff) || 1;
   return new THREE.Color(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
 
-export function buildScene(program) {
+export function buildScene(program, kernelCfg = null) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(program.style?.background ?? '#87a7c7');
   scene.fog = null;
@@ -117,8 +118,14 @@ export function buildScene(program) {
     group.name = instanceIndex ? `${spec.id}#${instanceIndex}` : spec.id;
     group.position.set(...base.pos); group.quaternion.set(...(base.quat ?? [0, 0, 0, 1])).normalize();
     scene.add(group);
+    // 编译器按同样的顺序生成了注册表，这里顺带核对一次，顺序对不上就退回自算并报警
+    const fromCfg = kernelCfg?.registry?.[idIndex - 1];
+    if (kernelCfg && fromCfg?.id !== spec.id) console.warn('[gwm] kernel_config registry mismatch at', idIndex, fromCfg?.id, '!=', spec.id);
+    const idColor = fromCfg?.id === spec.id && fromCfg.color
+      ? new THREE.Color(fromCfg.color[0] / 255, fromCfg.color[1] / 255, fromCfg.color[2] / 255)
+      : idToColor(idIndex);
     const entry = { id: spec.id, name: group.name, kind, group, colliders, base, spec, class: spec.class ?? kind,
-      pose: makePose(motion, base), dynamic: !!motion && motion.type !== 'static', idIndex, idColor: idToColor(idIndex), instanceIndex,
+      pose: makePose(motion, base), dynamic: !!motion && motion.type !== 'static', idIndex, idColor, instanceIndex,
       visible: true, events: spec.events ?? [] };
     idIndex++;
     group.traverse(o => { if (o.isMesh) o.userData.entry = entry; });

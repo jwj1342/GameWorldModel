@@ -1,6 +1,7 @@
 """Load and merge YAML configs. Usage: cfg = load_config(['configs/default.yaml', 'configs/vulcan.yaml', 'configs/ablations/x.yaml'])"""
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 from typing import Any
 import yaml
@@ -39,3 +40,14 @@ def load_config(files: list[str | Path] | None = None, overrides: dict | None = 
         if isinstance(v, str) and not Path(v).is_absolute(): cfg["paths"][k] = str(REPO / v)
     cfg.setdefault("site", site_name())
     return cfg
+
+
+SECRET_KEYS = re.compile(r"key|token|secret|password", re.I)
+
+def redact(value: Any) -> Any:
+    """把配置里像密钥的字段换成占位符。run.json 会被 collect_results.sh 复制进入库的 docs/results/，
+    所以写进去之前必须过一遍，别让人不小心把 key 写进 config 覆盖文件就提交上去。"""
+    if isinstance(value, dict):
+        return {k: ("<redacted>" if SECRET_KEYS.search(k) and not k.endswith("_file") else redact(v)) for k, v in value.items()}
+    if isinstance(value, list): return [redact(v) for v in value]
+    return value
