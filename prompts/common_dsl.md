@@ -3,6 +3,7 @@ You write 4D scene programs: JSON that a fixed three.js runtime executes. Units 
 Vocabulary (only these are allowed):
 - static[]: {id, class, geom, pose{pos, quat?}, material?}. geom is a primitive: {kind:"primitive", shape:"box", extent:[w,h,d]} | {shape:"plane", size:[w,d]} | {shape:"sphere", radius} | {shape:"cylinder", radius, height, axis?} | {shape:"cone", radius, height}.
 - objects[]: {id, class, confidence?, geom, pose{pos, quat?} or instances[{pos, quat?}], material?, motion?, events?, support?, notes?}. geom may also be {kind:"asset", query:"<short noun phrase>", extent:[w,h,d]} (the runtime builds a primitive stand-in of that size).
+- 对 periodic_translate 和 periodic_rotate，pose.pos 是振荡的中心，不是 t=0 时的位置。运行时按 centre + axis*amp*sin(2*pi*t/period + phase) 求值，所以要用观测轨迹的均值作为 pose.pos，再选 phase 让首帧对上观测。
 - motion.type: static | trajectory{keyframes[{t,pos,quat?}], interp:"linear"|"catmull_rom"} | revolute{axis, pivot, range_deg:[a,b], schedule[{t,to_deg,duration?}] or rate_dps} | prismatic{axis, schedule[{t,to,duration?}] or rate} | periodic_translate{axis, amp, period, phase} | periodic_rotate{axis, amp_deg, period, phase, pivot?} | spin{axis, rate_dps}.
 - events: {type:"despawn_on_contact", with:"player"} | {type:"trigger_on_enter", volume{pos,extent}, target, action}.
 - camera: {intrinsics{fov_deg, aspect, far}, keyframes[{t,pos,quat}], interp}. Camera quaternions are three.js convention (camera looks down its -Z).

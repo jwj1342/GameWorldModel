@@ -21,19 +21,22 @@ const log = (...a) => { console.log('[gwm]', ...a); };
 async function boot() {
   const program = await (await fetch('./program.json', { cache: 'no-store' })).json();
   game.program = program;
+  const kernelCfg = await fetch('./kernel_config.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
   const W = Number(params.get('w') ?? innerWidth), H = Number(params.get('h') ?? innerHeight);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  // 无头模式下关抗锯齿：depth 和 id 两个 pass 把数值编码进像素，多重采样会在物体边缘把相邻编码混成
+  // 不存在的颜色，Python 侧精确匹配会整片丢掉这些像素，掩码 IoU 被系统性压低
+  const renderer = new THREE.WebGLRenderer({ antialias: !HEADLESS, preserveDrawingBuffer: true });
   renderer.setSize(W, H, false); renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.width = '100vw'; renderer.domElement.style.height = '100vh';
   document.body.appendChild(renderer.domElement);
   await initRapier();
-  const { scene, registry } = buildScene(program);
+  const { scene, registry } = buildScene(program, kernelCfg);
   const physics = new Physics(DT);
   for (const e of registry) physics.addEntry(e);
   const replay = makeReplayCamera(program.camera, W / H);
-  const template = new PlatformerTemplate({ program, scene, registry, physics });
+  const template = new PlatformerTemplate({ program, scene, registry, physics, kernelCfg });
   template.camera.aspect = W / H; template.camera.updateProjectionMatrix();
   const far = program.camera?.intrinsics?.far ?? 100;
 

@@ -8,12 +8,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
-from .base import Geometry, Tracks, TrackedObject
+from .base import CV2THREE, Geometry, Tracks, TrackedObject
 from ..compiler.compile import compile_program
 from ..feedback.render import render
 from ..compiler.ids import registry_order, decode_depth_png, decode_id_png_by_entry
 
-CV2THREE = np.diag([1.0, -1.0, -1.0])
 
 @lru_cache(maxsize=4)
 def _render_gt(program_path: str, times: tuple, width: int, height: int):

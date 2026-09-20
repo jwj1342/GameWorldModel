@@ -1,6 +1,8 @@
 """Bundle a validated program into a self-contained game/ directory (buildless ESM)."""
 from __future__ import annotations
 import json, os, re, shutil, time
+
+from .ids import id_to_color, registry_order
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -60,7 +62,17 @@ def _copy_vendor(dst: Path) -> None:
     rapier_dst = dst / "vendor" / "rapier"; rapier_dst.mkdir(parents=True, exist_ok=True)
     shutil.copy2(nm / "@dimforge" / "rapier3d-compat" / "dist" / "rapier.mjs", rapier_dst / "rapier.mjs")
 
-def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = None, validation: dict | None = None) -> Path:
+def kernel_config(program: dict, cfg: dict | None = None) -> dict:
+    """内核要用、但不属于场景本身的数据。写成文件是为了让 Python 这边当唯一来源，
+    JS 不再自己算一遍物体 ID 颜色、也不再自己抄一份收集物和危险物的类别表。"""
+    b = (cfg or {}).get("binding", {})
+    return {
+        "registry": [{**r, "color": list(id_to_color(r["idx"]))} for r in registry_order(program)],
+        "collectible_classes": b.get("collectible_classes", ["coin", "gem", "key", "star", "pickup", "ball", "marble"]),
+        "hazard_classes": b.get("hazard_classes", ["lava", "spike", "water", "fire", "acid"]),
+    }
+
+def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = None, validation: dict | None = None, cfg: dict | None = None) -> Path:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     kdst = out / "kernel"
     if kdst.exists(): shutil.rmtree(kdst)
@@ -68,6 +80,7 @@ def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = Non
     shutil.copy2(KERNEL / "index.html", out / "index.html")
     _copy_vendor(out)
     (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False))
+    (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1))
     report = {"bundled_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kernel_files": sorted(p.name for p in KERNEL.glob("*.js")),
               "assets": asset_manifest or {}, "validation": validation or {}, "objects": len(program.get("objects", [])), "static": len(program.get("static", []))}
     (out / "compile_report.json").write_text(json.dumps(report, indent=2))

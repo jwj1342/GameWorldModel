@@ -135,6 +135,8 @@ def make_segmentation_backend(name: str, cfg: dict):
         from .grounded_sam2_backend import GroundedSAM2Backend; return GroundedSAM2Backend(w / cfg["weights"]["grounding_dino"], w / cfg["weights"]["sam2"])
     if name == "gt":
         from .gt_backend import GTSegmentationBackend; return GTSegmentationBackend(cfg["perception"]["gt_program"], cfg["frames"]["geometry_width"])
+    if name == "none":
+        from .base import NullSegmentationBackend; return NullSegmentationBackend(cfg)
     raise ValueError(f"unknown backend {name!r} (see configs/default.yaml perception.*_backend)")
 
 if __name__ == "__main__":
