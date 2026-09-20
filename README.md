@@ -44,6 +44,8 @@ flowchart TD
 
 模型这一步默认走 OpenRouter 上的 GLM-4.6V，一条视频大约六次调用，一美分左右。换模型改一个配置文件就行。没有 key 也能跑，加 `--no-vlm` 就直接从感知结果翻译出场景程序，整条链一样走完。
 
+想改代码的话看 [CONTRIBUTING.md](CONTRIBUTING.md)，main 分支开了保护，改动走 PR。
+
 ## 目录
 
 `gwm/` 是 Python 管线，按感知、程序生成、编译、反馈、绑定、试玩分成子包，入口是 `run_clip.py`。`kernel/` 是在浏览器里跑的固定运行时，生成侧只产出数据，从不改这里的代码。`harness/` 用 Playwright 驱动内核做渲染、试玩和录像。
