@@ -32,7 +32,7 @@ def load_config(files: list[str | Path] | None = None, overrides: dict | None = 
     for f in files:
         p = Path(f)
         if not p.is_absolute(): p = REPO / p
-        if p.exists(): cfg = _merge(cfg, yaml.safe_load(p.read_text()) or {})
+        if p.exists(): cfg = _merge(cfg, yaml.safe_load(p.read_text(encoding="utf-8")) or {})
     if overrides: cfg = _merge(cfg, overrides)
     cfg = _expand(cfg)
     for k, v in (cfg.get("paths") or {}).items():
