@@ -7,6 +7,7 @@ import numpy as np
 from .config import load_config, REPO
 from .errors import ErrorLog
 from .perception.run import run_perception, load_masks
+from .perception.contract import format_evidence_errors, validate_evidence
 from .synthesis.direct import evidence_to_program
 from .compiler.compile import compile_program
 from .compiler.validate import validate, format_errors
@@ -47,6 +48,16 @@ def main(argv=None):
         ev = json.loads((pdir / "evidence.json").read_text())
     else:
         ev = run_perception(a.video, a.clip, pdir, cfg, phrases=[p.strip() for p in a.phrases.split(",")] if a.phrases else None, client=client, log=log)
+    evidence_report = validate_evidence(ev)
+    manifest["stages"]["evidence_validation"] = {
+        "ok": evidence_report["ok"], "adapted": evidence_report["adapted"],
+        "errors": len(evidence_report["errors"]), "warnings": len(evidence_report["warnings"]),
+    }
+    if not evidence_report["ok"]:
+        log.record("evidence", "validation_failed", format_evidence_errors(evidence_report), recoverable=False,
+                   action_taken="stop before Program generation")
+        save(); raise SystemExit(2)
+    ev = evidence_report["evidence"]
     frames = json.loads((pdir / "frames" / "frames.json").read_text())["frames"]
     sam_masks = load_masks(pdir)
     manifest["stages"]["perception"] = {"seconds": round(time.time() - t0, 1), "objects": len(ev["objects"]), "geometry_backend": ev["meta"]["geometry_backend"], "fallbacks": ev["meta"]["fallbacks"]}; save()
@@ -101,7 +112,7 @@ def write_report(run_dir: Path, m: dict, ev: dict, program: dict, loop_res: dict
          f"- frames: {ev['meta']['n_frames']} @ {ev['meta']['fps_sampled']} fps, duration {ev['meta']['duration']:.1f} s; keyframes: {len(ev['keyframes'])}; timing: {ev['meta'].get('timing_s')}",
          f"- alignment: {ev['meta'].get('alignment')}", "", "| evidence object | class guess | dynamic | motion guess | conf | frames |", "|---|---|---|---|---|---|"]
     for o in ev["objects"]:
-        mg = o["motion_guess"]; L.append(f"| {o['id']} | {o['class_guess']} | {o['is_dynamic']} | {mg['type']} ({mg.get('notes','')[:60]}) | {mg.get('conf',0):.2f} | {len(o['obb'])} |")
+        mg = o["motion_guess"]; conf = mg.get("conf"); conf_text = f"{float(conf):.2f}" if isinstance(conf, (int, float)) else "unknown"; L.append(f"| {o['id']} | {o['class_guess']} | {o['is_dynamic']} | {mg.get('type','unknown')} ({mg.get('notes','')[:60]}) | {conf_text} | {len(o['obb'])} |")
     L += ["", "## Program", f"- writer: {json.dumps(m['stages'].get('writer'), default=str)[:600]}", f"- static: {len(program['static'])}, objects: {len(program['objects'])}", "", "| id | class | geom | motion |", "|---|---|---|---|"]
     for o in program["objects"]: L.append(f"| {o['id']} | {o.get('class')} | {o['geom'].get('kind')}:{o['geom'].get('shape') or o['geom'].get('query')} {o['geom'].get('extent')} | {(o.get('motion') or {}).get('type','static')} |")
     L += ["", "## Feedback loop", "| round | score | note |", "|---|---|---|"]

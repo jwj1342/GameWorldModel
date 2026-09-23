@@ -279,7 +279,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
     for o in tracks.objects:
-        obbs, ts, centers, yaws = [], [], [], []
+        obbs, observations, ts, centers, yaws = [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = any(kk in o.phrase.lower() for kk in cfg["perception"].get("static_classes", []))
         for k, fi in enumerate(geom.frame_indices):
@@ -299,6 +299,16 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     if dxz < max(1.0 * diag, 0.2) and abs(bottom) < max(0.5 * ob["size"][1], 0.15):
                         ob["center_depth"] = ob["center"]; ob["center"] = cc
             ob["t"] = frames[fi]["t"]; ob["frame"] = fi; ob["conf"] = float(min(1.0, ob["n"] / 400)); ob["visible"] = True
+            ys, xs = np.where(mres)
+            bbox = ({"format": "xyxy", "values": [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)],
+                     "space": "pixel", "image_size": [int(W), int(H)]} if len(xs) else "unknown")
+            valid_depth = geom.depth[k][mres & (geom.depth[k] > 1e-4)]
+            depth = ({"min": float(valid_depth.min()), "median": float(np.median(valid_depth)), "max": float(valid_depth.max()),
+                      "unit": "m" if geom.scale == "metric" else "relative"} if len(valid_depth) else "unknown")
+            observations.append({"frame_index": int(fi), "track_id": o.id, "t": float(ob["t"]), "bbox": bbox,
+                                 "mask_ref": f"masks.npz#{o.id}__{fi}", "visible_fraction": "unknown", "depth": depth,
+                                 "source": {"geometry": geom.backend or "unknown", "segmentation": tracks.backend or "unknown", "tracking": "mask_centroid_obb"},
+                                 "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
             obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); yaws.append(R.from_quat(ob["quat"]).as_euler("yxz")[0])
             if area > best_area: best_area, best_frame = area, fi
         if len(obbs) < 2: continue
@@ -314,13 +324,21 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)
         contacts = []
         if on_ground.mean() > 0.5: contacts.append({"with_id": "ground", "t_start": float(ts_a[0]), "t_end": float(ts_a[-1]), "conf": float(on_ground.mean())})
-        objects.append({"id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": mg["type"] not in ("static",),
+        geometry_conf = float(np.mean([ob["conf"] for ob in obbs])) if obbs else "unknown"
+        objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": mg["type"] not in ("static",),
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
+                        "observations": observations,
+                        "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
+                                                 "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
+                        "hypotheses": [],
                         "best_frame": best_frame, "mask_area_frac": float(best_area), "notes": f"{len(obbs)} frames with 3D points"})
     evidence = {
+        "schema_version": "2.0",
         "meta": {"clip": clip, "fps_sampled": float(round(1 / max(frames[1]["t"] - frames[0]["t"], 1e-6), 3)) if len(frames) > 1 else 0.0, "n_frames": len(frames), "duration": float(frames[-1]["t"]),
                  "geometry_backend": geom.backend, "segmentation_backend": tracks.backend, "tracks_backend": "mask_centroid_obb", "fallbacks": fallbacks,
                  "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices},
+        "frames": [{"frame_index": int(frame["index"]), "t": float(frame["t"]),
+                    "source": {"kind": "video_frame", "ref": Path(frame["file"]).name if frame.get("file") else "unknown"}} for frame in frames],
         "camera": {"intrinsics": {"fx": float(K0[0, 0]), "fy": float(K0[1, 1]), "cx": float(K0[0, 2]), "cy": float(K0[1, 2]), "width": int(W), "height": int(H), "fov_deg": fov_deg}, "poses": cam_poses,
                    "note": "poses in aligned world (y up, ground y=0); quaternion is three.js camera orientation (looks down -Z)"},
         "static": {"planes": [ground], "bounds": {"ground_center": ground["center_hint"], "ground_extent": ground["extent_hint"]}},

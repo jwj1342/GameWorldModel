@@ -4,6 +4,7 @@ import copy, json, re
 from pathlib import Path
 from typing import Any
 from ..compiler.validate import validate, format_errors, schema as full_schema
+from ..perception.contract import format_evidence_errors, validate_evidence
 from .direct import evidence_to_program
 from .vlm import VLMClient
 
@@ -31,13 +32,13 @@ def stage_schema(stage: str) -> dict:
 def evidence_summary(ev: dict, max_obb: int = 12) -> str:
     cam = ev["camera"]; lines = [f"camera: fov_deg={cam['intrinsics'].get('fov_deg', 60):.1f}, aspect={cam['intrinsics']['width']/cam['intrinsics']['height']:.3f}, {len(cam['poses'])} poses; first pose pos={_r(cam['poses'][0]['pos'])} quat={_r(cam['poses'][0]['quat'])}, last pose pos={_r(cam['poses'][-1]['pos'])} quat={_r(cam['poses'][-1]['quat'])} (t={cam['poses'][-1]['t']:.2f}); scale={ev['meta']['scale']}"]
     g = ev["static"]["planes"][0] if ev["static"]["planes"] else None
-    if g: lines.append(f"ground plane: y=0, centre_hint={_r(g['center_hint'])}, extent_hint={_r(g['extent_hint'])}, conf={g['conf']:.2f}")
+    if g: lines.append(f"ground plane: y=0, centre_hint={_r(g['center_hint'])}, extent_hint={_r(g['extent_hint'])}, conf={_conf_text(g.get('conf'))}")
     lines.append(f"objects ({len(ev['objects'])}):")
     for o in ev["objects"]:
         mg = o["motion_guess"]; ob = o["obb"]; step = max(1, len(ob) // max_obb)
         traj = "; ".join(f"t={b['t']:.2f} c={_r(b['center'])}" for b in ob[::step])
         mgs = ", ".join(f"{k}={_r(v) if isinstance(v, list) else (round(v, 3) if isinstance(v, float) else v)}" for k, v in mg.items() if k not in ("notes",) and v is not None)
-        lines.append(f"- id={o['id']} class_guess='{o['class_guess']}' conf={o['confidence']:.2f} dynamic={o['is_dynamic']} size_first={_r(ob[0]['size'])} quat_first={_r(ob[0]['quat'])} contacts={[c['with_id'] for c in o.get('contacts', [])]}\n  motion_guess: {mgs} ({mg.get('notes','')})\n  centres: {traj}")
+        lines.append(f"- id={o['id']} class_guess='{o['class_guess']}' conf={_conf_text(o.get('confidence'))} dynamic={o['is_dynamic']} size_first={_r(ob[0]['size'])} quat_first={_r(ob[0]['quat'])} contacts={[c['with_id'] for c in o.get('contacts', [])]}\n  motion_guess: {mgs} ({mg.get('notes','')})\n  centres: {traj}")
     return "\n".join(lines)
 
 def camera_keyframes_from_evidence(ev: dict, n: int = 16) -> list[dict]:
@@ -48,6 +49,9 @@ def _r(v, nd=3):
     if isinstance(v, (list, tuple)): return [round(float(x), nd) for x in v]
     return round(float(v), nd)
 
+def _conf_text(value) -> str:
+    return f"{float(value):.2f}" if isinstance(value, (int, float)) else "unknown"
+
 class Writer:
     def __init__(self, client: VLMClient, cfg: dict, log_dir: Path):
         self.client, self.cfg, self.log_dir = client, cfg, Path(log_dir); self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +59,10 @@ class Writer:
 
     def generate(self, ev: dict, keyframe_files: list[str], clip: str, temperature: float | None = None, tag: str = "r0") -> tuple[dict, dict]:
         """Returns (program, info). Uses staged generation; each stage validated and repaired; falls back to evidence on failure."""
+        evidence_report = validate_evidence(ev)
+        if not evidence_report["ok"]:
+            raise ValueError("invalid evidence:\n" + format_evidence_errors(evidence_report))
+        ev = evidence_report["evidence"]
         use_ev = self.w.get("use_evidence", True) and not self.cfg["ablations"].get("no_evidence", False)
         stages = ["single_stage"] if self.cfg["ablations"].get("single_stage") else list(self.w["stages"])
         program = {"meta": {"clip": clip, "fps": 30, "duration": float(max(ev["meta"]["duration"], 1.0)), "units": "m", "up": "y", "notes": "generated"}, "style": {"background": "#8fb3d9"}, "camera": {}, "static": [], "objects": [], "binding": {"template": "platformer_3p", "slots": {}}, "residual": None}

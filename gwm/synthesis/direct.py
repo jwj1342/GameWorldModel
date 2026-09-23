@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 import numpy as np
+from ..perception.contract import format_evidence_errors, validate_evidence
 
 def _slug(s: str) -> str:
     import re
@@ -14,6 +15,9 @@ def guess_material(cls: str) -> str:
                      ("track", "plastic"), ("rail", "plastic"), ("belt", "rubber"), ("conveyor", "metal"), ("ball", "blue"), ("wall", "stone"), ("floor", "concrete")]:
         if key in c: return mat
     return "default"
+
+def _confidence(value):
+    return float(value) if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) else None
 
 def motion_from_guess(mg: dict, obbs: list[dict]) -> dict | None:
     t = mg.get("type", "unknown")
@@ -40,6 +44,10 @@ def motion_from_guess(mg: dict, obbs: list[dict]) -> dict | None:
     return {"type": "trajectory", "interp": "linear", "keyframes": [{"t": float(ts[i]), "pos": [float(v) for v in cs[i]]} for i in idx]}
 
 def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = None) -> dict:
+    evidence_report = validate_evidence(ev)
+    if not evidence_report["ok"]:
+        raise ValueError("invalid evidence:\n" + format_evidence_errors(evidence_report))
+    ev = evidence_report["evidence"]
     meta = ev["meta"]; cam = ev["camera"]; g = ev["static"]["planes"][0] if ev["static"]["planes"] else None
     program = {"meta": {"clip": clip or meta["clip"], "fps": 30, "duration": float(max(meta["duration"], 1.0)), "units": "m", "up": "y", "notes": "direct translation of evidence (no VLM)"},
                "style": {"background": "#8fb3d9"},
@@ -48,7 +56,9 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
                "static": [], "objects": [], "binding": {"template": "platformer_3p", "slots": {}}, "residual": None}
     if g:
         ext = g.get("extent_hint") or [10, 0.2, 10]; c = g.get("center_hint") or [0, 0, 0]
-        program["static"].append({"id": "ground", "class": "ground", "geom": {"kind": "primitive", "shape": "box", "extent": [float(max(ext[0], 2)) * 1.4, 0.3, float(max(ext[2], 2)) * 1.4]}, "pose": {"pos": [float(c[0]), -0.15, float(c[2])]}, "material": "grass", "confidence": float(g.get("conf", 0.5))})
+        ground_node = {"id": "ground", "class": "ground", "geom": {"kind": "primitive", "shape": "box", "extent": [float(max(ext[0], 2)) * 1.4, 0.3, float(max(ext[2], 2)) * 1.4]}, "pose": {"pos": [float(c[0]), -0.15, float(c[2])]}, "material": "grass"}
+        if _confidence(g.get("conf")) is not None: ground_node["confidence"] = _confidence(g["conf"])
+        program["static"].append(ground_node)
     static_classes = [k for k in (cfg or {}).get("perception", {}).get("static_classes", [])] if cfg else ["wall", "floor", "ground", "table", "track", "rail", "belt", "conveyor", "road", "lawn", "grass"]
     for o in ev["objects"]:
         if not o["obb"]: continue
@@ -58,13 +68,16 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
             sz = [float(max(v, 0.05)) for v in sz]
             if any(k in cls for k in ("floor", "ground", "lawn", "grass", "carpet", "mat", "road")): sz[1] = min(sz[1], 0.3); cs[1] = -sz[1] / 2 + 0.0  # thin slab flush with the ground plane
-            program["static"].append({"id": _slug(o["id"]), "class": cls[:40], "geom": {"kind": "primitive", "shape": "box", "extent": sz}, "pose": {"pos": [float(v) for v in cs], "quat": [float(v) for v in o["obb"][0]["quat"]]},
-                                      "material": guess_material(cls), "confidence": float(o.get("confidence", 0.5)), "notes": "static structure from evidence"})
+            static_node = {"id": _slug(o["id"]), "class": cls[:40], "geom": {"kind": "primitive", "shape": "box", "extent": sz}, "pose": {"pos": [float(v) for v in cs], "quat": [float(v) for v in o["obb"][0]["quat"]]},
+                           "material": guess_material(cls), "notes": "static structure from evidence"}
+            if _confidence(o.get("confidence")) is not None: static_node["confidence"] = _confidence(o["confidence"])
+            program["static"].append(static_node)
             continue
         first = o["obb"][0]; size = [float(max(s, 0.05)) for s in first["size"]]
-        node = {"id": _slug(o["id"]), "class": o["class_guess"][:40], "confidence": float(o.get("confidence", 0.5)),
+        node = {"id": _slug(o["id"]), "class": o["class_guess"][:40],
                 "geom": {"kind": "asset", "query": o["class_guess"][:80], "extent": size}, "pose": {"pos": [float(v) for v in first["center"]], "quat": [float(v) for v in first["quat"]]},
                 "material": guess_material(o["class_guess"]), "notes": o["motion_guess"].get("notes", "")[:200]}
+        if _confidence(o.get("confidence")) is not None: node["confidence"] = _confidence(o["confidence"])
         m = motion_from_guess(o["motion_guess"], o["obb"])
         if m:
             base = m.pop("_base", None)
