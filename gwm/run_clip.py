@@ -7,7 +7,8 @@ import numpy as np
 from .config import load_config, REPO
 from .errors import ErrorLog
 from .perception.run import run_perception, load_masks
-from .perception.contract import format_evidence_errors, validate_evidence
+from .perception.contract import format_evidence_errors
+from .perception.quality import assess_evidence_quality
 from .synthesis.direct import evidence_to_program
 from .compiler.compile import compile_program
 from .compiler.validate import validate, format_errors
@@ -48,16 +49,26 @@ def main(argv=None):
         ev = json.loads((pdir / "evidence.json").read_text())
     else:
         ev = run_perception(a.video, a.clip, pdir, cfg, phrases=[p.strip() for p in a.phrases.split(",")] if a.phrases else None, client=client, log=log)
-    evidence_report = validate_evidence(ev)
+    quality_report = assess_evidence_quality(ev, cfg)
+    evidence_report = quality_report["validation"]
     manifest["stages"]["evidence_validation"] = {
         "ok": evidence_report["ok"], "adapted": evidence_report["adapted"],
         "errors": len(evidence_report["errors"]), "warnings": len(evidence_report["warnings"]),
     }
-    if not evidence_report["ok"]:
+    quality_artifact = {key: value for key, value in quality_report.items() if key not in ("evidence", "validation")}
+    (pdir / "evidence_quality.json").write_text(json.dumps(quality_artifact, indent=1, ensure_ascii=False))
+    manifest["stages"]["evidence_quality"] = {
+        "decision": quality_report["decision"], "metrics": quality_report["metrics"],
+        "diagnostic_codes": sorted({item["code"] for item in quality_report["diagnostics"]}),
+    }
+    if quality_report["decision"] == "block":
         log.record("evidence", "validation_failed", format_evidence_errors(evidence_report), recoverable=False,
                    action_taken="stop before Program generation")
         save(); raise SystemExit(2)
-    ev = evidence_report["evidence"]
+    if quality_report["decision"] == "warn":
+        codes = sorted({item["code"] for item in quality_report["diagnostics"] if item["severity"] == "warning"})
+        log.record("evidence", "quality_warning", ", ".join(codes), action_taken="proceed with explicit quality diagnostics")
+    ev = quality_report["evidence"]
     frames = json.loads((pdir / "frames" / "frames.json").read_text())["frames"]
     sam_masks = load_masks(pdir)
     manifest["stages"]["perception"] = {"seconds": round(time.time() - t0, 1), "objects": len(ev["objects"]), "geometry_backend": ev["meta"]["geometry_backend"], "fallbacks": ev["meta"]["fallbacks"]}; save()

@@ -4,7 +4,8 @@ import copy, json, re
 from pathlib import Path
 from typing import Any
 from ..compiler.validate import validate, format_errors, schema as full_schema
-from ..perception.contract import format_evidence_errors, validate_evidence
+from ..perception.contract import format_evidence_errors
+from ..perception.quality import assess_evidence_quality
 from .direct import evidence_to_program
 from .vlm import VLMClient
 
@@ -59,14 +60,19 @@ class Writer:
 
     def generate(self, ev: dict, keyframe_files: list[str], clip: str, temperature: float | None = None, tag: str = "r0") -> tuple[dict, dict]:
         """Returns (program, info). Uses staged generation; each stage validated and repaired; falls back to evidence on failure."""
-        evidence_report = validate_evidence(ev)
-        if not evidence_report["ok"]:
-            raise ValueError("invalid evidence:\n" + format_evidence_errors(evidence_report))
-        ev = evidence_report["evidence"]
+        quality_report = assess_evidence_quality(ev, self.cfg)
+        if quality_report["decision"] == "block":
+            raise ValueError("invalid evidence:\n" + format_evidence_errors(quality_report["validation"]))
+        ev = quality_report["evidence"]
         use_ev = self.w.get("use_evidence", True) and not self.cfg["ablations"].get("no_evidence", False)
         stages = ["single_stage"] if self.cfg["ablations"].get("single_stage") else list(self.w["stages"])
         program = {"meta": {"clip": clip, "fps": 30, "duration": float(max(ev["meta"]["duration"], 1.0)), "units": "m", "up": "y", "notes": "generated"}, "style": {"background": "#8fb3d9"}, "camera": {}, "static": [], "objects": [], "binding": {"template": "platformer_3p", "slots": {}}, "residual": None}
-        info = {"stages": {}, "fallbacks": []}
+        program["meta"]["evidence_quality"] = {"decision": quality_report["decision"],
+                                                "diagnostic_codes": sorted({item["code"] for item in quality_report["diagnostics"]})}
+        info = {"stages": {}, "fallbacks": [], "evidence_quality": {
+            "decision": quality_report["decision"],
+            "diagnostic_codes": sorted({item["code"] for item in quality_report["diagnostics"]}),
+        }}
         ev_text = evidence_summary(ev) if use_ev else "(evidence withheld in this ablation; rely on the frames)"
         common = _p("common_dsl.md") + "\n" + _p("fewshot/handwritten_summary.md")
         for st in stages:

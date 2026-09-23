@@ -32,6 +32,21 @@ perception:
   far_depth_factor: 3.0            # 丢弃深度 > 3×中位深度的点（天空、远景）
   assumed_camera_height_m: 1.2     # 相对尺度后端的定标假设
   static_classes: [wall, floor, ground, table, track, rail, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
+evidence_quality:
+  min_object_observation_coverage: 0.20
+  min_bbox_coverage: 0.70
+  min_mask_coverage: 0.70
+  min_depth_coverage: 0.50
+  min_visibility_coverage: 0.25
+  max_track_gap_frames: 3
+  min_object_temporal_span_ratio: 0.20
+  min_camera_frame_coverage: 0.50
+  min_camera_temporal_span_ratio: 0.70
+  max_attribute_unknown_ratio: 0.50
+  max_identity_ambiguity: 0.80
+  min_motion_support: 0.40
+  severe_occlusion_visible_fraction: 0.20
+  max_severe_occlusion_fraction: 0.50
 vlm:
   provider: openai_compat          # openai_compat | mock
   provider_kind: openrouter        # openrouter | vllm | openai  （决定发送哪些提供商特有参数）
