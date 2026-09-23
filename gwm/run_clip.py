@@ -14,6 +14,8 @@ from .compiler.compile import compile_program
 from .compiler.validate import validate, format_errors
 from .binding.platformer import bind
 from .playtest.autopilot import playtest
+from .feedback.render import render
+from .feedback.validate_render import validate_render_result
 
 def git_commit() -> str:
     try: return subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -107,6 +109,34 @@ def main(argv=None):
     if loop_res["best"].get("ok"):
         src = Path(loop_res["best"]["game_dir"]).parent / "render"
         if src.exists(): shutil.copytree(src, run_dir / "feedback", dirs_exist_ok=True)
+
+    # Validate the final bound Program's own render, not an earlier feedback candidate.
+    rv_dir = run_dir / "render_validation_frames"
+    duration = float(program.get("meta", {}).get("duration") or 0.0)
+    n_validation_frames = max(2, int(cfg.get("render_validation", {}).get("sample_frames", 5)))
+    validation_times = [round(float(value), 3) for value in np.linspace(0.0, duration, n_validation_frames)]
+    render_failure = None
+    try:
+        rv_index = render(run_dir / "game", validation_times, rv_dir,
+                          cfg["feedback"]["render_width"], cfg["feedback"]["render_height"], ("rgb", "depth", "id"))
+    except Exception as exc:
+        rv_index = None
+        render_failure = repr(exc)[:1000]
+    rv_report = validate_render_result(program, rv_index, rv_dir, cfg, expected_times=validation_times)
+    if render_failure:
+        rv_report["render_failure"] = render_failure
+    (run_dir / "render_validation.json").write_text(json.dumps(rv_report, indent=1, ensure_ascii=False))
+    manifest["stages"]["render_validation"] = {
+        "decision": rv_report["decision"], "errors": len(rv_report["errors"]), "warnings": len(rv_report["warnings"]),
+        "diagnostic_codes": sorted({item["code"] for item in rv_report["diagnostics"]}),
+        "artifact": "render_validation.json", "mode": rv_report["mode"],
+    }
+    save()
+    if rv_report["decision"] == "block":
+        log.record("render_validation", "render_invalid", ", ".join(manifest["stages"]["render_validation"]["diagnostic_codes"]),
+                   recoverable=rv_report["mode"] != "enforce", action_taken="report only" if rv_report["mode"] == "report" else "stop before playtest")
+        if rv_report["mode"] == "enforce":
+            raise SystemExit(2)
 
     # ---- playtest ----
     t0 = time.time()
