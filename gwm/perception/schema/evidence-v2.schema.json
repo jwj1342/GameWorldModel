@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gameworldmodel/evidence-v2.schema.json",
+  "title": "GameWorldModel Evidence v2",
+  "type": "object",
+  "required": ["schema_version", "meta", "frames", "camera", "static", "objects", "keyframes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "meta": {
+      "type": "object",
+      "required": ["clip", "duration", "scale"],
+      "additionalProperties": true,
+      "properties": {
+        "clip": {"type": "string"},
+        "duration": {"type": "number", "minimum": 0},
+        "scale": {"type": "string", "enum": ["metric", "relative", "unknown"]}
+      }
+    },
+    "frames": {"type": "array", "items": {"$ref": "#/$defs/frame"}},
+    "camera": {
+      "type": "object",
+      "required": ["intrinsics", "poses"],
+      "additionalProperties": true,
+      "properties": {
+        "intrinsics": {"type": "object"},
+        "poses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["t", "pos", "quat"],
+            "additionalProperties": true,
+            "properties": {
+              "t": {"type": "number", "minimum": 0},
+              "pos": {"$ref": "#/$defs/vec3"},
+              "quat": {"$ref": "#/$defs/quat"},
+              "conf": {"$ref": "#/$defs/confidence"}
+            }
+          }
+        }
+      }
+    },
+    "static": {"type": "object"},
+    "objects": {"type": "array", "items": {"$ref": "#/$defs/object"}},
+    "keyframes": {"type": "array"}
+  },
+  "$defs": {
+    "unknown": {"const": "unknown"},
+    "confidence": {
+      "anyOf": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"$ref": "#/$defs/unknown"}
+      ]
+    },
+    "frameIndex": {
+      "anyOf": [
+        {"type": "integer", "minimum": 0},
+        {"$ref": "#/$defs/unknown"}
+      ]
+    },
+    "vec3": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "quat": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+    "frame": {
+      "type": "object",
+      "required": ["frame_index", "t", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_index": {"type": "integer", "minimum": 0},
+        "t": {"type": "number", "minimum": 0},
+        "source": {
+          "type": "object",
+          "required": ["kind", "ref"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"type": "string", "minLength": 1},
+            "ref": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "bbox": {
+      "type": "object",
+      "required": ["format", "values", "space", "image_size"],
+      "additionalProperties": false,
+      "properties": {
+        "format": {"const": "xyxy"},
+        "values": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 4, "maxItems": 4},
+        "space": {"enum": ["pixel", "normalized"]},
+        "image_size": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "maxItems": 2}
+      }
+    },
+    "depthStats": {
+      "type": "object",
+      "required": ["min", "median", "max", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "min": {"type": "number", "minimum": 0},
+        "median": {"type": "number", "minimum": 0},
+        "max": {"type": "number", "minimum": 0},
+        "unit": {"enum": ["m", "relative"]}
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["geometry", "segmentation", "tracking"],
+      "additionalProperties": false,
+      "properties": {
+        "geometry": {"type": "string", "minLength": 1},
+        "segmentation": {"type": "string", "minLength": 1},
+        "tracking": {"type": "string", "minLength": 1}
+      }
+    },
+    "observationConfidence": {
+      "type": "object",
+      "required": ["geometry", "segmentation", "tracking"],
+      "additionalProperties": false,
+      "properties": {
+        "geometry": {"$ref": "#/$defs/confidence"},
+        "segmentation": {"$ref": "#/$defs/confidence"},
+        "tracking": {"$ref": "#/$defs/confidence"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["frame_index", "track_id", "t", "bbox", "mask_ref", "visible_fraction", "depth", "source", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_index": {"$ref": "#/$defs/frameIndex"},
+        "track_id": {"type": "string", "minLength": 1},
+        "t": {"type": "number", "minimum": 0},
+        "bbox": {"anyOf": [{"$ref": "#/$defs/bbox"}, {"$ref": "#/$defs/unknown"}]},
+        "mask_ref": {"anyOf": [{"type": "string", "minLength": 1, "not": {"const": "unknown"}}, {"$ref": "#/$defs/unknown"}]},
+        "visible_fraction": {"$ref": "#/$defs/confidence"},
+        "depth": {"anyOf": [{"$ref": "#/$defs/depthStats"}, {"$ref": "#/$defs/unknown"}]},
+        "source": {"$ref": "#/$defs/source"},
+        "confidence": {"$ref": "#/$defs/observationConfidence"}
+      }
+    },
+    "attributeConfidence": {
+      "type": "object",
+      "required": ["class", "identity", "geometry", "motion"],
+      "additionalProperties": false,
+      "properties": {
+        "class": {"$ref": "#/$defs/confidence"},
+        "identity": {"$ref": "#/$defs/confidence"},
+        "geometry": {"$ref": "#/$defs/confidence"},
+        "motion": {"$ref": "#/$defs/confidence"}
+      }
+    },
+    "hypothesisCandidate": {
+      "type": "object",
+      "required": ["value", "confidence", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {"type": "string", "minLength": 1},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "source": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1}
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "required": ["kind", "candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["identity", "motion"]},
+        "candidates": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/hypothesisCandidate"}}
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": ["id", "track_id", "class_guess", "confidence", "is_dynamic", "obb", "motion_guess", "contacts", "observations", "attribute_confidence", "hypotheses"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "track_id": {"type": "string", "minLength": 1},
+        "class_guess": {"type": "string", "minLength": 1},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "is_dynamic": {"anyOf": [{"type": "boolean"}, {"$ref": "#/$defs/unknown"}]},
+        "obb": {"type": "array"},
+        "motion_guess": {"type": "object"},
+        "contacts": {"type": "array"},
+        "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
+        "attribute_confidence": {"$ref": "#/$defs/attributeConfidence"},
+        "hypotheses": {"type": "array", "items": {"$ref": "#/$defs/hypothesis"}}
+      }
+    }
+  }
+}
