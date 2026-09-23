@@ -26,6 +26,7 @@ for (const t of times) {
   index.frames.push(frame);
 }
 index.camera_far = await g.page.evaluate(() => window.__game.program?.camera?.intrinsics?.far ?? 100);
+index.browser_events = [...g.logs];
 index.elapsed_ms = Date.now() - t0;
 fs.writeFileSync(path.join(outDir, 'index.json'), JSON.stringify(index, null, 2));
 await g.close();

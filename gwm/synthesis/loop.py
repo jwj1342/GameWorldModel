@@ -6,6 +6,7 @@ import jsonpatch
 from ..compiler.compile import compile_program
 from ..compiler.validate import validate, format_errors
 from ..feedback.render import render
+from ..feedback.validate_render import validate_render_result
 from ..feedback.metrics import compute_metrics, Dino
 from .critic import make_crops, critique
 
@@ -19,10 +20,20 @@ def evaluate(program: dict, round_dir: Path, evidence: dict, frames: list[dict],
     try:
         idx = render(round_dir / "game", key_times, round_dir / "render", cfg["feedback"]["render_width"], cfg["feedback"]["render_height"], tuple(cfg["feedback"]["passes"]))
     except Exception as e:
+        render_report = validate_render_result(program, None, round_dir / "render", cfg, expected_times=key_times)
+        (round_dir / "render_validation.json").write_text(json.dumps(render_report, indent=1, ensure_ascii=False))
         (round_dir / "render_error.txt").write_text(repr(e)); return {"ok": False, "error": "render", "details": repr(e)[:1000]}
-    m = compute_metrics(program, idx, round_dir / "render", evidence, frames, sam_masks, cfg, dino)
+    render_report = validate_render_result(program, idx, round_dir / "render", cfg, expected_times=key_times)
+    (round_dir / "render_validation.json").write_text(json.dumps(render_report, indent=1, ensure_ascii=False))
+    if cfg.get("render_validation", {}).get("mode", "report") == "enforce" and not render_report["ok"]:
+        return {"ok": False, "error": "render_validation", "details": render_report}
+    try:
+        m = compute_metrics(program, idx, round_dir / "render", evidence, frames, sam_masks, cfg, dino)
+    except (OSError, KeyError, ValueError) as exc:
+        return {"ok": False, "error": "render_metrics", "details": repr(exc)[:1000], "render_validation": render_report}
     (round_dir / "clauses.json").write_text(json.dumps(m, indent=1))
-    return {"ok": True, "game_dir": str(round_dir / "game"), "render_index": idx, "metrics": m, "score": m["summary"]["score"]}
+    return {"ok": True, "game_dir": str(round_dir / "game"), "render_index": idx, "metrics": m,
+            "render_validation": render_report, "score": m["summary"]["score"]}
 
 def apply_patches(program: dict, items: list[dict]) -> tuple[dict, list[str]]:
     p = copy.deepcopy(program); applied = []
