@@ -80,6 +80,16 @@ evidence_quality:
   min_motion_support: 0.40
   severe_occlusion_visible_fraction: 0.20
   max_severe_occlusion_fraction: 0.50
+candidate_repair:
+  mode: "off"                      # off | report | apply；默认不改变现有流水线
+  max_passes: 3
+  max_quaternion_norm_delta: 0.02
+  max_contact_shift_m: 0.12
+  max_evidence_position_error_m: 0.10
+  min_contact_confidence: 0.80
+  min_geometry_confidence: 0.80
+  min_support_overlap_fraction: 0.50
+  max_support_tilt_deg: 2.0
 vlm:
   provider: openai_compat          # openai_compat | mock
   provider_kind: openrouter        # openrouter | vllm | openai  （决定发送哪些提供商特有参数）

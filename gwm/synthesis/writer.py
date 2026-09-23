@@ -4,6 +4,7 @@ import copy, json, re
 from pathlib import Path
 from typing import Any
 from ..compiler.validate import validate, format_errors, schema as full_schema
+from ..compiler.repair import repair_candidate
 from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
 from .direct import evidence_to_program
@@ -89,6 +90,14 @@ class Writer:
                 (self.log_dir / f"{tag}_{st}_try{tries}.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
                 cand = self._merge(program, st, out)
                 rep = validate(cand)
+                if self.cfg.get("candidate_repair", {}).get("mode", "off") != "off":
+                    cand, repair_report, unresolved = repair_candidate(cand, ev, rep, self.cfg)
+                    rep = repair_report["final_validation"]
+                    info.setdefault("candidate_repairs", []).append({
+                        "stage": st, "try": tries, "repairs": repair_report["repairs"],
+                        "proposed_repairs": repair_report["proposed_repairs"],
+                        "unresolved_codes": [item["code"] for item in unresolved],
+                    })
                 if rep["ok"]: program = cand; ok = True
                 else: errors_text = "Your previous output had these errors; fix them and output the complete JSON for this stage again:\n" + format_errors(rep)
             info["stages"][st] = {"ok": ok, "tries": tries}
@@ -97,6 +106,12 @@ class Writer:
                 program = self._fallback(program, st, ev, clip)
         # final safety
         rep = validate(program)
+        if self.cfg.get("candidate_repair", {}).get("mode", "off") != "off":
+            program, repair_report, unresolved = repair_candidate(program, ev, rep, self.cfg)
+            rep = repair_report["final_validation"]
+            info["final_candidate_repair"] = {"repairs": repair_report["repairs"],
+                                              "proposed_repairs": repair_report["proposed_repairs"],
+                                              "unresolved_codes": [item["code"] for item in unresolved]}
         if not rep["ok"]:
             info["fallbacks"].append("full_direct"); program = evidence_to_program(ev, clip, self.cfg); rep = validate(program)
         info["final_validation"] = {"ok": rep["ok"], "n_errors": len(rep["errors"]), "warnings": [w["code"] for w in rep["warnings"]]}
