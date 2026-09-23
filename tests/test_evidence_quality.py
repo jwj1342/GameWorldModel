@@ -122,6 +122,23 @@ def test_weak_motion_support_warns():
     assert report["metrics"]["objects"][0]["motion_support"]["primary_confidence"] == 0.2
 
 
+def test_motion_fit_evidence_reaches_quality_report():
+    evidence = _evidence()
+    obj = evidence["objects"][0]
+    obj["motion_guess"].update({"support_frames": 10, "temporal_span_s": 9.0, "residual": 0.012, "residual_unit": "m",
+                                "candidate_margin": 0.42})
+    obj["hypotheses"].append({"kind": "motion", "candidates": [
+        {"value": "static", "confidence": 0.81, "source": "multi_frame_motion_estimator"},
+        {"value": "prismatic", "confidence": 0.39, "source": "multi_frame_motion_estimator"}]})
+    report = assess_evidence_quality(evidence, QUALITY)
+    support = report["metrics"]["objects"][0]["motion_support"]
+    assert support["support_frames"] == 10
+    assert support["temporal_span_s"] == 9.0
+    assert support["residual"] == 0.012
+    assert support["residual_unit"] == "m"
+    assert support["candidate_margin"] == 0.42
+
+
 def test_configured_threshold_changes_decision():
     evidence = _evidence(); evidence["objects"][0]["observations"] = [_observation(i) for i in range(4)]
     permissive = copy.deepcopy(QUALITY); permissive["min_object_observation_coverage"] = 0.3

@@ -111,9 +111,10 @@ def _identity_ambiguity(hypotheses: list[dict]) -> dict:
 
 
 def _motion_support(obj: dict) -> dict:
+    motion_guess = obj.get("motion_guess") or {}
     primary = _number((obj.get("attribute_confidence") or {}).get("motion"))
     if primary is None:
-        primary = _number((obj.get("motion_guess") or {}).get("conf"))
+        primary = _number(motion_guess.get("conf"))
     motion_hypotheses = [hypothesis for hypothesis in obj.get("hypotheses", []) if hypothesis.get("kind") == "motion"]
     candidate_scores = [
         score
@@ -124,9 +125,15 @@ def _motion_support(obj: dict) -> dict:
     ordered = sorted(candidate_scores, reverse=True)
     return {
         "primary_confidence": round(primary, 6) if primary is not None else UNKNOWN,
+        "support_frames": int(motion_guess["support_frames"]) if isinstance(motion_guess.get("support_frames"), int) else UNKNOWN,
+        "temporal_span_s": round(float(motion_guess["temporal_span_s"]), 6) if _number(motion_guess.get("temporal_span_s")) is not None else UNKNOWN,
+        "residual": round(float(motion_guess["residual"]), 6) if _number(motion_guess.get("residual")) is not None else UNKNOWN,
+        "residual_unit": motion_guess.get("residual_unit", UNKNOWN),
         "hypothesis_count": len(motion_hypotheses),
         "best_candidate_confidence": round(ordered[0], 6) if ordered else UNKNOWN,
-        "candidate_margin": round(ordered[0] - ordered[1], 6) if len(ordered) > 1 else UNKNOWN,
+        "candidate_margin": (round(float(motion_guess["candidate_margin"]), 6)
+                             if _number(motion_guess.get("candidate_margin")) is not None
+                             else (round(ordered[0] - ordered[1], 6) if len(ordered) > 1 else UNKNOWN)),
     }
 
 

@@ -30,8 +30,28 @@ perception:
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
   motion:
+    min_support_frames: 5
+    min_temporal_span_s: 0.75
+    max_missing_fraction: 0.50
+    min_mean_visible_fraction: 0.50
+    max_gap_factor: 4.0
+    min_primary_confidence: 0.55
+    min_candidate_confidence: 0.15
+    min_hypothesis_margin: 0.10
     static_pos_thresh_m: 0.05
     static_rot_thresh_deg: 3.0
+    translation_min_displacement_m: 0.08
+    translation_residual_frac: 0.12
+    rotation_min_angle_deg: 12.0
+    rotation_residual_deg: 5.0
+    revolute_min_radius_m: 0.10
+    revolute_residual_frac: 0.12
+    revolute_axis_stability: 0.85
+    periodic_min_cycles: 1.5
+    periodic_min_period_s: 0.25
+    periodic_min_samples_per_cycle: 4.0
+    periodic_min_r2: 0.70
+    periodic_frequency_steps: 160
     revolute_axis_stability: 0.9
     periodic_autocorr_peak: 0.5
     smooth_window: 5

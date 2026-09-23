@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.spatial.transform import Rotation as R
 from .base import Geometry, Tracks
+from .motion import classify_motion_legacy, estimate_motion
 
 # OpenCV camera (x right, y down, z fwd) -> three.js camera (x right, y up, z back): flip y and z
 CV2THREE = np.diag([1.0, -1.0, -1.0])
@@ -152,86 +153,8 @@ def smooth_series(x: np.ndarray, win: int) -> np.ndarray:
 
 # ---------------- motion classification ----------------
 def classify_motion(ts: np.ndarray, centers: np.ndarray, yaws: np.ndarray, cfg: dict, size: np.ndarray | None = None, class_name: str = "", cam_pos: np.ndarray | None = None) -> dict:
-    mc = cfg["perception"]["motion"]
-    out = {"type": "unknown", "conf": 0.0, "notes": ""}
-    if len(ts) < 3: out.update(type="static", conf=0.3, notes="too few frames"); return out
-    c = smooth_series(centers, mc["smooth_window"])
-    size = np.asarray(size) if size is not None else np.zeros(3)
-    diag = float(np.linalg.norm(size)); footprint_ar = float(max(size[0], size[2]) / max(min(size[0], size[2]), 1e-6)) if size.any() else 1.0
-    yaw_reliable = footprint_ar > mc.get("yaw_min_aspect_ratio", 1.3)
-    # the PCA axis has no sign: canonicalise yaw modulo pi before unwrapping, then unwrap with period pi
-    yaw_raw = np.asarray(yaws, float); yaw_raw = (yaw_raw + np.pi / 2) % np.pi - np.pi / 2
-    yaw = np.unwrap(yaw_raw, period=np.pi) if yaw_reliable else np.zeros_like(ts)
-    yaw = smooth_series(yaw, mc["smooth_window"]) if yaw_reliable else yaw
-    step_yaw = float(np.degrees(np.abs(np.diff(yaw))).mean()) if len(yaw) > 1 else 0.0
-    disp = c - c.mean(0); rng_pos = float(np.linalg.norm(c.max(0) - c.min(0))); rng_yaw = float(np.degrees(yaw.max() - yaw.min()))
-    dt = float(np.median(np.diff(ts))) if len(ts) > 1 else 1.0
-    static_pos = max(mc["static_pos_thresh_m"], mc.get("static_pos_frac_of_size", 0.15) * diag)
-    # coherence of the centre motion: fraction of variance on the principal axis; incoherent jitter is treated as static
-    if len(c) >= 3:
-        _U, _S, _Vt = np.linalg.svd(disp, full_matrices=False); coherence = float(_S[0] ** 2 / max((_S ** 2).sum(), 1e-12))
-    else: coherence = 1.0
-    if rng_pos < static_pos * 2.5 and coherence < mc.get("min_motion_coherence", 0.75) and rng_yaw < 45:
-        out.update(type="static", conf=0.7, notes=f"incoherent jitter: pos range {rng_pos:.3f} m, coherence {coherence:.2f}"); return out
-    is_static_class = any(k in class_name.lower() for k in cfg["perception"].get("static_classes", []))
-    if is_static_class:
-        out.update(type="static", conf=0.8, notes=f"static class '{class_name}' (structure), centroid drift {rng_pos:.3f} m ignored"); return out
-    if rng_pos < static_pos and (rng_yaw < mc["static_rot_thresh_deg"] or step_yaw > 60):
-        out.update(type="static", conf=0.9, notes=f"pos range {rng_pos:.3f} m (< {static_pos:.3f}), yaw range {rng_yaw:.1f} deg"); return out
-    if rng_pos < static_pos * 2 and rng_yaw > 45 and step_yaw < 60:
-        ydeg = np.degrees(yaw); dy = np.diff(ydeg); mono = bool(np.all(dy >= -2) or np.all(dy <= 2))
-        if mono:
-            rate = float(np.polyfit(ts, ydeg, 1)[0])
-            out.update(type="spin", axis=[0, 1, 0], rate=rate, conf=0.6, notes=f"in-place monotone yaw change {rng_yaw:.0f} deg"); return out
-        # back-and-forth rotation about the centre (or a hinge we cannot see): periodic_rotate with the observed range
-        yc = ydeg - ydeg.mean(); n = len(yc); var = float(yc @ yc) / n
-        ac = np.array([float(yc[:n - lag] @ yc[lag:]) / max(n - lag, 1) / max(var, 1e-12) for lag in range(n)])
-        peaks = [lag for lag in range(2, int(n * 0.7)) if ac[lag] > ac[lag - 1] and ac[lag] >= ac[lag + 1] and ac[lag] > 0.3]
-        period = float(peaks[0] * dt) if peaks else float(2 * (ts[-1] - ts[0]))
-        phase = float(math.asin(max(-1, min(1, yc[0] / max(rng_yaw / 2, 1e-6)))) - 2 * math.pi * ts[0] / period)
-        out.update(type="periodic_rotate", axis=[0, 1, 0], amp_deg=float(rng_yaw / 2), period=period, phase=phase, conf=0.55, notes=f"in-place back-and-forth yaw {rng_yaw:.0f} deg"); return out
-    # principal axis of motion
-    U, S, Vt = np.linalg.svd(disp, full_matrices=False); ax = Vt[0]; proj = disp @ ax
-    lin_frac = float(S[0] ** 2 / max((S ** 2).sum(), 1e-9))
-    # a static object seen from a moving camera drifts (visible-surface centroid) in step with the camera; moving objects do not need the camera to move
-    if cam_pos is not None and len(cam_pos) == len(c) and rng_pos < mc.get("camera_drift_max_frac_of_size", 0.8) * max(diag, 1e-6):
-        cp = np.asarray(cam_pos, float) @ ax; cp = cp - cp.mean()
-        if cp.std() > 1e-6 and proj.std() > 1e-6:
-            corr = float(abs(np.corrcoef(proj, cp)[0, 1]))
-            if corr > mc.get("camera_drift_corr", 0.9):
-                out.update(type="static", conf=0.7, notes=f"centroid drift correlated with camera motion (r={corr:.2f}), pos range {rng_pos:.3f} m < {0.8 * diag:.3f}"); return out
-    # periodicity via autocorrelation of the projection
-    p = proj - proj.mean(); n = len(p); var = float(p @ p) / n
-    # unbiased autocorrelation (normalised by overlap length) so a peak at one period stays near 1 even with few periods observed
-    ac = np.array([float(p[:n - lag] @ p[lag:]) / max(n - lag, 1) / max(var, 1e-12) for lag in range(n)])
-    peak_lag, peak_val = None, 0.0
-    for lag in range(2, int(n * 0.7)):
-        if ac[lag] > ac[lag - 1] and ac[lag] >= ac[lag + 1] and ac[lag] > peak_val: peak_lag, peak_val = lag, float(ac[lag])
-    if peak_lag is not None and peak_val > mc["periodic_autocorr_peak"] and peak_lag * dt * 1.5 <= ts[-1] - ts[0]:
-        period = peak_lag * dt; amp = float((proj.max() - proj.min()) / 2)
-        out.update(type="periodic_translate", axis=[float(v) for v in ax], period=float(period), amp=amp, conf=min(0.9, peak_val),
-                   notes=f"autocorr peak {peak_val:.2f} at lag {peak_lag}; linear fraction {lin_frac:.2f}"); return out
-    # circle fit in xz for revolute (object translating along an arc while yawing)
-    if rng_yaw > 15 and step_yaw < 60 and lin_frac < 0.97:
-        xz = c[:, [0, 2]]; A = np.c_[2 * xz, np.ones(len(xz))]; b = (xz ** 2).sum(1)
-        try:
-            sol, *_ = np.linalg.lstsq(A, b, rcond=None); cx, cz = sol[0], sol[1]; r = math.sqrt(max(sol[2] + cx ** 2 + cz ** 2, 1e-9))
-            resid = float(np.abs(np.linalg.norm(xz - [cx, cz], axis=1) - r).mean())
-            if resid < 0.15 * r and r < 5 * rng_pos:
-                if r < 0.25 * max(diag, 1e-6):  # pivot at (or very near) the centre: this is rotation in place
-                    ydeg = np.degrees(yaw); dy = np.diff(ydeg); mono = bool(np.all(dy >= -2) or np.all(dy <= 2))
-                    if mono: out.update(type="spin", axis=[0, 1, 0], rate=float(np.polyfit(ts, ydeg, 1)[0]), conf=0.6, notes=f"in-place rotation (arc radius {r:.2f} << size), yaw {rng_yaw:.0f} deg"); return out
-                    out.update(type="periodic_rotate", axis=[0, 1, 0], amp_deg=float(rng_yaw / 2), period=float(2 * (ts[-1] - ts[0])), phase=0.0, conf=0.5, notes=f"in-place back-and-forth (arc radius {r:.2f} << size)"); return out
-                out.update(type="revolute", axis=[0, 1, 0], pivot=[float(cx), float(c[:, 1].mean()), float(cz)], range=[0.0, rng_yaw], conf=0.6,
-                           notes=f"arc fit radius {r:.2f}, resid {resid:.3f}"); return out
-        except Exception: pass
-    if lin_frac > 0.95:
-        v = np.polyfit(ts, proj, 1)[0]
-        mono = np.all(np.diff(proj) >= -0.02) or np.all(np.diff(proj) <= 0.02)
-        out.update(type="prismatic" if mono else "trajectory", axis=[float(x) for x in ax], rate=float(v), range=[float(proj.min()), float(proj.max())], conf=0.7 if mono else 0.5,
-                   notes=f"linear fraction {lin_frac:.2f}, {'monotone' if mono else 'non-monotone'}"); return out
-    out.update(type="trajectory", conf=0.5, notes=f"free path, linear fraction {lin_frac:.2f}, yaw range {rng_yaw:.0f}")
-    return out
+    """Backward-compatible adapter backed by the multi-hypothesis world-frame estimator."""
+    return classify_motion_legacy(ts, centers, yaws, cfg, size=size, class_name=class_name, cam_pos=cam_pos)
 
 # ---------------- main ----------------
 def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "") -> dict:
@@ -279,7 +202,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
     for o in tracks.objects:
-        obbs, observations, ts, centers, yaws = [], [], [], [], []
+        obbs, observations, ts, centers, quaternions = [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = any(kk in o.phrase.lower() for kk in cfg["perception"].get("static_classes", []))
         for k, fi in enumerate(geom.frame_indices):
@@ -309,28 +232,31 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                  "mask_ref": f"masks.npz#{o.id}__{fi}", "visible_fraction": "unknown", "depth": depth,
                                  "source": {"geometry": geom.backend or "unknown", "segmentation": tracks.backend or "unknown", "tracking": "mask_centroid_obb"},
                                  "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
-            obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); yaws.append(R.from_quat(ob["quat"]).as_euler("yxz")[0])
+            obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); quaternions.append(ob["quat"])
             if area > best_area: best_area, best_frame = area, fi
         if not obbs: continue
-        ts_a, c_a, y_a = np.asarray(ts), np.asarray(centers), np.asarray(yaws)
+        ts_a, c_a, q_a = np.asarray(ts), np.asarray(centers), np.asarray(quaternions)
         # smooth centers/sizes in the stored OBBs too
         cs = smooth_series(c_a, cfg["perception"]["motion"]["smooth_window"]); sz = smooth_series(np.asarray([ob["size"] for ob in obbs]), 9)
         for i, ob in enumerate(obbs): ob["center"] = [float(v) for v in cs[i]]; ob["size"] = [float(v) for v in sz[i]]
-        cam_by_t = {round(p["t"], 4): p["pos"] for p in cam_poses}
-        cam_at = np.asarray([cam_by_t.get(round(float(t), 4), cam_poses[0]["pos"]) for t in ts_a], float)
-        mg = classify_motion(ts_a, c_a, y_a, cfg, size=np.median(sz, 0), class_name=o.phrase, cam_pos=cam_at)
+        median_size = np.median(sz, axis=0)
+        footprint_ratio = max(median_size[0], median_size[2]) / max(min(median_size[0], median_size[2]), 1e-6)
+        motion_result = estimate_motion(ts_a, c_a, q_a, cfg, size=median_size, coordinate_space="world",
+                                        camera_pose_available=geom.backend != "static",
+                                        orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
+        mg = motion_result["motion_guess"]
         # contacts with ground
         bottoms = cs[:, 1] - sz[:, 1] / 2
         on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)
         contacts = []
         if on_ground.mean() > 0.5: contacts.append({"with_id": "ground", "t_start": float(ts_a[0]), "t_end": float(ts_a[-1]), "conf": float(on_ground.mean())})
         geometry_conf = float(np.mean([ob["conf"] for ob in obbs])) if obbs else "unknown"
-        objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": mg["type"] not in ("static",),
+        objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
                         "observations": observations,
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
-                        "hypotheses": copy.deepcopy(o.identity_hypotheses),
+                        "hypotheses": copy.deepcopy(o.identity_hypotheses) + ([motion_result["hypothesis"]] if motion_result["hypothesis"] else []),
                         "best_frame": best_frame, "mask_area_frac": float(best_area), "notes": f"{len(obbs)} frames with 3D points"})
     association_diagnostics = copy.deepcopy(tracks.association_diagnostics)
     retained_ids = {obj["id"] for obj in objects}
