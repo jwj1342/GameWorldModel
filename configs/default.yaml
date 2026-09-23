@@ -15,10 +15,43 @@ perception:
   min_mask_area_frac: 0.002
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
+  detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
+  association:
+    max_frame_gap: 24
+    max_bbox_center_distance_ratio: 2.5
+    max_position_3d_distance: 2.0
+    min_class_similarity: 0.50
+    min_match_score: 0.25
+    min_ambiguous_score: 0.20
+    ambiguity_margin: 0.08
+    max_identity_candidates: 3
+    allow_class_mismatch: false
+    time_decay_frames: 12.0
+    weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
   motion:
+    min_support_frames: 5
+    min_temporal_span_s: 0.75
+    max_missing_fraction: 0.50
+    min_mean_visible_fraction: 0.50
+    max_gap_factor: 4.0
+    min_primary_confidence: 0.55
+    min_candidate_confidence: 0.15
+    min_hypothesis_margin: 0.10
     static_pos_thresh_m: 0.05
     static_rot_thresh_deg: 3.0
+    translation_min_displacement_m: 0.08
+    translation_residual_frac: 0.12
+    rotation_min_angle_deg: 12.0
+    rotation_residual_deg: 5.0
+    revolute_min_radius_m: 0.10
+    revolute_residual_frac: 0.12
+    revolute_axis_stability: 0.85
+    periodic_min_cycles: 1.5
+    periodic_min_period_s: 0.25
+    periodic_min_samples_per_cycle: 4.0
+    periodic_min_r2: 0.70
+    periodic_frequency_steps: 160
     revolute_axis_stability: 0.9
     periodic_autocorr_peak: 0.5
     smooth_window: 5
@@ -32,6 +65,31 @@ perception:
   far_depth_factor: 3.0            # 丢弃深度 > 3×中位深度的点（天空、远景）
   assumed_camera_height_m: 1.2     # 相对尺度后端的定标假设
   static_classes: [wall, floor, ground, table, track, rail, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
+evidence_quality:
+  min_object_observation_coverage: 0.20
+  min_bbox_coverage: 0.70
+  min_mask_coverage: 0.70
+  min_depth_coverage: 0.50
+  min_visibility_coverage: 0.25
+  max_track_gap_frames: 3
+  min_object_temporal_span_ratio: 0.20
+  min_camera_frame_coverage: 0.50
+  min_camera_temporal_span_ratio: 0.70
+  max_attribute_unknown_ratio: 0.50
+  max_identity_ambiguity: 0.80
+  min_motion_support: 0.40
+  severe_occlusion_visible_fraction: 0.20
+  max_severe_occlusion_fraction: 0.50
+candidate_repair:
+  mode: "off"                      # off | report | apply；默认不改变现有流水线
+  max_passes: 3
+  max_quaternion_norm_delta: 0.02
+  max_contact_shift_m: 0.12
+  max_evidence_position_error_m: 0.10
+  min_contact_confidence: 0.80
+  min_geometry_confidence: 0.80
+  min_support_overlap_fraction: 0.50
+  max_support_tilt_deg: 2.0
 vlm:
   provider: openai_compat          # openai_compat | mock
   provider_kind: openrouter        # openrouter | vllm | openai  （决定发送哪些提供商特有参数）
@@ -67,6 +125,21 @@ feedback:
     depth_silog_fail: 0.3
   weights: {iou: 0.5, centroid: 0.2, ate: 0.15, dino: 0.15}
   min_improvement: 0.01
+render_validation:
+  mode: report                    # report | enforce；默认只记录诊断，不修改 Program
+  min_frames: 2
+  time_tolerance_s: 0.005
+  min_rgb_spatial_range: 2
+  min_depth_spatial_range: 1
+  min_id_spatial_range: 1
+  min_object_pixels: 4
+  max_unknown_id_fraction: 0.05
+  min_motion_frames: 2
+  min_motion_span_s: 0.05
+  min_translation_m: 0.01
+  min_rotation_deg: 1.0
+  max_browser_events_per_code: 10
+  sample_frames: 5
 binding:
   template: platformer_3p
   collectible_classes: [coin, gem, key, star, pickup, ball, marble]

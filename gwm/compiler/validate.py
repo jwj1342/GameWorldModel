@@ -4,6 +4,7 @@ import json, math
 from pathlib import Path
 from typing import Any
 import jsonschema
+from .geometry import geometry_findings
 
 SCHEMA_PATH = Path(__file__).parent / "schema" / "program.schema.json"
 _SCHEMA = None
@@ -119,14 +120,45 @@ def _check_motion(m: dict, path: str, duration, errors: list[dict], warnings: li
         if duration and s["t"] > duration * 1.5: warnings.append(_err(f"{path}/schedule/{k}", "after_clip", "schedule time is far beyond the clip duration"))
     if t in ("periodic_translate", "periodic_rotate") and not m.get("period"): errors.append(_err(path, "missing_period", f"{t} needs 'period'"))
 
+def _annotate(findings: list[dict], stage: str, severity: str) -> list[dict]:
+    return [{**finding, "stage": stage, "severity": severity} for finding in findings]
+
+
+def validate_candidate(program: Any, evidence: dict | None = None) -> dict:
+    """Validate one candidate program without mutating it.
+
+    ``evidence`` is reserved for evidence/program consistency checks.  Keeping
+    it in this stable entry point allows later visibility and temporal stages
+    to be added without coupling callers to a particular model backend.
+    """
+    del evidence  # Explicitly unused by the model-independent v1 preflight.
+    findings: list[dict] = []
+
+    schema_errs = schema_errors(program)
+    findings.extend(_annotate(schema_errs, "schema", "error"))
+    if not schema_errs and isinstance(program, dict):
+        semantic_errs, semantic_warns = semantic_errors(program)
+        findings.extend(_annotate(semantic_errs, "semantic", "error"))
+        findings.extend(_annotate(semantic_warns, "semantic", "warning"))
+
+        geometry_errs, geometry_warns = geometry_findings(program)
+        findings.extend(_annotate(geometry_errs, "geometry", "error"))
+        findings.extend(_annotate(geometry_warns, "geometry", "warning"))
+
+    errors = [finding for finding in findings if finding["severity"] == "error"]
+    warnings = [finding for finding in findings if finding["severity"] == "warning"]
+    return {
+        "version": "1.0",
+        "ok": not errors,
+        "findings": findings,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 def validate(program: Any) -> dict:
-    """Return {'ok': bool, 'errors': [...], 'warnings': [...]} ."""
-    errs = schema_errors(program)
-    warns: list[dict] = []
-    if not errs and isinstance(program, dict):
-        e2, warns = semantic_errors(program)
-        errs.extend(e2)
-    return {"ok": not errs, "errors": errs, "warnings": warns}
+    """Backward-compatible alias for the unified candidate preflight."""
+    return validate_candidate(program)
 
 def format_errors(report: dict, limit: int = 30) -> str:
     lines = [f"- {e['path']}: [{e['code']}] {e['message']}" + (f" -> {e['suggestion']}" if e.get('suggestion') else "") for e in report["errors"][:limit]]

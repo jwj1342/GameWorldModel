@@ -7,11 +7,15 @@ import numpy as np
 from .config import load_config, REPO
 from .errors import ErrorLog
 from .perception.run import run_perception, load_masks
+from .perception.contract import format_evidence_errors
+from .perception.quality import assess_evidence_quality
 from .synthesis.direct import evidence_to_program
 from .compiler.compile import compile_program
 from .compiler.validate import validate, format_errors
 from .binding.platformer import bind
 from .playtest.autopilot import playtest
+from .feedback.render import render
+from .feedback.validate_render import validate_render_result
 
 def git_commit() -> str:
     try: return subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -47,6 +51,26 @@ def main(argv=None):
         ev = json.loads((pdir / "evidence.json").read_text())
     else:
         ev = run_perception(a.video, a.clip, pdir, cfg, phrases=[p.strip() for p in a.phrases.split(",")] if a.phrases else None, client=client, log=log)
+    quality_report = assess_evidence_quality(ev, cfg)
+    evidence_report = quality_report["validation"]
+    manifest["stages"]["evidence_validation"] = {
+        "ok": evidence_report["ok"], "adapted": evidence_report["adapted"],
+        "errors": len(evidence_report["errors"]), "warnings": len(evidence_report["warnings"]),
+    }
+    quality_artifact = {key: value for key, value in quality_report.items() if key not in ("evidence", "validation")}
+    (pdir / "evidence_quality.json").write_text(json.dumps(quality_artifact, indent=1, ensure_ascii=False))
+    manifest["stages"]["evidence_quality"] = {
+        "decision": quality_report["decision"], "metrics": quality_report["metrics"],
+        "diagnostic_codes": sorted({item["code"] for item in quality_report["diagnostics"]}),
+    }
+    if quality_report["decision"] == "block":
+        log.record("evidence", "validation_failed", format_evidence_errors(evidence_report), recoverable=False,
+                   action_taken="stop before Program generation")
+        save(); raise SystemExit(2)
+    if quality_report["decision"] == "warn":
+        codes = sorted({item["code"] for item in quality_report["diagnostics"] if item["severity"] == "warning"})
+        log.record("evidence", "quality_warning", ", ".join(codes), action_taken="proceed with explicit quality diagnostics")
+    ev = quality_report["evidence"]
     frames = json.loads((pdir / "frames" / "frames.json").read_text())["frames"]
     sam_masks = load_masks(pdir)
     manifest["stages"]["perception"] = {"seconds": round(time.time() - t0, 1), "objects": len(ev["objects"]), "geometry_backend": ev["meta"]["geometry_backend"], "fallbacks": ev["meta"]["fallbacks"]}; save()
@@ -86,6 +110,34 @@ def main(argv=None):
         src = Path(loop_res["best"]["game_dir"]).parent / "render"
         if src.exists(): shutil.copytree(src, run_dir / "feedback", dirs_exist_ok=True)
 
+    # Validate the final bound Program's own render, not an earlier feedback candidate.
+    rv_dir = run_dir / "render_validation_frames"
+    duration = float(program.get("meta", {}).get("duration") or 0.0)
+    n_validation_frames = max(2, int(cfg.get("render_validation", {}).get("sample_frames", 5)))
+    validation_times = [round(float(value), 3) for value in np.linspace(0.0, duration, n_validation_frames)]
+    render_failure = None
+    try:
+        rv_index = render(run_dir / "game", validation_times, rv_dir,
+                          cfg["feedback"]["render_width"], cfg["feedback"]["render_height"], ("rgb", "depth", "id"))
+    except Exception as exc:
+        rv_index = None
+        render_failure = repr(exc)[:1000]
+    rv_report = validate_render_result(program, rv_index, rv_dir, cfg, expected_times=validation_times)
+    if render_failure:
+        rv_report["render_failure"] = render_failure
+    (run_dir / "render_validation.json").write_text(json.dumps(rv_report, indent=1, ensure_ascii=False))
+    manifest["stages"]["render_validation"] = {
+        "decision": rv_report["decision"], "errors": len(rv_report["errors"]), "warnings": len(rv_report["warnings"]),
+        "diagnostic_codes": sorted({item["code"] for item in rv_report["diagnostics"]}),
+        "artifact": "render_validation.json", "mode": rv_report["mode"],
+    }
+    save()
+    if rv_report["decision"] == "block":
+        log.record("render_validation", "render_invalid", ", ".join(manifest["stages"]["render_validation"]["diagnostic_codes"]),
+                   recoverable=rv_report["mode"] != "enforce", action_taken="report only" if rv_report["mode"] == "report" else "stop before playtest")
+        if rv_report["mode"] == "enforce":
+            raise SystemExit(2)
+
     # ---- playtest ----
     t0 = time.time()
     verdict = playtest(run_dir / "game", run_dir / "playtest", cfg, client, video_frame=kf_files[0] if kf_files else None)
@@ -101,7 +153,7 @@ def write_report(run_dir: Path, m: dict, ev: dict, program: dict, loop_res: dict
          f"- frames: {ev['meta']['n_frames']} @ {ev['meta']['fps_sampled']} fps, duration {ev['meta']['duration']:.1f} s; keyframes: {len(ev['keyframes'])}; timing: {ev['meta'].get('timing_s')}",
          f"- alignment: {ev['meta'].get('alignment')}", "", "| evidence object | class guess | dynamic | motion guess | conf | frames |", "|---|---|---|---|---|---|"]
     for o in ev["objects"]:
-        mg = o["motion_guess"]; L.append(f"| {o['id']} | {o['class_guess']} | {o['is_dynamic']} | {mg['type']} ({mg.get('notes','')[:60]}) | {mg.get('conf',0):.2f} | {len(o['obb'])} |")
+        mg = o["motion_guess"]; conf = mg.get("conf"); conf_text = f"{float(conf):.2f}" if isinstance(conf, (int, float)) else "unknown"; L.append(f"| {o['id']} | {o['class_guess']} | {o['is_dynamic']} | {mg.get('type','unknown')} ({mg.get('notes','')[:60]}) | {conf_text} | {len(o['obb'])} |")
     L += ["", "## Program", f"- writer: {json.dumps(m['stages'].get('writer'), default=str)[:600]}", f"- static: {len(program['static'])}, objects: {len(program['objects'])}", "", "| id | class | geom | motion |", "|---|---|---|---|"]
     for o in program["objects"]: L.append(f"| {o['id']} | {o.get('class')} | {o['geom'].get('kind')}:{o['geom'].get('shape') or o['geom'].get('query')} {o['geom'].get('extent')} | {(o.get('motion') or {}).get('type','static')} |")
     L += ["", "## Feedback loop", "| round | score | note |", "|---|---|---|"]
