@@ -15,6 +15,19 @@ perception:
   min_mask_area_frac: 0.002
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
+  detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
+  association:
+    max_frame_gap: 24
+    max_bbox_center_distance_ratio: 2.5
+    max_position_3d_distance: 2.0
+    min_class_similarity: 0.50
+    min_match_score: 0.25
+    min_ambiguous_score: 0.20
+    ambiguity_margin: 0.08
+    max_identity_candidates: 3
+    allow_class_mismatch: false
+    time_decay_frames: 12.0
+    weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
   motion:
     static_pos_thresh_m: 0.05

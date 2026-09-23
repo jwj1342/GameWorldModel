@@ -1,6 +1,6 @@
 """Evidence extraction: unproject masks with depth -> per-frame OBBs -> smoothing -> screw-motion classification -> contacts -> ground alignment -> evidence.json (+ overlay video)."""
 from __future__ import annotations
-import json, math, subprocess, time
+import copy, json, math, subprocess, time
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
@@ -311,7 +311,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                  "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
             obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); yaws.append(R.from_quat(ob["quat"]).as_euler("yxz")[0])
             if area > best_area: best_area, best_frame = area, fi
-        if len(obbs) < 2: continue
+        if not obbs: continue
         ts_a, c_a, y_a = np.asarray(ts), np.asarray(centers), np.asarray(yaws)
         # smooth centers/sizes in the stored OBBs too
         cs = smooth_series(c_a, cfg["perception"]["motion"]["smooth_window"]); sz = smooth_series(np.asarray([ob["size"] for ob in obbs]), 9)
@@ -330,13 +330,23 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                         "observations": observations,
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
-                        "hypotheses": [],
+                        "hypotheses": copy.deepcopy(o.identity_hypotheses),
                         "best_frame": best_frame, "mask_area_frac": float(best_area), "notes": f"{len(obbs)} frames with 3D points"})
+    association_diagnostics = copy.deepcopy(tracks.association_diagnostics)
+    retained_ids = {obj["id"] for obj in objects}
+    for obj in objects:
+        for hypothesis in obj["hypotheses"]:
+            for candidate in hypothesis.get("candidates", []):
+                ref = candidate.get("ref")
+                if ref and ref not in retained_ids:
+                    candidate.pop("ref")
+                    association_diagnostics.append({"code": "unresolved_identity_candidate", "object_id": obj["id"], "candidate": ref})
     evidence = {
         "schema_version": "2.0",
         "meta": {"clip": clip, "fps_sampled": float(round(1 / max(frames[1]["t"] - frames[0]["t"], 1e-6), 3)) if len(frames) > 1 else 0.0, "n_frames": len(frames), "duration": float(frames[-1]["t"]),
                  "geometry_backend": geom.backend, "segmentation_backend": tracks.backend, "tracks_backend": "mask_centroid_obb", "fallbacks": fallbacks,
-                 "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices},
+                 "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices,
+                 "association_diagnostics": association_diagnostics},
         "frames": [{"frame_index": int(frame["index"]), "t": float(frame["t"]),
                     "source": {"kind": "video_frame", "ref": Path(frame["file"]).name if frame.get("file") else "unknown"}} for frame in frames],
         "camera": {"intrinsics": {"fx": float(K0[0, 0]), "fy": float(K0[1, 1]), "cx": float(K0[0, 2]), "cy": float(K0[1, 2]), "width": int(W), "height": int(H), "fov_deg": fov_deg}, "poses": cam_poses,

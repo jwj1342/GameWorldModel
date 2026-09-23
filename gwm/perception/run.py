@@ -83,7 +83,11 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
             small = np.asarray(Image.fromarray(m.astype(np.uint8) * 255).resize((480, int(round(480 * m.shape[0] / m.shape[1]))), Image.NEAREST)) > 127
             with_arrays[f"{o.id}__{fi}"] = small; masks_index.setdefault(o.id, []).append(fi)
     np.savez_compressed(out_dir / "masks.npz", **with_arrays)
-    (out_dir / "masks_index.json").write_text(json.dumps({"objects": {o.id: {"phrase": o.phrase, "score": o.score, "frames": sorted(masks_index.get(o.id, []))} for o in tracks.objects}, "frame_size": tracks.frame_size, "backend": tracks.backend}))
+    (out_dir / "masks_index.json").write_text(json.dumps({"objects": {o.id: {"phrase": o.phrase, "score": o.score, "frames": sorted(masks_index.get(o.id, [])),
+                                                                                  "identity_hypotheses": o.identity_hypotheses,
+                                                                                  "source_detection_ids": o.source_detection_ids} for o in tracks.objects},
+                                                          "frame_size": tracks.frame_size, "backend": tracks.backend,
+                                                          "association_diagnostics": tracks.association_diagnostics}))
     t1 = time.time()
     ev = build_evidence(clip, frames, geom, tracks, cfg, out_dir, keyframes, fallbacks, phrases_source)
     timing["evidence"] = round(time.time() - t1, 1); timing["total"] = round(time.time() - t0, 1)
@@ -108,8 +112,11 @@ def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     keyframes = json.loads((out_dir / "keyframes.json").read_text())
     geom = load_geometry(out_dir / "geometry.npz")
     mi = json.loads((out_dir / "masks_index.json").read_text()); masks = load_masks(out_dir)
-    objs = [TrackedObject(id=oid, phrase=m["phrase"], score=m["score"], masks=masks.get(oid, {})) for oid, m in mi["objects"].items()]
-    tracks = Tracks(objects=objs, frame_size=tuple(mi["frame_size"]), backend=mi["backend"])
+    objs = [TrackedObject(id=oid, phrase=m["phrase"], score=m["score"], masks=masks.get(oid, {}),
+                          identity_hypotheses=m.get("identity_hypotheses", []), source_detection_ids=m.get("source_detection_ids", []))
+            for oid, m in mi["objects"].items()]
+    tracks = Tracks(objects=objs, frame_size=tuple(mi["frame_size"]), backend=mi["backend"],
+                    association_diagnostics=mi.get("association_diagnostics", []))
     old = json.loads((out_dir / "evidence.json").read_text()) if (out_dir / "evidence.json").exists() else None
     return build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir, keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")
 

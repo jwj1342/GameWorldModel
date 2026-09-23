@@ -95,6 +95,9 @@ def test_track_break_is_measured_without_assuming_continuity():
 
 def test_identity_ambiguity_uses_normalized_entropy():
     evidence = _evidence()
+    evidence["meta"]["association_diagnostics"] = [
+        {"code": "new_track"}, {"code": "associated"}, {"code": "ambiguous_split"},
+    ]
     evidence["objects"][0]["hypotheses"] = [{
         "kind": "identity",
         "candidates": [
@@ -106,6 +109,8 @@ def test_identity_ambiguity_uses_normalized_entropy():
     ambiguity = report["metrics"]["objects"][0]["identity_ambiguity"]
     assert report["decision"] == "warn" and "high_identity_ambiguity" in _codes(report)
     assert ambiguity["normalized_entropy"] == 1.0
+    assert report["metrics"]["association"]["tracks_with_identity_hypotheses"] == 1
+    assert report["metrics"]["association"]["diagnostic_counts"]["ambiguous_split"] == 1
 
 
 def test_weak_motion_support_warns():

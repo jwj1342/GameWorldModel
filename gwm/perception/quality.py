@@ -211,6 +211,19 @@ def _aggregate_metrics(objects: list[dict]) -> dict:
     }
 
 
+def _association_metrics(evidence: dict, objects: list[dict]) -> dict:
+    diagnostics = (evidence.get("meta") or {}).get("association_diagnostics") or []
+    counts: dict[str, int] = {}
+    for diagnostic in diagnostics:
+        code = str(diagnostic.get("code") or "unknown")
+        counts[code] = counts.get(code, 0) + 1
+    return {
+        "track_count": len(objects),
+        "tracks_with_identity_hypotheses": sum(obj["identity_ambiguity"]["hypothesis_count"] > 0 for obj in objects),
+        "diagnostic_counts": counts,
+    }
+
+
 def _below(diagnostics: list[dict], path: str, code: str, value: float, threshold: Any, label: str) -> None:
     limit = _number(threshold)
     if limit is not None and value < limit:
@@ -306,7 +319,7 @@ def assess_evidence_quality(evidence: Any, config: dict | None = None) -> dict:
             "evidence": normalized,
             "validation": validation,
             "thresholds": thresholds,
-            "metrics": {"objects": [], "camera": {}, "aggregate": {}},
+            "metrics": {"objects": [], "camera": {}, "aggregate": {}, "association": {}},
             "diagnostics": diagnostics,
         }
 
@@ -318,6 +331,7 @@ def assess_evidence_quality(evidence: Any, config: dict | None = None) -> dict:
         "objects": object_metrics,
         "camera": _camera_metrics(normalized),
         "aggregate": _aggregate_metrics(object_metrics),
+        "association": _association_metrics(normalized, object_metrics),
     }
     diagnostics.extend(_quality_diagnostics(metrics, thresholds))
     decision = "warn" if any(item["severity"] == "warning" for item in diagnostics) else "proceed"
