@@ -2,7 +2,8 @@
 from __future__ import annotations
 import math
 import numpy as np
-from ..perception.contract import format_evidence_errors, validate_evidence
+from ..perception.contract import format_evidence_errors
+from ..perception.quality import assess_evidence_quality
 
 from ..taxonomy import is_static_class, slug
 
@@ -48,16 +49,18 @@ def recentre_periodic(node: dict, obb: list[dict]) -> None:
     node.setdefault("pose", {})["pos"] = [float(v) for v in np.asarray([b["center"] for b in obb]).mean(0)]
 
 def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = None) -> dict:
-    evidence_report = validate_evidence(ev)
-    if not evidence_report["ok"]:
-        raise ValueError("invalid evidence:\n" + format_evidence_errors(evidence_report))
-    ev = evidence_report["evidence"]
+    quality_report = assess_evidence_quality(ev, cfg)
+    if quality_report["decision"] == "block":
+        raise ValueError("invalid evidence:\n" + format_evidence_errors(quality_report["validation"]))
+    ev = quality_report["evidence"]
     meta = ev["meta"]; cam = ev["camera"]; g = ev["static"]["planes"][0] if ev["static"]["planes"] else None
     program = {"meta": {"clip": clip or meta["clip"], "fps": 30, "duration": float(max(meta["duration"], 1.0)), "units": "m", "up": "y", "notes": "direct translation of evidence (no VLM)"},
                "style": {"background": "#8fb3d9"},
                "camera": {"intrinsics": {"fov_deg": float(cam["intrinsics"].get("fov_deg", 60)), "aspect": cam["intrinsics"]["width"] / cam["intrinsics"]["height"], "far": 100},
                           "keyframes": [{"t": p["t"], "pos": p["pos"], "quat": p["quat"]} for p in cam["poses"][::max(1, len(cam["poses"]) // 24)]], "interp": "catmull_rom"},
                "static": [], "objects": [], "binding": {"template": "platformer_3p", "slots": {}}, "residual": None}
+    program["meta"]["evidence_quality"] = {"decision": quality_report["decision"],
+                                             "diagnostic_codes": sorted({item["code"] for item in quality_report["diagnostics"]})}
     if g:
         ext = g.get("extent_hint") or [10, 0.2, 10]; c = g.get("center_hint") or [0, 0, 0]
         ground_node = {"id": "ground", "class": "ground", "geom": {"kind": "primitive", "shape": "box", "extent": [float(max(ext[0], 2)) * 1.4, 0.3, float(max(ext[2], 2)) * 1.4]}, "pose": {"pos": [float(c[0]), -0.15, float(c[2])]}, "material": "grass"}
