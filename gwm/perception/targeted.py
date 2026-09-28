@@ -12,8 +12,10 @@ import numpy as np
 from PIL import Image
 
 from ..feedback.active_perception import request_identifier
+from .contract import validate_evidence
 from .base import DetectionProvider, DetectionRecord
 from .frames import extract_frames, pick_uniform, probe
+from .provenance import evidence_sha256, file_sha256
 
 
 DEFAULTS = {"sample_fps": 4.0, "max_frames_per_request": 5, "max_side": 960,
@@ -36,14 +38,6 @@ def _settings(config: dict | None) -> dict:
         if not isinstance(settings[key], str) or not settings[key]:
             raise ValueError(f"{key} must be a nonempty executable path")
     return settings
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _range(request: dict, duration: float) -> tuple[float, float]:
@@ -140,10 +134,65 @@ def _write(out_dir: Path, report: dict) -> dict:
     return report
 
 
+def _source_issues(submitted: dict, selected: list[tuple[str, dict]], video_hash: str,
+                   evidence_file: str | Path | None, require_evidence: bool) -> tuple[list[dict], dict | None, dict[str, list[dict]]]:
+    """Reject mismatched provenance before any Provider call or frame extraction."""
+    issues: list[dict] = []
+    request_issues: dict[str, list[dict]] = {}
+    binding = submitted.get("source_binding")
+    binding = binding if isinstance(binding, dict) else {}
+    declared = binding.get("video_sha256")
+    if declared is not None and declared != video_hash:
+        issues.append({"code": "request_video_hash_mismatch", "reason": "request video hash differs from supplied video"})
+    if evidence_file is None:
+        if require_evidence:
+            issues.append({"code": "missing_evidence", "reason": "a validated Evidence v2 file is required before Provider inference"})
+        return issues, None, request_issues
+    try:
+        evidence = json.loads(Path(evidence_file).read_text(encoding="utf-8"))
+        validation = validate_evidence(evidence, adapt_v1=False)
+    except (OSError, ValueError, TypeError) as exc:
+        issues.append({"code": "evidence_unavailable", "reason": str(exc)[:500]})
+        return issues, None, request_issues
+    if not validation["ok"]:
+        issues.append({"code": "invalid_evidence", "reason": "Evidence v2 validation failed"})
+        return issues, None, request_issues
+    normalized = validation["evidence"]
+    if not declared:
+        issues.append({"code": "request_source_unbound", "reason": "request has no source video hash"})
+    evidence_origin = normalized.get("meta", {}).get("source_video_sha256")
+    if not evidence_origin:
+        issues.append({"code": "evidence_origin_unverified", "reason": "Evidence has no source video hash"})
+    elif evidence_origin != video_hash:
+        issues.append({"code": "evidence_video_hash_mismatch", "reason": "Evidence source hash differs from supplied video"})
+    expected_evidence_hash = binding.get("evidence_sha256")
+    if not expected_evidence_hash:
+        issues.append({"code": "request_evidence_unbound", "reason": "request has no Evidence fingerprint"})
+    elif expected_evidence_hash != evidence_sha256(normalized):
+        issues.append({"code": "request_evidence_hash_mismatch", "reason": "Evidence content differs from the request source"})
+    objects = {item["id"]: item for item in normalized.get("objects", [])}
+    for request_id, request in selected:
+        target = request.get("target") or {}
+        evidence_id = target.get("evidence_object_id") if isinstance(target, dict) else None
+        track_id = target.get("track_id") if isinstance(target, dict) else None
+        program_id = target.get("program_object_id") if isinstance(target, dict) else None
+        if not evidence_id or evidence_id not in objects:
+            request_issues.setdefault(request_id, []).append(
+                {"code": "request_object_mismatch", "reason": f"{request_id}: target Evidence object ID is absent"})
+        elif track_id != objects[evidence_id]["track_id"]:
+            request_issues.setdefault(request_id, []).append(
+                {"code": "request_track_mismatch", "reason": f"{request_id}: target track ID differs from Evidence"})
+        if program_id != evidence_id:
+            request_issues.setdefault(request_id, []).append(
+                {"code": "request_program_object_mismatch", "reason": f"{request_id}: Program and Evidence object IDs differ; no mapping was verified"})
+    return issues, normalized, request_issues
+
+
 def run_targeted_observations(requests_file: str | Path, video_file: str | Path, out_dir: str | Path,
                               provider: DetectionProvider | None = None, config: dict | None = None,
                               *, selected_request_ids: Iterable[str] | None = None,
-                              provider_unavailable_reason: str | None = None) -> dict:
+                              provider_unavailable_reason: str | None = None,
+                              evidence_file: str | Path | None = None) -> dict:
     """Read human-approved requests, extract frames, and collect candidate detections.
 
     No detector is invoked when ``provider`` is None. Output observations are
@@ -178,9 +227,9 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
     report = {"version": "1.0", "status": "nothing_selected", "source_request_file": str(source.resolve()),
               "source_video": str(video.resolve()), "selected_request_ids": [item[0] for item in selected],
               "duplicate_request_ids": duplicates, "unknown_selected_request_ids": sorted(selection - seen) if selection else [],
-              "results": [], "provenance": {"frame_extractor": "gwm.perception.frames.extract_frames",
+              "source_issues": [], "results": [], "provenance": {"frame_extractor": "gwm.perception.frames.extract_frames",
               "provider": getattr(provider, "name", None), "sample_fps": settings["sample_fps"],
-              "request_file_sha256": _sha256(source),
+              "request_file_sha256": file_sha256(source),
               "provider_model_dir": str(Path(provider.model_dir).resolve()) if provider is not None and hasattr(provider, "model_dir") else None,
               "video_time_basis": "requested_seek_plus_sample_index_over_fps (estimated, not decoded PTS)",
               "ffmpeg_bin": settings["ffmpeg_bin"], "ffprobe_bin": settings["ffprobe_bin"]}}
@@ -197,7 +246,7 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
         if not video.is_file():
             raise FileNotFoundError(f"source video not found: {video}")
         video_info = probe(video, settings["ffprobe_bin"])
-        report["provenance"]["video_sha256"] = _sha256(video)
+        report["provenance"]["video_sha256"] = file_sha256(video)
         report["provenance"]["video_probe"] = video_info
     except (OSError, ValueError, KeyError, IndexError) as exc:
         report["status"] = "video_unavailable"
@@ -207,7 +256,27 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
                                       "selected_frames": [], "observations": [], "frame_failures": []})
         return _write(target_dir, report)
 
+    issues, checked_evidence, request_issues = _source_issues(submitted, selected, report["provenance"]["video_sha256"],
+                                                               evidence_file, provider is not None)
+    report["source_issues"] = issues + [issue for findings in request_issues.values() for issue in findings]
+    if checked_evidence is not None:
+        report["provenance"]["evidence_file"] = str(Path(evidence_file).resolve())
+        report["provenance"]["evidence_sha256"] = evidence_sha256(checked_evidence)
+    if issues:
+        report["status"] = "source_mismatch"
+        for request_id, request in selected:
+            report["results"].append({"request_id": request_id, "target": request.get("target"), "status": "rejected",
+                                      "reason_code": issues[0]["code"], "reason": "; ".join(item["reason"] for item in issues),
+                                      "selected_frames": [], "observations": [], "frame_failures": []})
+        return _write(target_dir, report)
+
     for ordinal, (request_id, request) in enumerate(selected):
+        if request_id in request_issues:
+            findings = request_issues[request_id]
+            report["results"].append({"request_id": request_id, "target": request.get("target"), "status": "rejected",
+                                      "reason_code": findings[0]["code"], "reason": "; ".join(item["reason"] for item in findings),
+                                      "selected_frames": [], "observations": [], "frame_failures": []})
+            continue
         result = {"request_id": request_id, "target": request.get("target"), "status": "failed", "reason_code": None,
                   "reason": None, "requested_range": request.get("suggested_video_range"), "actual_range": None,
                   "selected_frames": [], "observations": [], "frame_failures": [], "search_phrases": []}
@@ -272,7 +341,8 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
         except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
             result.update(status="failed", reason_code="request_failed", reason=str(exc)[:500])
     states = {item["status"] for item in report["results"]}
-    report["status"] = ("provider_unavailable" if states == {"provider_unavailable"} else
+    report["status"] = ("source_mismatch" if states == {"rejected"} else
+                        "provider_unavailable" if states == {"provider_unavailable"} else
                         "completed" if states <= {"observed", "no_match"} else
                         "partial" if states & {"observed", "no_match", "partial", "provider_unavailable"} else "failed")
     return _write(target_dir, report)
@@ -282,6 +352,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Extract requested video frames; detections require a supplied provider")
     parser.add_argument("--requests", required=True)
     parser.add_argument("--video", required=True)
+    parser.add_argument("--evidence", help="validated Evidence v2 JSON bound to this video; required for detection")
     parser.add_argument("--out", required=True)
     parser.add_argument("--select", action="append", default=None, help="manually selected request ID; repeat for multiple")
     parser.add_argument("--provider", choices=("none", "grounding-dino"), default="none")
@@ -309,7 +380,7 @@ def main(argv: list[str] | None = None) -> None:
     result = run_targeted_observations(args.requests, args.video, args.out, provider,
                                        selected_request_ids=args.select,
                                        config={"ffmpeg_bin": args.ffmpeg_bin, "ffprobe_bin": args.ffprobe_bin},
-                                       provider_unavailable_reason=unavailable_reason)
+                                       provider_unavailable_reason=unavailable_reason, evidence_file=args.evidence)
     print(json.dumps({"status": result["status"], "results": len(result["results"]),
                       "artifact": str((Path(args.out) / "targeted_observations.json").resolve())}, ensure_ascii=False))
 

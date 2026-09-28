@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 from .frames import extract_frames, pick_uniform, select_keyframes, motion_profile, resize_copy
 from .evidence import build_evidence
+from .provenance import file_sha256
 from ..errors import ErrorLog
 
 REPO = Path(__file__).resolve().parents[2]
@@ -91,7 +92,10 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     t1 = time.time()
     ev = build_evidence(clip, frames, geom, tracks, cfg, out_dir, keyframes, fallbacks, phrases_source)
     timing["evidence"] = round(time.time() - t1, 1); timing["total"] = round(time.time() - t0, 1)
-    ev["meta"]["timing_s"] = timing; (out_dir / "evidence.json").write_text(json.dumps(ev, indent=1))
+    ev["meta"]["timing_s"] = timing
+    ev["meta"]["source_video_sha256"] = file_sha256(video)
+    ev["meta"]["source_video_path"] = str(Path(video).resolve())
+    (out_dir / "evidence.json").write_text(json.dumps(ev, indent=1))
     return ev
 
 def save_geometry(geom, path: Path) -> None:
@@ -118,7 +122,13 @@ def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     tracks = Tracks(objects=objs, frame_size=tuple(mi["frame_size"]), backend=mi["backend"],
                     association_diagnostics=mi.get("association_diagnostics", []))
     old = json.loads((out_dir / "evidence.json").read_text()) if (out_dir / "evidence.json").exists() else None
-    return build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir, keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")
+    rebuilt = build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir,
+                             keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")
+    if old:
+        for key in ("source_video_sha256", "source_video_path"):
+            if key in old["meta"]:
+                rebuilt["meta"][key] = old["meta"][key]
+    return rebuilt
 
 def load_masks(out_dir: Path) -> dict[str, dict[int, np.ndarray]]:
     z = np.load(out_dir / "masks.npz"); res: dict[str, dict[int, np.ndarray]] = {}
