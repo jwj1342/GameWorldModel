@@ -135,6 +135,14 @@ render_validation:
   min_rotation_deg: 1.0
   max_browser_events_per_code: 10
   sample_frames: 5
+active_perception:
+  max_requests: 12
+  max_time_range_s: 4.0
+  time_padding_s: 0.5
+  merge_gap_s: 0.5
+  max_keyframes_per_request: 3
+  min_observation_frames: 2
+  min_observation_coverage: 0.3
 binding:
   template: platformer_3p
   collectible_classes: [coin, gem, key, star, pickup, ball, marble]
