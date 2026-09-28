@@ -54,12 +54,20 @@ def test_no_findings_produces_no_requests_and_preserves_inputs():
     assert (verification, evidence, program) == before
 
 
+def test_planned_request_ids_are_stable_for_human_selection():
+    verification = _verification(_signal("object_never_visible"))
+    first = _plan(verification)["requests"][0]["request_id"]
+    second = _plan(verification)["requests"][0]["request_id"]
+    assert first == second and first.startswith("apr-")
+
+
 def test_never_visible_and_low_coverage_merge_with_uncertainty_and_priority():
     verification = _verification(_signal("object_never_visible"))
     report = _plan(verification, _evidence(observed=(1,)))
     assert len(report["requests"]) == 1
     request = report["requests"][0]
-    assert request["target"] == {"program_object_id": "object_a", "evidence_object_id": "object_a", "track_id": "track_0"}
+    assert request["target"] == {"program_object_id": "object_a", "evidence_object_id": "object_a",
+                                 "track_id": "track_0", "class_guess": "object"}
     assert {signal["code"] for signal in request["verification_signals"]} == {
         "object_never_visible", "insufficient_object_observations"}
     assert request["priority"] == "high"
