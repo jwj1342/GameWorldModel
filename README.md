@@ -106,6 +106,8 @@ out/                  每次运行的产物 ├ 都不进 git
 
 第二阶段的补充感知规划会在最终渲染验证后，将 `render_validation.json`、Evidence v2 和 Program 对照，写出 `active_perception_requests.json`。其中的请求仅供人工审查，包含触发信号、目标对象、建议补充的证据及原视频检查时段；不会自动运行检测模型、修改 Evidence 或重新合成。浏览器错误、缺图等执行故障会优先列为 `execution_issues`，此时不生成补充感知请求。请求上限、时段长度与合并间隔可在 `configs/default.yaml` 的 `active_perception` 中调整；独立调用入口为 `gwm.feedback.active_perception.plan_active_perception_requests()`。
 
+第三阶段可将请求的 `review_status` 人工改为 `approved`，再调用 `python -m gwm.perception.targeted --requests <active_perception_requests.json> --video <原视频> --out <输出目录>`。它复用现有抽帧入口，生成 `targeted_observations.json`，记录实际帧、候选检测、逐请求状态和来源。默认不调用模型；若要使用本地 Grounding DINO，需显式提供 `--provider grounding-dino --model-dir <已有权重目录>`。也可从 Python 向 `run_targeted_observations()` 注入符合 `DetectionProvider` 协议的实现。输出的检测仍是未核实身份的候选 observation，不会合并进 Evidence；`targeted_observation` 配置控制抽帧率与每条请求的帧数。
+
 ## 现在做到什么程度
 
 三段视频都能从头走到尾，自动试玩都能走到终点。一段玩具火车在地板轨道上跑的视频，一段工厂输送线的俯拍视频，还有一段我们自己渲染的合成场景。

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 import math
 from typing import Any
 
@@ -154,6 +156,15 @@ def _merge(candidates: list[dict], settings: dict) -> list[dict]:
     return merged
 
 
+def request_identifier(request: dict) -> str:
+    """Stable identifier for human selection, including legacy request files."""
+    identity = {"target": request.get("target"), "range": request.get("suggested_video_range"),
+                "signals": sorted(str(item.get("code")) for item in request.get("verification_signals", [])
+                                  if isinstance(item, dict))}
+    content = json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "apr-" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
 def plan_active_perception_requests(render_validation: dict, evidence: dict, program: dict,
                                     config: dict | None = None) -> dict:
     """Plan requests for human review without running detectors or mutating inputs.
@@ -224,7 +235,8 @@ def plan_active_perception_requests(render_validation: dict, evidence: dict, pro
                                                 f"Program object {object_id} has no exact Evidence ID match; no identity was guessed",
                                                 f"/program/objects/{index}"))
         target = {"program_object_id": object_id, "evidence_object_id": ev_obj["id"] if ev_obj else None,
-                  "track_id": ev_obj["track_id"] if ev_obj else None}
+                  "track_id": ev_obj["track_id"] if ev_obj else None,
+                  "class_guess": ev_obj.get("class_guess", UNKNOWN) if ev_obj else UNKNOWN}
         observations = (ev_obj.get("observations") or []) if ev_obj else []
         observation_times = [item["t"] for item in observations if _number(item.get("t"))]
         for diagnostic in render_diagnostics:
@@ -275,5 +287,6 @@ def plan_active_perception_requests(render_validation: dict, evidence: dict, pro
     result["truncated"] = max(0, len(merged) - settings["max_requests"])
     result["requests"] = merged[:settings["max_requests"]]
     for request in result["requests"]:
+        request["request_id"] = request_identifier(request)
         request["suggested_keyframes"] = _keyframes(frames, request["suggested_video_range"], settings["max_keyframes_per_request"])
     return result
