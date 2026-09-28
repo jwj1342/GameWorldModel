@@ -8,6 +8,7 @@ import math
 from typing import Any
 
 from ..perception.contract import UNKNOWN, validate_evidence
+from ..perception.provenance import evidence_sha256, file_sha256
 
 
 DEFAULTS = {
@@ -166,7 +167,7 @@ def request_identifier(request: dict) -> str:
 
 
 def plan_active_perception_requests(render_validation: dict, evidence: dict, program: dict,
-                                    config: dict | None = None) -> dict:
+                                    config: dict | None = None, *, source_video: str | None = None) -> dict:
     """Plan requests for human review without running detectors or mutating inputs.
 
     ``render_validation`` is the content of render_validation.json. Only exact
@@ -200,6 +201,23 @@ def plan_active_perception_requests(render_validation: dict, evidence: dict, pro
         result["diagnostics"].append(_issue("invalid_evidence", "Evidence is structurally invalid", "/evidence"))
         return result
     normalized = validation["evidence"]
+    declared_video_hash = normalized.get("meta", {}).get("source_video_sha256")
+    if not isinstance(declared_video_hash, str) or len(declared_video_hash) != 64:
+        declared_video_hash = None
+    result["source_binding"] = {"evidence_sha256": evidence_sha256(normalized),
+                                "video_sha256": declared_video_hash,
+                                "status": "evidence_declared" if declared_video_hash else "unverified_evidence_origin"}
+    if source_video is not None:
+        actual_video_hash = file_sha256(source_video)
+        if declared_video_hash is not None and declared_video_hash.lower() != actual_video_hash:
+            result["status"] = "invalid_input"
+            result["diagnostics"].append(_issue("evidence_video_hash_mismatch",
+                                                "Evidence source video hash differs from the supplied original video",
+                                                "/evidence/meta/source_video_sha256"))
+            return result
+        result["source_binding"]["checked_video_sha256"] = actual_video_hash
+        if declared_video_hash is not None:
+            result["source_binding"]["status"] = "verified"
     if not isinstance(program, dict) or not isinstance(program.get("objects"), list) or any(
         not isinstance(obj, dict) or not isinstance(obj.get("id"), str) or not obj["id"]
         for obj in program["objects"]

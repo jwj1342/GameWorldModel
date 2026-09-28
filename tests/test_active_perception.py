@@ -1,5 +1,6 @@
 """Planning tests use synthetic contracts and never run browser or perception models."""
 from copy import deepcopy
+import hashlib
 
 import pytest
 
@@ -59,6 +60,21 @@ def test_planned_request_ids_are_stable_for_human_selection():
     first = _plan(verification)["requests"][0]["request_id"]
     second = _plan(verification)["requests"][0]["request_id"]
     assert first == second and first.startswith("apr-")
+
+
+def test_planner_binds_evidence_to_video_hash_and_rejects_mismatch(tmp_path):
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"first source")
+    evidence = _evidence()
+    evidence["meta"]["source_video_sha256"] = hashlib.sha256(video.read_bytes()).hexdigest()
+    verification = _verification(_signal("object_never_visible"))
+    matched = plan_active_perception_requests(verification, evidence, _program(), source_video=str(video))
+    assert matched["source_binding"]["status"] == "verified"
+    assert matched["source_binding"]["video_sha256"] == hashlib.sha256(video.read_bytes()).hexdigest()
+    video.write_bytes(b"different source")
+    rejected = plan_active_perception_requests(verification, evidence, _program(), source_video=str(video))
+    assert rejected["status"] == "invalid_input" and rejected["requests"] == []
+    assert rejected["diagnostics"][0]["code"] == "evidence_video_hash_mismatch"
 
 
 def test_never_visible_and_low_coverage_merge_with_uncertainty_and_priority():

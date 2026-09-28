@@ -127,7 +127,7 @@ def main(argv=None):
     if render_failure:
         rv_report["render_failure"] = render_failure
     (run_dir / "render_validation.json").write_text(json.dumps(rv_report, indent=1, ensure_ascii=False))
-    perception_requests = plan_active_perception_requests(rv_report, ev, program, cfg)
+    perception_requests = plan_active_perception_requests(rv_report, ev, program, cfg, source_video=a.video)
     (run_dir / "active_perception_requests.json").write_text(json.dumps(perception_requests, indent=1, ensure_ascii=False))
     manifest["stages"]["active_perception_requests"] = {
         "status": perception_requests["status"], "count": len(perception_requests["requests"]),
