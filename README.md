@@ -56,6 +56,8 @@ flowchart TD
 
 `data/clips/` 放视频，`out/` 放每次运行的产物，`.secrets/` 放 API key，这三个都不进 git。
 
+第二阶段的补充感知规划会在最终渲染验证后，将 `render_validation.json`、Evidence v2 和 Program 对照，写出 `active_perception_requests.json`。其中的请求仅供人工审查，包含触发信号、目标对象、建议补充的证据及原视频检查时段；不会自动运行检测模型、修改 Evidence 或重新合成。浏览器错误、缺图等执行故障会优先列为 `execution_issues`，此时不生成补充感知请求。请求上限、时段长度与合并间隔可在 `configs/default.yaml` 的 `active_perception` 中调整；独立调用入口为 `gwm.feedback.active_perception.plan_active_perception_requests()`。
+
 ## 现在做到什么程度
 
 三段视频都能从头走到尾，自动试玩都能走到终点。一段玩具火车在地板轨道上跑的视频，一段工厂输送线的俯拍视频，还有一段我们自己渲染的合成场景。
