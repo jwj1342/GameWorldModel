@@ -8,7 +8,7 @@ import math
 from typing import Any
 
 from ..perception.contract import UNKNOWN, validate_evidence
-from ..perception.provenance import evidence_sha256, file_sha256
+from ..perception.provenance import declared_video_sha256, evidence_sha256, file_sha256
 
 
 DEFAULTS = {
@@ -201,9 +201,12 @@ def plan_active_perception_requests(render_validation: dict, evidence: dict, pro
         result["diagnostics"].append(_issue("invalid_evidence", "Evidence is structurally invalid", "/evidence"))
         return result
     normalized = validation["evidence"]
-    declared_video_hash = normalized.get("meta", {}).get("source_video_sha256")
-    if not isinstance(declared_video_hash, str) or len(declared_video_hash) != 64:
-        declared_video_hash = None
+    try:
+        declared_video_hash = declared_video_sha256(normalized)
+    except ValueError as exc:
+        result["status"] = "invalid_input"
+        result["diagnostics"].append(_issue("evidence_video_hash_conflict", str(exc), "/evidence/meta"))
+        return result
     result["source_binding"] = {"evidence_sha256": evidence_sha256(normalized),
                                 "video_sha256": declared_video_hash,
                                 "status": "evidence_declared" if declared_video_hash else "unverified_evidence_origin"}
