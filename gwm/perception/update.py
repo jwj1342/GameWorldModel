@@ -4,17 +4,16 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import re
 from typing import Any
 
 from .contract import validate_evidence
 from .quality import assess_evidence_quality
+from .provenance import declared_video_sha256
 
 
 _OBSERVATION_FIELDS = frozenset({
     "bbox", "mask_ref", "visible_fraction", "visibility_state", "depth", "source", "confidence",
 })
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def evidence_digest(evidence: dict) -> str:
@@ -24,8 +23,8 @@ def evidence_digest(evidence: dict) -> str:
 
 
 def _source_hash(evidence: dict) -> str:
-    value = ((evidence.get("meta") or {}).get("source_video") or {}).get("sha256")
-    if not isinstance(value, str) or not _SHA256.fullmatch(value):
+    value = declared_video_sha256(evidence)
+    if value is None:
         raise ValueError("Evidence must contain meta.source_video.sha256 before an auditable update")
     return value
 

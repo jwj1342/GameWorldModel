@@ -15,7 +15,7 @@ from ..feedback.active_perception import request_identifier
 from .contract import validate_evidence
 from .base import DetectionProvider, DetectionRecord
 from .frames import extract_frames, pick_uniform, probe
-from .provenance import evidence_sha256, file_sha256
+from .provenance import declared_video_sha256, evidence_sha256, file_sha256
 
 
 DEFAULTS = {"sample_fps": 4.0, "max_frames_per_request": 5, "max_side": 960,
@@ -73,7 +73,7 @@ def _choose(frames: list[dict], request: dict, limit: int, start: float) -> list
     for time in times:
         if isinstance(time, bool) or not isinstance(time, (int, float)) or not math.isfinite(time):
             continue
-        nearest = min(frames, key=lambda frame: (abs(start + frame["t"] - time), frame["index"]))
+        nearest = min(frames, key=lambda frame: (abs(frame.get("source_pts_s", start + frame["t"]) - time), frame["index"]))
         selected[nearest["index"]] = nearest
         if len(selected) >= limit:
             break
@@ -160,7 +160,11 @@ def _source_issues(submitted: dict, selected: list[tuple[str, dict]], video_hash
     normalized = validation["evidence"]
     if not declared:
         issues.append({"code": "request_source_unbound", "reason": "request has no source video hash"})
-    evidence_origin = normalized.get("meta", {}).get("source_video_sha256")
+    try:
+        evidence_origin = declared_video_sha256(normalized)
+    except ValueError as exc:
+        issues.append({"code": "evidence_origin_conflict", "reason": str(exc)})
+        evidence_origin = None
     if not evidence_origin:
         issues.append({"code": "evidence_origin_unverified", "reason": "Evidence has no source video hash"})
     elif evidence_origin != video_hash:
@@ -231,7 +235,7 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
               "provider": getattr(provider, "name", None), "sample_fps": settings["sample_fps"],
               "request_file_sha256": file_sha256(source),
               "provider_model_dir": str(Path(provider.model_dir).resolve()) if provider is not None and hasattr(provider, "model_dir") else None,
-              "video_time_basis": "requested_seek_plus_sample_index_over_fps (estimated, not decoded PTS)",
+              "video_time_basis": "per-frame time_basis; decoded_source_pts only if extractor supplies source_pts_s",
               "ffmpeg_bin": settings["ffmpeg_bin"], "ffprobe_bin": settings["ffprobe_bin"]}}
     if not selected:
         return _write(target_dir, report)
@@ -294,10 +298,17 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
                 raise RuntimeError("frame extractor returned no frames in the requested range")
             selected_frames = _choose(extracted, request, settings["max_frames_per_request"], start)
             for frame in selected_frames:
-                result["selected_frames"].append({"extracted_index": frame["index"],
-                                                   "video_time_s": round(start + frame["t"], 4),
-                                                   "file": str(Path(frame["file"]).resolve()),
-                                                   "width": frame["width"], "height": frame["height"]})
+                pts = frame.get("source_pts_s")
+                if pts is not None and (isinstance(pts, bool) or not isinstance(pts, (int, float)) or not math.isfinite(pts)):
+                    raise ValueError("extractor returned invalid source PTS")
+                selected_frame = {"extracted_index": frame["index"],
+                                  "video_time_s": float(pts) if pts is not None else round(start + frame["t"], 4),
+                                  "time_basis": "decoded_source_pts" if pts is not None else "estimated_sample_time",
+                                  "file": str(Path(frame["file"]).resolve()),
+                                  "width": frame["width"], "height": frame["height"]}
+                if "source_frame_index" in frame:
+                    selected_frame["source_frame_index"] = frame["source_frame_index"]
+                result["selected_frames"].append(selected_frame)
             if provider is None:
                 result.update(status="provider_unavailable", reason_code="provider_unavailable",
                               reason=provider_unavailable_reason or "frames extracted; no Perception Provider was supplied")
