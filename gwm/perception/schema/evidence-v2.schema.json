@@ -130,6 +130,10 @@
         "t": {"type": "number", "minimum": 0},
         "bbox": {"anyOf": [{"$ref": "#/$defs/bbox"}, {"$ref": "#/$defs/unknown"}]},
         "mask_ref": {"anyOf": [{"type": "string", "minLength": 1, "not": {"const": "unknown"}}, {"$ref": "#/$defs/unknown"}]},
+        "visibility_state": {
+          "description": "Optional observed 2D presence. visible means some target pixels are seen; it does not imply full visibility or a measured visible_fraction. not_visible does not assign a cause.",
+          "enum": ["visible", "not_visible", "unknown"]
+        },
         "visible_fraction": {"$ref": "#/$defs/confidence"},
         "depth": {"anyOf": [{"$ref": "#/$defs/depthStats"}, {"$ref": "#/$defs/unknown"}]},
         "source": {"$ref": "#/$defs/source"},

@@ -92,6 +92,32 @@ def test_unknown_information_is_explicit_and_warned():
     assert "/objects/0/attribute_confidence/identity" in warning_paths
 
 
+def test_visibility_state_is_optional_and_does_not_imply_fraction():
+    evidence = _v2()
+    observation = evidence["objects"][0]["observations"][0]
+    observation["visibility_state"] = "visible"
+    observation["visible_fraction"] = "unknown"
+    report = validate_evidence(evidence)
+    assert report["ok"]
+    assert "/objects/0/observations/0/visible_fraction" in {item["path"] for item in report["warnings"]}
+    assert not any(item["path"] == "/objects/0/observations/0/visibility_state" for item in report["warnings"])
+
+
+def test_invalid_visibility_state_is_rejected():
+    evidence = _v2()
+    evidence["objects"][0]["observations"][0]["visibility_state"] = "unverified_occlusion_reason"
+    report = validate_evidence(evidence)
+    assert not report["ok"] and any(error["code"] == "schema" for error in report["errors"])
+
+
+def test_unknown_visibility_state_warns_without_blocking():
+    evidence = _v2()
+    evidence["objects"][0]["observations"][0]["visibility_state"] = "unknown"
+    report = validate_evidence(evidence)
+    assert report["ok"]
+    assert "/objects/0/observations/0/visibility_state" in {item["path"] for item in report["warnings"]}
+
+
 def test_bad_frame_reference_is_rejected():
     evidence = _v2()
     evidence["objects"][0]["observations"][0]["frame_index"] = 99
