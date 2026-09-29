@@ -24,6 +24,8 @@ _THRESHOLD_KEYS = {
     "max_severe_occlusion_fraction",
 }
 
+_MEASURED_FIELDS = ("bbox", "mask_ref", "depth", "visible_fraction", "visibility_state")
+
 
 def _diagnostic(path: str, code: str, message: str, suggestion: str = "", severity: str = "warning") -> dict:
     return {
@@ -147,8 +149,8 @@ def _object_metrics(obj: dict, frames: list[dict], frame_order: dict[int, int], 
     span = times[-1] - times[0] if len(times) > 1 else 0.0
 
     measured = {
-        field: _ratio(sum(observation.get(field) != UNKNOWN for observation in observations), len(observations))
-        for field in ("bbox", "mask_ref", "depth", "visible_fraction")
+        field: _ratio(sum(field in observation and observation[field] != UNKNOWN for observation in observations), len(observations))
+        for field in _MEASURED_FIELDS
     }
     visibility_values = [
         value for observation in observations
@@ -204,7 +206,7 @@ def _aggregate_metrics(objects: list[dict]) -> dict:
         return {
             "object_count": 0,
             "mean_observation_coverage": 0.0,
-            "measured_coverage": {field: 0.0 for field in ("bbox", "mask_ref", "depth", "visible_fraction")},
+            "measured_coverage": {field: 0.0 for field in _MEASURED_FIELDS},
             "mean_attribute_unknown_ratio": 0.0,
         }
     return {
@@ -212,7 +214,7 @@ def _aggregate_metrics(objects: list[dict]) -> dict:
         "mean_observation_coverage": round(sum(obj["observation_coverage"] for obj in objects) / len(objects), 6),
         "measured_coverage": {
             field: round(sum(obj["measured_coverage"][field] for obj in objects) / len(objects), 6)
-            for field in ("bbox", "mask_ref", "depth", "visible_fraction")
+            for field in _MEASURED_FIELDS
         },
         "mean_attribute_unknown_ratio": round(sum(obj["attribute_unknown_ratio"] for obj in objects) / len(objects), 6),
     }

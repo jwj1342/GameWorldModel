@@ -65,7 +65,7 @@ def test_high_quality_evidence_proceeds_without_total_score():
     assert "score" not in report and "score" not in report["metrics"]
     obj = report["metrics"]["objects"][0]
     assert obj["observation_coverage"] == 1.0
-    assert obj["measured_coverage"] == {"bbox": 1.0, "mask_ref": 1.0, "depth": 1.0, "visible_fraction": 1.0}
+    assert obj["measured_coverage"] == {"bbox": 1.0, "mask_ref": 1.0, "depth": 1.0, "visible_fraction": 1.0, "visibility_state": 0.0}
     assert report["metrics"]["camera"]["frame_coverage"] == 1.0
 
 
@@ -83,6 +83,19 @@ def test_severe_occlusion_is_reported_separately():
     report = assess_evidence_quality(evidence, QUALITY)
     assert report["decision"] == "warn" and "severe_occlusion" in _codes(report)
     assert report["metrics"]["objects"][0]["visibility"]["severe_occlusion_fraction"] == 1.0
+
+
+def test_visible_state_coverage_does_not_invent_visible_fraction():
+    evidence = _evidence()
+    for observation in evidence["objects"][0]["observations"]:
+        observation["visibility_state"] = "visible"
+        observation["visible_fraction"] = "unknown"
+    report = assess_evidence_quality(evidence, QUALITY)
+    coverage = report["metrics"]["objects"][0]["measured_coverage"]
+    assert report["decision"] == "warn"
+    assert coverage["visibility_state"] == 1.0
+    assert coverage["visible_fraction"] == 0.0
+    assert "low_visible_fraction_coverage" in _codes(report)
 
 
 def test_track_break_is_measured_without_assuming_continuity():

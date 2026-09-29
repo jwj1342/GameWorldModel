@@ -336,6 +336,11 @@ def _semantic_findings(evidence: dict) -> list[dict]:
                         f"{opath}/{field}", "unknown_value", f"observation {field} is unknown",
                         "populate it only from a traceable measurement", "evidence_semantic", "warning",
                     ))
+            if observation.get("visibility_state") == UNKNOWN:
+                findings.append(_diag(
+                    f"{opath}/visibility_state", "unknown_value", "observation visibility state is unknown",
+                    "record visible or not_visible only when checked in the source frame", "evidence_semantic", "warning",
+                ))
             for field, value in observation["source"].items():
                 if value == UNKNOWN:
                     findings.append(_diag(
