@@ -2,8 +2,11 @@
 import json
 from pathlib import Path
 import hashlib
+import sys
+import types
 
 from PIL import Image
+import pytest
 
 from gwm.feedback.active_perception import request_identifier
 from gwm.perception.base import DetectionRecord
@@ -79,6 +82,59 @@ class SyntheticProvider:
         match = DetectionRecord(f"match_{frame_index}", frame_index, "item", 0.9, (1, 1, 5, 5), source=self.name)
         other = DetectionRecord(f"other_{frame_index}", frame_index, "unrelated", 0.7, (6, 2, 9, 6), source=self.name)
         return [match, match, other]
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ([], (0.25, 0.2, 8)),
+    (["--grounding-box-threshold", "0.31", "--grounding-text-threshold", "0.27", "--max-objects", "3"],
+     (0.31, 0.27, 3)),
+])
+def test_cli_passes_configured_grounding_thresholds_to_provider(tmp_path, monkeypatch, overrides, expected):
+    _fake_extractor(monkeypatch)
+    monkeypatch.setattr(targeted, "load_config", lambda: {"perception": {
+        "grounding_box_threshold": 0.25, "grounding_text_threshold": 0.2, "max_objects": 8},
+        "targeted_observation": {"sample_fps": 2.0}})
+    request = _request()
+    source, video, evidence = _source(tmp_path, [request])
+    model_dir = tmp_path / "model_fixture"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "model.safetensors").write_bytes(b"test placeholder; never loaded")
+    calls = []
+
+    class ConfigCheckingProvider:
+        name = "synthetic_cli_provider"
+
+        def __init__(self, path):
+            self.model_dir = path
+
+        def detect(self, image, frame_index, phrases, cfg):
+            calls.append((frame_index, dict(cfg["perception"])))
+            return []
+
+    fake_module = types.ModuleType("gwm.perception.grounded_sam2_backend")
+    fake_module.GroundingDinoDetectionProvider = ConfigCheckingProvider
+    monkeypatch.setitem(sys.modules, fake_module.__name__, fake_module)
+    targeted.main(["--requests", str(source), "--video", str(video), "--evidence", str(evidence),
+                   "--out", str(tmp_path / "cli_out"), "--provider", "grounding-dino",
+                   "--model-dir", str(model_dir), *overrides])
+    assert calls and all((settings["grounding_box_threshold"], settings["grounding_text_threshold"],
+                          settings["max_objects"]) == expected for _, settings in calls)
+    report = json.loads((tmp_path / "cli_out" / "targeted_observations.json").read_text(encoding="utf-8"))
+    assert report["results"][0]["status"] == "no_match"
+    assert tuple(report["provenance"]["detection_settings"][key] for key in
+                 ("grounding_box_threshold", "grounding_text_threshold", "max_objects")) == expected
+
+
+@pytest.mark.parametrize("args", [
+    ["--grounding-box-threshold", "nan"], ["--grounding-text-threshold", "1.1"],
+    ["--max-objects", "0"],
+])
+def test_cli_rejects_invalid_detection_thresholds_before_model_loading(args, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        targeted.main(["--requests", "unused.json", "--video", "unused.mp4",
+                       "--out", str(tmp_path / "unused"), "--provider", "grounding-dino", *args])
+    assert exc.value.code == 2
 
 
 def test_reviewed_range_selects_real_frame_refs_filters_objects_and_deduplicates(tmp_path, monkeypatch):
