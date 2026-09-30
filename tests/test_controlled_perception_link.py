@@ -75,6 +75,8 @@ def _chain(tmp_path, monkeypatch):
         path = out_dir / "synthetic_decoded_frame.png"
         Image.new("RGB", (16, 12), "blue").save(path)
         return [{"index": 0, "t": 1.0 - start, "source_pts_s": 1.0,
+                 "video_sha256": hashlib.sha256(video_file.read_bytes()).hexdigest(),
+                 "image_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                  "source_frame_index": 1, "file": str(path), "width": 16, "height": 12}]
 
     monkeypatch.setattr(targeted, "extract_frames", fixture_decode)
@@ -105,7 +107,9 @@ def test_synthetic_verification_to_reversible_evidence_update(tmp_path, monkeypa
     ("approval", "reviewer approval"), ("identity", "identity confirmation"),
     ("request_id", "request ID"), ("video_hash", "video hashes"),
     ("evidence_hash", "Evidence content"), ("estimated_time", "decoded source PTS"),
-    ("wrong_pts", "decoded PTS differs"), ("wrong_frame", "frame index or decoded PTS"),
+    ("frame_hash", "source frame record or video hash"), ("image_hash", "frame image hash"),
+    ("tampered_image", "frame image hash"),
+    ("wrong_pts", "decoded PTS differs"), ("wrong_frame", "source frame record or video hash"),
 ])
 def test_link_rejects_unapproved_or_broken_provenance(tmp_path, monkeypatch, change, expected):
     base, bundle, report, request_id = _chain(tmp_path, monkeypatch)
@@ -123,6 +127,13 @@ def test_link_rejects_unapproved_or_broken_provenance(tmp_path, monkeypatch, cha
         report["provenance"]["evidence_sha256"] = "f" * 64
     elif change == "estimated_time":
         report["results"][0]["selected_frames"][0]["time_basis"] = "estimated_sample_time"
+    elif change == "frame_hash":
+        report["results"][0]["observations"][0]["video_sha256"] = "f" * 64
+    elif change == "image_hash":
+        report["results"][0]["observations"][0]["frame_sha256"] = "f" * 64
+    elif change == "tampered_image":
+        from pathlib import Path
+        Path(report["results"][0]["selected_frames"][0]["file"]).write_bytes(b"tampered image")
     elif change == "wrong_pts":
         report["results"][0]["selected_frames"][0]["video_time_s"] = 1.2
         report["results"][0]["observations"][0]["video_time_s"] = 1.2

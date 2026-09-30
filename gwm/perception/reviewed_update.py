@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..feedback.active_perception import request_identifier
-from .provenance import declared_video_sha256, evidence_sha256
+from .provenance import declared_video_sha256, evidence_sha256, file_sha256
 from .update import apply_evidence_update
 
 
@@ -59,6 +59,12 @@ def apply_reviewed_targeted_candidate(base: dict, request_bundle: dict, targeted
         raise ValueError("candidate lacks a unique decoded source PTS")
     frame = selected[0]
     frame_index, pts = frame.get("source_frame_index"), frame["video_time_s"]
+    if (frame.get("video_sha256") != source_hash or candidate.get("video_sha256") != source_hash
+            or candidate.get("source_frame_index") != frame_index or candidate.get("time_basis") != "decoded_source_pts"):
+        raise ValueError("candidate source frame record or video hash differs from extracted frame")
+    image_hash = frame.get("image_sha256")
+    if not image_hash or candidate.get("frame_sha256") != image_hash or file_sha256(frame["file"]) != image_hash:
+        raise ValueError("candidate frame image hash differs from extracted frame")
     registry = [item for item in base.get("frames", []) if item.get("frame_index") == frame_index]
     if len(registry) != 1 or abs(registry[0]["t"] - pts) > 1e-4:
         raise ValueError("candidate frame index or decoded PTS differs from Evidence registry")

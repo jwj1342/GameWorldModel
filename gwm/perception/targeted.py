@@ -121,6 +121,8 @@ def _observation(record: DetectionRecord, frame: dict, target_id: str, provider_
         mask_ref = str(mask_file.resolve())
     return {"target_object_id": target_id, "identity_status": "candidate_unverified",
             "video_time_s": frame["video_time_s"], "frame_ref": frame["file"],
+            "time_basis": frame["time_basis"], "source_frame_index": frame.get("source_frame_index"),
+            "video_sha256": frame.get("video_sha256"), "frame_sha256": frame.get("image_sha256"),
             "detection": {"detection_id": record.detection_id, "class_label": record.class_label,
                           "confidence": float(score), "bbox": box,
                           "mask_ref": mask_ref, "position_3d": position,
@@ -301,6 +303,8 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
                 pts = frame.get("source_pts_s")
                 if pts is not None and (isinstance(pts, bool) or not isinstance(pts, (int, float)) or not math.isfinite(pts)):
                     raise ValueError("extractor returned invalid source PTS")
+                if frame.get("video_sha256") is not None and frame["video_sha256"] != report["provenance"]["video_sha256"]:
+                    raise ValueError("extracted frame video hash differs from supplied source video")
                 selected_frame = {"extracted_index": frame["index"],
                                   "video_time_s": float(pts) if pts is not None else round(start + frame["t"], 4),
                                   "time_basis": "decoded_source_pts" if pts is not None else "estimated_sample_time",
@@ -308,6 +312,10 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
                                   "width": frame["width"], "height": frame["height"]}
                 if "source_frame_index" in frame:
                     selected_frame["source_frame_index"] = frame["source_frame_index"]
+                if "video_sha256" in frame:
+                    selected_frame["video_sha256"] = frame["video_sha256"]
+                if "image_sha256" in frame:
+                    selected_frame["image_sha256"] = frame["image_sha256"]
                 result["selected_frames"].append(selected_frame)
             if provider is None:
                 result.update(status="provider_unavailable", reason_code="provider_unavailable",
