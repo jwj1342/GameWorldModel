@@ -11,6 +11,7 @@ from typing import Any, Iterable
 import numpy as np
 from PIL import Image
 
+from ..config import load_config
 from ..feedback.active_perception import request_identifier
 from .contract import validate_evidence
 from .base import DetectionProvider, DetectionRecord
@@ -239,6 +240,13 @@ def run_targeted_observations(requests_file: str | Path, video_file: str | Path,
               "provider_model_dir": str(Path(provider.model_dir).resolve()) if provider is not None and hasattr(provider, "model_dir") else None,
               "video_time_basis": "per-frame time_basis; decoded_source_pts only if extractor supplies source_pts_s",
               "ffmpeg_bin": settings["ffmpeg_bin"], "ffprobe_bin": settings["ffprobe_bin"]}}
+    perception_config = (config or {}).get("perception")
+    if provider is not None and isinstance(perception_config, dict):
+        report["provenance"]["detection_settings"] = {
+            key: perception_config[key] for key in
+            ("grounding_box_threshold", "grounding_text_threshold", "max_objects")
+            if key in perception_config
+        }
     if not selected:
         return _write(target_dir, report)
     if submitted.get("status") == "execution_blocked" or submitted.get("execution_issues"):
@@ -376,12 +384,37 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--select", action="append", default=None, help="manually selected request ID; repeat for multiple")
     parser.add_argument("--provider", choices=("none", "grounding-dino"), default="none")
     parser.add_argument("--model-dir", help="existing local Grounding DINO model directory; never downloaded")
+    parser.add_argument("--grounding-box-threshold", type=float,
+                        help="override perception.grounding_box_threshold from the site config")
+    parser.add_argument("--grounding-text-threshold", type=float,
+                        help="override perception.grounding_text_threshold from the site config")
+    parser.add_argument("--max-objects", type=int, help="override perception.max_objects from the site config")
     parser.add_argument("--ffmpeg-bin", default="ffmpeg")
     parser.add_argument("--ffprobe-bin", default="ffprobe")
     args = parser.parse_args(argv)
     provider = None
     unavailable_reason = None
+    run_config = {"ffmpeg_bin": args.ffmpeg_bin, "ffprobe_bin": args.ffprobe_bin}
     if args.provider == "grounding-dino":
+        run_config = load_config()
+        perception = run_config.get("perception")
+        if not isinstance(perception, dict):
+            parser.error("Grounding DINO requires a perception config")
+        overrides = {"grounding_box_threshold": args.grounding_box_threshold,
+                     "grounding_text_threshold": args.grounding_text_threshold,
+                     "max_objects": args.max_objects}
+        perception.update({key: value for key, value in overrides.items() if value is not None})
+        for key in ("grounding_box_threshold", "grounding_text_threshold"):
+            value = perception.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
+                parser.error(f"perception.{key} must be finite and between 0 and 1")
+        count = perception.get("max_objects")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            parser.error("perception.max_objects must be a positive integer")
+        targeted_config = run_config.setdefault("targeted_observation", {})
+        if not isinstance(targeted_config, dict):
+            parser.error("targeted_observation config must be a mapping")
+        targeted_config.update({"ffmpeg_bin": args.ffmpeg_bin, "ffprobe_bin": args.ffprobe_bin})
         model_dir = Path(args.model_dir) if args.model_dir else None
         if model_dir is None or not model_dir.is_dir():
             unavailable_reason = "local Grounding DINO model directory is missing; no model was called"
@@ -398,7 +431,7 @@ def main(argv: list[str] | None = None) -> None:
                 unavailable_reason = f"local Grounding DINO dependency unavailable: {exc}"
     result = run_targeted_observations(args.requests, args.video, args.out, provider,
                                        selected_request_ids=args.select,
-                                       config={"ffmpeg_bin": args.ffmpeg_bin, "ffprobe_bin": args.ffprobe_bin},
+                                       config=run_config,
                                        provider_unavailable_reason=unavailable_reason, evidence_file=args.evidence)
     print(json.dumps({"status": result["status"], "results": len(result["results"]),
                       "artifact": str((Path(args.out) / "targeted_observations.json").resolve())}, ensure_ascii=False))
