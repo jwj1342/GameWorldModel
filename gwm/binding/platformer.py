@@ -114,8 +114,8 @@ def bind(program: dict, evidence: dict | None, cfg: dict, prompt: str | None = N
         if o["id"] in coll and not any(e.get("type") == "despawn_on_contact" for e in o.get("events", [])):
             o.setdefault("events", []).append({"type": "despawn_on_contact", "with": "player"})
     if prompt: notes.append(f"prompt ignored in MVP binder: {prompt[:80]}")
-    program["binding"]["notes"] = "; ".join(notes) if notes else ""
-    program["binding"] = {k: v for k, v in program["binding"].items() if k in ("template", "slots")} | ({} if not notes else {})
+    # schema 的 binding 只允许 template 和 slots（additionalProperties: false），notes 记到 meta 里
+    program["binding"] = {k: v for k, v in program["binding"].items() if k in ("template", "slots")}
     program.setdefault("meta", {}).setdefault("notes", "")
     if notes: program["meta"]["notes"] = (program["meta"]["notes"] + " | binder: " + "; ".join(notes)).strip(" |")
     return program

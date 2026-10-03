@@ -9,7 +9,7 @@ export { RAPIER };
 
 function colliderDescFor(c) {
   // c: {shape, extent|size, radius, height, axis, offset}
-  const off = c.offset ?? [0, 0, 0];
+  const off = [...(c.offset ?? [0, 0, 0])];   // 复制：plane 分支会改它，而 colliders 在 reset 后会被重用
   let desc;
   switch (c.shape) {
     case 'sphere': desc = RAPIER.ColliderDesc.ball(c.radius ?? 0.5); break;

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ..compiler.ids import id_to_color, registry_order, decode_id_png, decode_depth_png
+from ..compiler.ids import id_to_color, registry_order, decode_id_png
 from ..perception.masks import resize_mask as _resize_bool, iou, centroid
 
 class Dino:

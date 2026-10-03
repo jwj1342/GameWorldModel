@@ -10,9 +10,8 @@ perception:
   geometry_backend: vggt          # vggt | static | gt（ViPE 与 SAM 3.1 见 docs/status.md 的待办）
   geometry_fallbacks: [static]
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
-  segmentation_fallbacks: []
+  segmentation_fallbacks: [none]   # 检测器崩了也要出包，退化成只有静态结构的场景
   max_objects: 8
-  min_mask_area_frac: 0.002
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
@@ -50,21 +49,17 @@ writer:
   stages: [camera_static, objects, motion]   # 或 single_stage 消融
   repair_attempts: 3
   candidates: 2
-  candidate_temperatures: [0.5, 0.9]
   use_evidence: true
-  evidence_fallback_on_failure: true
 feedback:
   rounds: 2
   max_rounds: 3
   render_width: 640
   render_height: 360
-  passes: [rgb, depth, id]
+  passes: [rgb, id]        # depth 目前没有参与打分，需要时再加回来
   thresholds:
     iou_fail: 0.5
     centroid_px_frac_fail: 0.05
-    centroid_m_fail: 0.5
     ate_m_fail: 0.5
-    depth_silog_fail: 0.3
   weights: {iou: 0.5, centroid: 0.2, ate: 0.15, dino: 0.15}
   min_improvement: 0.01
 binding:
@@ -80,8 +75,7 @@ playtest:
   shot_every_s: 0.5
   vlm_review: true
 budget:
-  max_vlm_calls: 40
-  max_wall_minutes: 60
+  max_vlm_calls: 40        # 超过就停，防止某条片段把预算耗光
 ablations:
   no_evidence: false
   no_feedback: false

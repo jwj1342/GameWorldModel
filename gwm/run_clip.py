@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse, json, os, shutil, subprocess, time, uuid
 from pathlib import Path
 import numpy as np
-from .config import load_config, REPO
+from .config import load_config, redact, site_name, REPO
 from .errors import ErrorLog
 from .perception.run import run_perception, load_masks
 from .synthesis.direct import evidence_to_program
@@ -25,11 +25,11 @@ def main(argv=None):
     ap.add_argument("--phrases", default=None); ap.add_argument("--config", action="append", default=[]); ap.add_argument("--no-vlm", action="store_true"); ap.add_argument("--resume", default=None, help="existing run dir to resume")
     ap.add_argument("--prompt", default=None, help="gameplay prompt (MVP: platformer only)")
     a = ap.parse_args(argv)
-    cfg = load_config([REPO / "configs/default.yaml", REPO / "configs/vulcan.yaml", *[REPO / c for c in a.config]])
+    cfg = load_config([REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *[REPO / c for c in a.config]])
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     run_dir = Path(a.resume) if a.resume else Path(a.out or (Path(cfg["paths"]["out"]) / a.clip / run_id)); run_dir.mkdir(parents=True, exist_ok=True)
     log = ErrorLog(run_dir / "errors.jsonl")
-    manifest = {"run_id": run_dir.name, "clip": a.clip, "video": str(a.video), "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "git_commit": git_commit(), "node": os.uname().nodename, "config": cfg, "args": vars(a), "stages": {}}
+    manifest = {"run_id": run_dir.name, "clip": a.clip, "video": str(a.video), "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "git_commit": git_commit(), "node": os.uname().nodename, "config": redact(cfg), "args": vars(a), "stages": {}}
     (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
     def save(): manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S"); (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
 
@@ -78,7 +78,7 @@ def main(argv=None):
     if not rep["ok"]:
         log.record("binding", "invalid_after_binding", format_errors(rep), action_taken="drop binding slots"); program["binding"] = {"template": "platformer_3p", "slots": {}}
     (run_dir / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False))
-    comp = compile_program(program, run_dir / "game")
+    comp = compile_program(program, run_dir / "game", cfg)
     if not comp["ok"]:
         log.record("compile", "final_compile_failed", format_errors(comp["validation"]), recoverable=False); save(); raise SystemExit(2)
     # copy final render for the report

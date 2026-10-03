@@ -28,7 +28,7 @@ for m in ["torch", "torchvision", "transformers", "cv2", "vggt", "jsonschema", "
     except Exception as e: print("  import FAILED", m, repr(e)[:120])
 from torchvision.ops import nms; print("  torchvision ops ok")
 PY
-pip freeze --local > $REPO/requirements.txt
+pip freeze --local > $REPO/requirements-vulcan.lock.txt   # requirements.txt 是手写的通用清单，别覆盖
 deactivate
 
 echo "=== weights -> $GWM_WEIGHTS ==="
@@ -64,7 +64,7 @@ for l in meta:
 PY
   while read -r req; do [ -z "$req" ] && continue; pip install --no-index "$req" > /tmp/dep.log 2>&1 || pip install "$req" > /tmp/dep.log 2>&1 || echo "  FAILED  $req"; done < /tmp/vllm_deps.txt
   python -c "import vllm, torch; print('  vllm', vllm.__version__, 'torch', torch.__version__)"
-  pip freeze --local > $REPO/requirements-vllm.txt
+  pip freeze --local > $REPO/requirements-vllm.lock.txt
   hf download Qwen/Qwen3.5-27B-FP8 --local-dir "$GWM_WEIGHTS/qwen3.5-27b-fp8" > /tmp/hf_qwen.log 2>&1 && echo "  ok      qwen3.5-27b-fp8" || echo "  FAILED  qwen3.5-27b-fp8"
   deactivate
 fi

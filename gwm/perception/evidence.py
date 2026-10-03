@@ -1,14 +1,13 @@
 """Evidence extraction: unproject masks with depth -> per-frame OBBs -> smoothing -> screw-motion classification -> contacts -> ground alignment -> evidence.json (+ overlay video)."""
 from __future__ import annotations
-import json, math, subprocess, time
+import json, math, time
 from pathlib import Path
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 from scipy.spatial.transform import Rotation as R
-from .base import Geometry, Tracks
+from ..taxonomy import is_static_class
+from .base import CV2THREE, Geometry, Tracks
 
-# OpenCV camera (x right, y down, z fwd) -> three.js camera (x right, y up, z back): flip y and z
-CV2THREE = np.diag([1.0, -1.0, -1.0])
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
     return [float(v) for v in R.from_matrix(mat3).as_quat()]  # scipy: x,y,z,w
@@ -173,8 +172,7 @@ def classify_motion(ts: np.ndarray, centers: np.ndarray, yaws: np.ndarray, cfg: 
     else: coherence = 1.0
     if rng_pos < static_pos * 2.5 and coherence < mc.get("min_motion_coherence", 0.75) and rng_yaw < 45:
         out.update(type="static", conf=0.7, notes=f"incoherent jitter: pos range {rng_pos:.3f} m, coherence {coherence:.2f}"); return out
-    is_static_class = any(k in class_name.lower() for k in cfg["perception"].get("static_classes", []))
-    if is_static_class:
+    if is_static_class(class_name, cfg):
         out.update(type="static", conf=0.8, notes=f"static class '{class_name}' (structure), centroid drift {rng_pos:.3f} m ignored"); return out
     if rng_pos < static_pos and (rng_yaw < mc["static_rot_thresh_deg"] or step_yaw > 60):
         out.update(type="static", conf=0.9, notes=f"pos range {rng_pos:.3f} m (< {static_pos:.3f}), yaw range {rng_yaw:.1f} deg"); return out
@@ -259,7 +257,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     G = np.concatenate(gpts, 0) if gpts else np.zeros((0, 3))
     if len(G) > 100:
         lo, hi = np.percentile(G, 2, axis=0), np.percentile(G, 98, axis=0)
-        ground = {"kind": "ground", "normal": [0, 1, 0], "offset": 0.0, "coverage": float(len(G)), "conf": 0.8 if align_info.get("ground") == "largest_plane" else 0.5,
+        ground = {"kind": "ground", "normal": [0, 1, 0], "offset": 0.0, "coverage": float(len(G)), "conf": 0.8 if align_info.get("ground", "").startswith("candidate") and align_info.get("ground_inliers", 0) > 500 else 0.5,
                   "center_hint": [float((lo[0] + hi[0]) / 2), 0.0, float((lo[2] + hi[2]) / 2)], "extent_hint": [float(max(hi[0] - lo[0], 1.0)), 0.2, float(max(hi[2] - lo[2], 1.0))]}
     else:
         ground = {"kind": "ground", "normal": [0, 1, 0], "offset": 0.0, "coverage": 0.0, "conf": 0.2, "center_hint": [0, 0, 0], "extent_hint": [10, 0.2, 10]}
@@ -281,7 +279,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     for o in tracks.objects:
         obbs, ts, centers, yaws = [], [], [], []
         best_frame, best_area = None, 0
-        is_structure = any(kk in o.phrase.lower() for kk in cfg["perception"].get("static_classes", []))
+        is_structure = is_static_class(o.phrase, cfg)
         for k, fi in enumerate(geom.frame_indices):
             m = o.masks.get(fi)
             if m is None: continue
@@ -329,39 +327,9 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     }
     (out / "evidence.json").write_text(json.dumps(evidence, indent=1))
     try:
+        from .overlay import render_overlay
         render_overlay(frames, geom, tracks, evidence, T, scale, out / "overlay")
-    except Exception as e:  # overlay is diagnostic only
+    except Exception as e:  # 叠加视频只是给人看的，画不出来不影响证据
         (out / "overlay_error.txt").write_text(repr(e))
     return evidence
 
-def project(pts_w: np.ndarray, K: np.ndarray, c2w_aligned: np.ndarray, scale: float):
-    """World (aligned, scaled) -> pixels using aligned cam pose."""
-    w2c = np.linalg.inv(c2w_aligned); pc = (w2c[:3, :3] @ (pts_w / scale).T).T + w2c[:3, 3]  # OpenCV camera coords (c2w_aligned maps OpenCV-camera points)
-    z = pc[:, 2]; ok = z > 1e-4
-    u = K[0, 0] * pc[:, 0] / np.where(ok, z, 1) + K[0, 2]; v = K[1, 1] * pc[:, 1] / np.where(ok, z, 1) + K[1, 2]
-    return np.stack([u, v], 1), ok
-
-def render_overlay(frames, geom: Geometry, tracks: Tracks, evidence: dict, T, scale, out_dir: Path, fps: int = 4):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    W, H = geom.size()
-    colors = [(255, 80, 80), (80, 200, 255), (120, 255, 120), (255, 200, 60), (230, 120, 255), (255, 140, 40), (80, 255, 220), (200, 200, 200)]
-    for k, fi in enumerate(geom.frame_indices):
-        im = Image.open(frames[fi]["file"]).convert("RGB").resize((W, H)); dr = ImageDraw.Draw(im, "RGBA")
-        c2w = T @ _fix(geom.cam_to_world[k])
-        for j, o in enumerate(evidence["objects"]):
-            col = colors[j % len(colors)]
-            ob = next((b for b in o["obb"] if b.get("frame") == fi), None)
-            m = next((t for t in tracks.objects if t.id == o["id"]), None)
-            if m is not None and fi in m.masks:
-                mm = _resize_mask(m.masks[fi], (W, H)); ov = Image.new("RGBA", (W, H), col + (0,)); ov.putalpha(Image.fromarray((mm * 70).astype(np.uint8))); im.paste(ov, (0, 0), ov); dr = ImageDraw.Draw(im, "RGBA")
-            if ob is None: continue
-            c = np.array(ob["center"]); s = np.array(ob["size"]) / 2; Rm = R.from_quat(ob["quat"]).as_matrix()
-            corners = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]) * s
-            cw = (Rm @ corners.T).T + c; uv, ok = project(cw, geom.intrinsics[k], c2w, scale)
-            edges = [(0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3), (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7)]
-            for a, b in edges:
-                if ok[a] and ok[b]: dr.line([tuple(uv[a]), tuple(uv[b])], fill=col + (255,), width=2)
-            if ok.any(): dr.text((float(uv[ok][:, 0].min()), float(uv[ok][:, 1].min()) - 12), f"{o['id']} {o['motion_guess']['type']}", fill=col + (255,))
-        dr.text((6, 6), f"t={frames[fi]['t']:.2f}s  {geom.backend}/{tracks.backend}", fill=(255, 255, 255, 255))
-        im.save(out_dir / f"ov_{k:05d}.jpg", quality=85)
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", str(fps), "-i", str(out_dir / "ov_%05d.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out_dir.parent / "overlay.mp4")], check=False)

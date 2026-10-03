@@ -23,6 +23,9 @@ ls $OUT/game; du -sh $OUT/game
 echo "=== render 3 passes at 4 times ==="; t0=$(date +%s)
 $H render.mjs --game $OUT/game --times 0,2.5,5,7.5 --out $OUT/render --width 640 --height 360 || { echo RENDER FAILED; cat $OUT/render/browser.log 2>/dev/null | tail -30; exit 1; }
 echo "render took $(( $(date +%s)-t0 ))s"; ls $OUT/render | head -20; tail -5 $OUT/render/browser.log 2>/dev/null
+echo "=== 检查 ID pass 是否干净 ==="
+python $REPO/scripts/check_id_pass.py $OUT/game $OUT/render || echo "（上面的越界像素会压低所有掩码 IoU，需要修）"
+
 echo "=== playtest ==="; t0=$(date +%s)
 $H playtest.mjs --game $OUT/game --out $OUT/playtest --seconds 90 || { echo PLAYTEST FAILED; tail -30 $OUT/playtest/browser.log; }
 echo "playtest took $(( $(date +%s)-t0 ))s"; cat $OUT/playtest/verdict.json; tail -3 $OUT/playtest/states.jsonl | cut -c1-200

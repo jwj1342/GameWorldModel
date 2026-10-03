@@ -3,7 +3,7 @@ import * as THREE from 'three';
 
 function aabbOf(entry) { entry.group.updateMatrixWorld(true); return new THREE.Box3().setFromObject(entry.group); }
 
-export function inferSlots(program, registry) {
+export function inferSlots(program, registry, kernelCfg = null) {
   // 默认槽位推断（binder.py 未填时兜底）：可行走面 = 静态几何顶面
   const slots = { ...(program.binding?.slots ?? {}) };
   const statics = registry.filter(e => e.kind === 'static');
@@ -13,15 +13,24 @@ export function inferSlots(program, registry) {
   const topY = ground.max.y;
   if (!slots.player_spawn) slots.player_spawn = [ground.min.x + (ground.max.x - ground.min.x) * 0.2, topY + 1.2, ground.max.z - (ground.max.z - ground.min.z) * 0.2];
   if (!slots.goal_volume) slots.goal_volume = { pos: [ground.max.x - (ground.max.x - ground.min.x) * 0.15, topY + 1.0, ground.min.z + (ground.max.z - ground.min.z) * 0.15], extent: [1.5, 2, 1.5] };
-  if (!slots.collectibles) slots.collectibles = registry.filter(e => e.kind === 'object' && /coin|gem|key|star|pickup/i.test(e.class)).map(e => e.id).filter((v, i, a) => a.indexOf(v) === i);
-  if (!slots.hazards) slots.hazards = registry.filter(e => /lava|spike|water|fire|acid/i.test(e.class) || /lava|spike/i.test(e.spec.material ?? '')).map(e => e.id).filter((v, i, a) => a.indexOf(v) === i);
+  // 类别表由编译器写进 kernel_config.json，唯一来源是 configs/default.yaml 的 binding 段
+  const words = (list, fallback) => new RegExp((kernelCfg?.[list] ?? fallback).join('|'), 'i');
+  const uniq = (a) => a.filter((v, i) => a.indexOf(v) === i);
+  if (!slots.collectibles) {
+    const re = words('collectible_classes', ['coin', 'gem', 'key', 'star', 'pickup']);
+    slots.collectibles = uniq(registry.filter(e => e.kind === 'object' && re.test(e.class)).map(e => e.id));
+  }
+  if (!slots.hazards) {
+    const re = words('hazard_classes', ['lava', 'spike', 'water', 'fire', 'acid']);
+    slots.hazards = uniq(registry.filter(e => re.test(e.class) || re.test(e.spec.material ?? '')).map(e => e.id));
+  }
   return slots;
 }
 
 export class PlatformerTemplate {
-  constructor({ program, scene, registry, physics }) {
+  constructor({ program, scene, registry, physics, kernelCfg = null }) {
     this.program = program; this.scene = scene; this.registry = registry; this.physics = physics;
-    this.slots = inferSlots(program, registry);
+    this.slots = inferSlots(program, registry, kernelCfg);
     this.spawn = new THREE.Vector3(...this.slots.player_spawn);
     this.goal = { pos: new THREE.Vector3(...this.slots.goal_volume.pos), extent: new THREE.Vector3(...(this.slots.goal_volume.extent ?? [1.5, 2, 1.5])) };
     this.goalBox = new THREE.Box3().setFromCenterAndSize(this.goal.pos, this.goal.extent);

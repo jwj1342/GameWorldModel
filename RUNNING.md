@@ -130,6 +130,35 @@ sbatch scripts/pipeline.sh 片段名 "toy train,train track,floor" --config conf
 
 产物在 `out/片段名/运行编号/`。想在浏览器里玩的话，要么把 `game` 目录下载到本地起服务器，要么用集群的 Open OnDemand。
 
+### 登录节点和计算节点的区别（实测）
+
+| 项目 | 登录节点 vulcan1 | 计算节点（CPU compute[1-2] / GPU rack*-*） |
+|---|---|---|
+| 允许的负载 | 编译、npm install、打包、提交作业；禁止渲染与模型推理 | 全部重负载：感知模型、VLM、无头渲染 |
+| Node.js | 模块 nodejs/18.17.1、20.16.0、24.15.0 | 同一套 CVMFS 模块：`module load StdEnv/2023 nodejs/20.16.0` |
+| Python | 模块 python/3.10.13 ~ 3.14.2 | 同上；虚拟环境建在 `/project` |
+| 互联网 | 直连，无代理 | 无直连；squid 代理 `http://squid:3128`（prolog 自动注入 `http_proxy` / `https_proxy`） |
+| 代理放行 | — | github.com、huggingface.co、api.anthropic.com、api.openai.com、Docker Hub、inference.vulcan.alliancecan.ca |
+| 代理封禁 | — | registry.npmjs.org、Playwright 浏览器 CDN、poly.pizza、sketchfab.com（CONNECT 403） |
+| Chromium 系统依赖 | 齐全（libnss3、libatk、libgbm、libxkbcommon、libasound、libEGL、libvulkan 等） | 齐全；NVIDIA EGL 库存在（driver 595.91.07）；Vulkan ICD 目录只有 asahi，但 ANGLE 仍能拿到 L40S |
+| 容器 | apptainer 1.3.5 | apptainer 1.3.5，`docker://` 拉取经代理可用 |
+| 本地盘 | 无 | `$SLURM_TMPDIR=/tmp`，作业结束即清空 |
+| 现有缓存 | `~/.cache/ms-playwright` 已有 chromium-1228（663 MB，占 $HOME 配额，应迁走） | 无 |
+
+### 无头渲染实测
+
+Playwright 1.63.0 + Chromium 1243 + three.js r186，320×240 单立方体，30 帧，颜色 / ID 掩码 / 深度三种 pass 回读均正确：
+
+| 节点 | Chromium 参数 | WebGL2 渲染器 | 每帧 | 结论 |
+|---|---|---|---|---|
+| CPU（rack01-08） | `--use-gl=angle --use-angle=swiftshader` | SwiftShader（软件 Vulkan） | 0.95 ms | 可用；反馈循环默认走这里 |
+| GPU（rack05-05, L40S） | 同上 | SwiftShader | 0.77 ms | 与 CPU 一致 |
+| GPU | `--use-gl=angle --use-angle=vulkan --enable-features=Vulkan` | ANGLE (NVIDIA, Vulkan 1.4, NVIDIA L40S) | 1.17 ms | 硬件加速可用，无需 X server |
+| GPU | `--use-gl=angle --use-angle=gl-egl` | ANGLE (NVIDIA L40S, OpenGL ES 3.2) | 3.87 ms | 硬件加速可用 |
+| GPU | `--use-gl=egl` | 回退 SwiftShader 且 context lost | — | 不要用 |
+
+Chromium 必须带 `--no-sandbox --disable-dev-shm-usage`。小场景下软件渲染已足够快，硬件加速的优势在大分辨率、批量帧时才体现。
+
 ### 换一个集群要改什么
 
 `scripts/setup_env.sh` 里的模块名和目录。`configs/vulcan.yaml` 里的路径和 Slurm 账号，或者照着它新建一个自己的站点配置。各个 `scripts/*.sh` 顶上的 `#SBATCH` 参数。

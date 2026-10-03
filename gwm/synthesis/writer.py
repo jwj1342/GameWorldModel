@@ -4,7 +4,7 @@ import copy, json, re
 from pathlib import Path
 from typing import Any
 from ..compiler.validate import validate, format_errors, schema as full_schema
-from .direct import evidence_to_program
+from .direct import evidence_to_program, recentre_periodic
 from .vlm import VLMClient
 
 REPO = Path(__file__).resolve().parents[2]
@@ -73,7 +73,7 @@ class Writer:
                 except Exception as e:
                     errors_text = f"previous attempt failed: {e!r}"; (self.log_dir / f"{tag}_{st}_try{tries}_error.txt").write_text(errors_text); continue
                 (self.log_dir / f"{tag}_{st}_try{tries}.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
-                cand = self._merge(program, st, out)
+                cand = self._merge(program, st, out, ev)
                 rep = validate(cand)
                 if rep["ok"]: program = cand; ok = True
                 else: errors_text = "Your previous output had these errors; fix them and output the complete JSON for this stage again:\n" + format_errors(rep)
@@ -98,7 +98,7 @@ class Writer:
         if errors_text: parts.append(errors_text)
         return "\n\n".join(parts)
 
-    def _merge(self, program: dict, st: str, out: dict) -> dict:
+    def _merge(self, program: dict, st: str, out: dict, ev: dict) -> dict:
         p = copy.deepcopy(program)
         if st == "camera_static":
             p["camera"] = out.get("camera", {}); p["static"] = out.get("static", []); p["style"] = out.get("style", p["style"])
@@ -121,6 +121,7 @@ class Writer:
                     if m.get("motion") and m["motion"].get("type") != "static": o["motion"] = m["motion"]
                     if m.get("events"): o["events"] = m["events"]
                     if m.get("notes"): o["notes"] = (o.get("notes", "") + " " + m["notes"]).strip()[:300]
+                    recentre_periodic(o, next((e["obb"] for e in ev["objects"] if e["id"] in (o["id"], base)), []))
         elif st == "single_stage":
             for k in ("style", "camera", "static", "objects"):
                 if k in out: p[k] = out[k]

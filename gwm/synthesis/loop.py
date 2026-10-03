@@ -13,7 +13,7 @@ def evaluate(program: dict, round_dir: Path, evidence: dict, frames: list[dict],
     """Compile + render + metrics for one program. Returns dict with game_dir, render_index, metrics, score (or error)."""
     round_dir.mkdir(parents=True, exist_ok=True)
     (round_dir / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False))
-    comp = compile_program(program, round_dir / "game")
+    comp = compile_program(program, round_dir / "game", cfg)
     if not comp["ok"]:
         (round_dir / "compile_errors.txt").write_text(format_errors(comp["validation"])); return {"ok": False, "error": "compile", "details": comp["validation"]}
     try:
@@ -47,7 +47,7 @@ def run_loop(program: dict, evidence: dict, frames: list[dict], sam_masks: dict,
     best_prog = program; history.append({"round": 0, "ok": best["ok"], "score": best.get("score"), "error": best.get("error")})
     if not best["ok"]:
         return {"program": program, "best": best, "history": history, "rounds_run": 0}
-    rounds = 0 if (cfg["ablations"].get("no_feedback") or client is None) else fb["rounds"]
+    rounds = 0 if (cfg["ablations"].get("no_feedback") or client is None) else min(fb["rounds"], fb.get("max_rounds", fb["rounds"]))
     if client is None: history.append({"round": 0, "note": "no VLM client: feedback loop skipped"})
     for r in range(1, rounds + 1):
         clauses = best["metrics"]["clauses"]
