@@ -4,7 +4,7 @@ import copy, json
 from pathlib import Path
 
 from gwm.compiler.bundle import kernel_config
-from gwm.compiler.validate import validate
+from gwm.compiler.validate import validate, validate_candidate
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = json.loads((REPO / "examples/handwritten/program.json").read_text())
@@ -40,3 +40,45 @@ def test_kernel_config_matches_the_scene_order():
     assert len(coin) == len(next(o for o in EXAMPLE["objects"] if o["id"] == "coin")["instances"])
     assert len({tuple(r["color"]) for r in kc["registry"]}) == len(kc["registry"])   # 颜色不能撞，否则掩码会混
     assert kc["collectible_classes"] and kc["hazard_classes"]
+
+
+def test_candidate_report_is_stable_and_model_independent():
+    report = validate_candidate(EXAMPLE, evidence={"ignored_by_v1": True})
+    assert report["version"] == "1.0" and report["ok"]
+    assert report["findings"] == report["warnings"]
+    assert all({"stage", "severity", "path", "code", "message", "suggestion"} <= set(f)
+               for f in report["findings"])
+    json.dumps(report)
+
+
+def test_geometry_rejects_zero_and_non_unit_quaternions():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][0]["pose"]["quat"] = [0, 0, 0, 0]
+    report = validate_candidate(program)
+    assert not report["ok"]
+    assert any(e["code"] == "zero_quaternion" and e["stage"] == "geometry" for e in report["errors"])
+    program["objects"][0]["pose"]["quat"] = [0, 0, 0, 2]
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "non_unit_quaternion" for e in report["errors"])
+
+
+def test_geometry_rejects_non_finite_camera_transform():
+    program = copy.deepcopy(EXAMPLE)
+    program["camera"]["keyframes"][0]["pos"][0] = float("inf")
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "non_finite_transform" for e in report["errors"])
+
+
+def test_geometry_rejects_ground_penetration():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][2]["pose"]["pos"][1] = -1.0
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "ground_penetration" for e in report["errors"])
+
+
+def test_geometry_checks_support_contact():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][2]["support"] = "ground"
+    program["objects"][2]["pose"]["pos"] = [20.0, 0.4, 20.0]
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "support_no_overlap" for e in report["errors"])

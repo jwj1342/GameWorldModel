@@ -1,10 +1,12 @@
 """管线里几段容易出错又不好肉眼验证的数值逻辑。"""
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation as R
 
 from gwm.compiler.validate import validate
 from gwm.config import load_config
-from gwm.perception.evidence import classify_motion, obb_from_points
+from gwm.perception.evidence import obb_from_points
+from gwm.perception.motion import estimate_motion
 from gwm.synthesis.direct import evidence_to_program, recentre_periodic
 
 CFG = load_config()
@@ -30,12 +32,15 @@ def _evidence_with_lift():
 @pytest.mark.parametrize("kind, centres, expected", [
     ("周期往复", lambda t: np.stack([np.zeros_like(t), 1 + 1.2 * np.sin(2 * np.pi * t / 4), np.zeros_like(t)], 1), "periodic_translate"),
     ("原地不动", lambda t: np.tile([1.0, 2.0, 3.0], (len(t), 1)), "static"),
+    ("静态噪声", lambda t: np.tile([1.0, 2.0, 3.0], (len(t), 1))
+     + 0.001 * np.random.default_rng(0).standard_normal((len(t), 3)), "static"),
     ("单向滑动", lambda t: np.stack([t * 0.5, np.ones_like(t), np.zeros_like(t)], 1), ("prismatic", "trajectory")),
 ])
 def test_motion_classification(kind, centres, expected):
     """运动类型判断是感知里最容易出错的一步，三种典型运动必须认对。"""
     ts = np.linspace(0, 8, 33)
-    got = classify_motion(ts, centres(ts), np.zeros_like(ts), CFG)["type"]
+    quaternions = R.from_euler("y", np.zeros((len(ts), 1))).as_quat()
+    got = estimate_motion(ts, centres(ts), quaternions, CFG, coordinate_space="world")["motion_guess"]["type"]
     assert got in (expected if isinstance(expected, tuple) else (expected,)), f"{kind} 被判成 {got}"
 
 
