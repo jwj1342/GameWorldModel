@@ -16,7 +16,6 @@ from .binding.platformer import bind
 from .playtest.autopilot import playtest
 from .feedback.render import render
 from .feedback.validate_render import validate_render_result
-from .feedback.active_perception import plan_active_perception_requests
 
 def git_commit() -> str:
     try: return subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -127,13 +126,6 @@ def main(argv=None):
     if render_failure:
         rv_report["render_failure"] = render_failure
     (run_dir / "render_validation.json").write_text(json.dumps(rv_report, indent=1, ensure_ascii=False))
-    perception_requests = plan_active_perception_requests(rv_report, ev, program, cfg, source_video=a.video)
-    (run_dir / "active_perception_requests.json").write_text(json.dumps(perception_requests, indent=1, ensure_ascii=False))
-    manifest["stages"]["active_perception_requests"] = {
-        "status": perception_requests["status"], "count": len(perception_requests["requests"]),
-        "execution_issues": len(perception_requests["execution_issues"]),
-        "artifact": "active_perception_requests.json", "mode": "review_only",
-    }
     manifest["stages"]["render_validation"] = {
         "decision": rv_report["decision"], "errors": len(rv_report["errors"]), "warnings": len(rv_report["warnings"]),
         "diagnostic_codes": sorted({item["code"] for item in rv_report["diagnostics"]}),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import numpy as np
 from PIL import Image
@@ -152,3 +153,33 @@ def test_frame_count_timestamps_and_safe_paths(tmp_path):
     assert {"non_monotonic_render_times", "timestamp_mismatch", "missing_pass_file"} <= _codes(report)
     index["frames"].pop()
     assert "frame_count_mismatch" in _codes(_check(program, index, tmp_path))
+
+
+def test_feedback_two_pass_scoring_keeps_three_pass_validation(tmp_path, monkeypatch):
+    """PR #1's RGB/ID scoring must not make the new enforce gate fail for missing depth."""
+    from gwm.synthesis import loop
+
+    round_dir = tmp_path / "round"
+    render_dir = round_dir / "render"
+    render_dir.mkdir(parents=True)
+    program, index = _fixture(render_dir)
+    config = {"feedback": {"render_width": 16, "render_height": 12, "passes": ["rgb", "id"]},
+              "render_validation": {"mode": "enforce"}}
+    before = deepcopy(config)
+    monkeypatch.setattr(loop, "compile_program", lambda *args: {"ok": True})
+
+    def synthetic_render(game, times, directory, width, height, passes):
+        assert set(passes) == {"rgb", "depth", "id"}
+        assert times == [0, 0.5, 1]
+        return index
+
+    def synthetic_metrics(*args):
+        assert args[6]["feedback"]["passes"] == ["rgb", "id"]
+        return {"summary": {"score": 0.8}}
+
+    monkeypatch.setattr(loop, "render", synthetic_render)
+    monkeypatch.setattr(loop, "compute_metrics", synthetic_metrics)
+    result = loop.evaluate(program, round_dir, {}, [], {}, config, None, [0, 0.5, 1])
+    assert result["ok"] and result["render_validation"]["decision"] == "proceed"
+    assert config == before
+    assert json.loads((round_dir / "render_validation.json").read_text())["mode"] == "enforce"

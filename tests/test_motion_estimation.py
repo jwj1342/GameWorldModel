@@ -12,7 +12,9 @@ CFG = {"perception": {"motion": {"min_support_frames": 5, "min_temporal_span_s":
 def _quats(times, degrees=None):
     if degrees is None:
         degrees = np.zeros(len(times))
-    return R.from_euler("y", degrees, degrees=True).as_quat()
+    # Both SciPy 1.13 and 1.17 accept a batch with explicit one-axis shape.
+    angles = np.asarray(degrees, dtype=float).reshape(-1, 1)
+    return R.from_euler("y", angles, degrees=True).as_quat()
 
 
 def _result(times, positions, degrees=None, **kwargs):

@@ -15,7 +15,7 @@ perception:
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
   detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
-  association:
+  association:                    # 类别／重叠／空间／时间关联；保留身份候选
     max_frame_gap: 24
     max_bbox_center_distance_ratio: 2.5
     max_position_3d_distance: 2.0
@@ -28,7 +28,7 @@ perception:
     time_decay_frames: 12.0
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
-  motion:
+  motion:                         # 世界坐标多假设估计；证据、残差、置信度阈值
     min_support_frames: 5
     min_temporal_span_s: 0.75
     max_missing_fraction: 0.50
@@ -45,26 +45,21 @@ perception:
     rotation_residual_deg: 5.0
     revolute_min_radius_m: 0.10
     revolute_residual_frac: 0.12
-    revolute_axis_stability: 0.85
     periodic_min_cycles: 1.5
     periodic_min_period_s: 0.25
     periodic_min_samples_per_cycle: 4.0
     periodic_min_r2: 0.70
     periodic_frequency_steps: 160
     revolute_axis_stability: 0.9
-    periodic_autocorr_peak: 0.5
     smooth_window: 5
     static_pos_frac_of_size: 0.3    # 位移小于物体对角线的 30% 视为静止（可见表面质心随相机漂移）
-    min_motion_coherence: 0.75      # 质心位移的主轴方差占比低于此值视为抖动
-    camera_drift_corr: 0.9          # 质心漂移与相机运动相关系数高于此值且位移小于物体尺寸的 0.8 倍 → 静止
-    camera_drift_max_frac_of_size: 0.8
     yaw_min_aspect_ratio: 1.3       # 足迹接近正方形时不信任朝向
   contact_dist_m: 0.08
   ground_ransac_thresh_m: 0.03
   far_depth_factor: 3.0            # 丢弃深度 > 3×中位深度的点（天空、远景）
   assumed_camera_height_m: 1.2     # 相对尺度后端的定标假设
   static_classes: [wall, floor, ground, table, track, rail, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
-evidence_quality:
+evidence_quality:                 # 实测覆盖与歧义门禁；信息不足默认 warning
   min_object_observation_coverage: 0.20
   min_bbox_coverage: 0.70
   min_mask_coverage: 0.70
@@ -79,7 +74,7 @@ evidence_quality:
   min_motion_support: 0.40
   severe_occlusion_visible_fraction: 0.20
   max_severe_occlusion_fraction: 0.50
-candidate_repair:
+candidate_repair:                 # 安全几何修复；默认关闭
   mode: "off"                      # off | report | apply；默认不改变现有流水线
   max_passes: 3
   max_quaternion_norm_delta: 0.02
@@ -135,20 +130,6 @@ render_validation:
   min_rotation_deg: 1.0
   max_browser_events_per_code: 10
   sample_frames: 5
-active_perception:
-  max_requests: 12
-  max_time_range_s: 4.0
-  time_padding_s: 0.5
-  merge_gap_s: 0.5
-  max_keyframes_per_request: 3
-  min_observation_frames: 2
-  min_observation_coverage: 0.3
-targeted_observation:
-  sample_fps: 4.0
-  max_frames_per_request: 5
-  max_side: 960
-  ffmpeg_bin: ffmpeg
-  ffprobe_bin: ffprobe
 binding:
   template: platformer_3p
   collectible_classes: [coin, gem, key, star, pickup, ball, marble]

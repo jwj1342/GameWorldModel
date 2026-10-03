@@ -321,11 +321,3 @@ def estimate_motion(
                   "mean_visible_fraction": support["mean_visible_fraction"],
                   "candidate_details": ranked, "notes": "competing hypotheses fitted in aligned world coordinates"})
     return {"motion_guess": guess, "hypothesis": _hypothesis(ranked)}
-
-
-def classify_motion_legacy(times, centers, yaws, cfg: dict, size=None, class_name: str = "", cam_pos=None) -> dict:
-    """Compatibility adapter for the original yaw-based classify_motion API."""
-    del class_name, cam_pos  # legacy hints no longer override measured motion evidence
-    yaw = np.asarray(yaws, dtype=float)
-    quaternions = R.from_euler("y", yaw).as_quat() if yaw.ndim == 1 else np.asarray(yaws, dtype=float)
-    return estimate_motion(times, centers, quaternions, cfg, size=size, coordinate_space="world")["motion_guess"]

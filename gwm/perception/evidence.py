@@ -7,7 +7,7 @@ from PIL import Image
 from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
-from .motion import classify_motion_legacy, estimate_motion
+from .motion import estimate_motion
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -149,11 +149,6 @@ def smooth_series(x: np.ndarray, win: int) -> np.ndarray:
     win = min(win | 1, len(x) if len(x) % 2 else len(x) - 1); k = np.ones(win) / win
     pad = win // 2; xp = np.pad(x, ((pad, pad), (0, 0)) if x.ndim == 2 else (pad, pad), mode="edge")
     return np.stack([np.convolve(xp[:, j], k, mode="valid") for j in range(x.shape[1])], 1) if x.ndim == 2 else np.convolve(xp, k, mode="valid")
-
-# ---------------- motion classification ----------------
-def classify_motion(ts: np.ndarray, centers: np.ndarray, yaws: np.ndarray, cfg: dict, size: np.ndarray | None = None, class_name: str = "", cam_pos: np.ndarray | None = None) -> dict:
-    """Backward-compatible adapter backed by the multi-hypothesis world-frame estimator."""
-    return classify_motion_legacy(ts, centers, yaws, cfg, size=size, class_name=class_name, cam_pos=cam_pos)
 
 # ---------------- main ----------------
 def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "") -> dict:

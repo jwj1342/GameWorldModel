@@ -17,8 +17,10 @@ def evaluate(program: dict, round_dir: Path, evidence: dict, frames: list[dict],
     comp = compile_program(program, round_dir / "game", cfg)
     if not comp["ok"]:
         (round_dir / "compile_errors.txt").write_text(format_errors(comp["validation"])); return {"ok": False, "error": "compile", "details": comp["validation"]}
+    # Scoring may use only RGB/ID; validation still needs all three passes.
+    passes = tuple(dict.fromkeys((*cfg["feedback"]["passes"], "rgb", "depth", "id")))
     try:
-        idx = render(round_dir / "game", key_times, round_dir / "render", cfg["feedback"]["render_width"], cfg["feedback"]["render_height"], tuple(cfg["feedback"]["passes"]))
+        idx = render(round_dir / "game", key_times, round_dir / "render", cfg["feedback"]["render_width"], cfg["feedback"]["render_height"], passes)
     except Exception as e:
         render_report = validate_render_result(program, None, round_dir / "render", cfg, expected_times=key_times)
         (round_dir / "render_validation.json").write_text(json.dumps(render_report, indent=1, ensure_ascii=False))
