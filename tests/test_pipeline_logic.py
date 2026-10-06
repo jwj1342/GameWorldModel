@@ -121,3 +121,39 @@ def test_seed_reaches_the_model_call(monkeypatch):
     assert seed_sent(None) == "absent"        # 不配就不发，保持原有行为
     assert seed_sent(1234) == 1234            # 配了就发
     assert seed_sent(1234, 99) == 99          # 单次调用覆盖运行级设置
+def test_editability_judge_catches_side_effects_and_fabrication():
+    """可编辑性实验的判定逻辑本身要可信，否则跑出来的数字没意义。
+
+    判定要能分清四种情况：改对了、改了但有副作用、该改的没改、
+    以及该拒绝的时候编造了改动。
+    """
+    import sys
+    sys.path.insert(0, str(REPO / "scripts"))
+    from run_editability import judge
+
+    want = {"id": "x", "kind": "运动参数", "instruction": "让它快一倍",
+            "expect_paths": ["/objects/0/motion/period"],
+            "expect_value": {"/objects/0/motion/period": 2.0}}
+    prog = {"objects": [{"motion": {"period": 2.0}}]}
+
+    good = {"ok": True, "ops": [{"op": "replace"}], "changed": ["/objects/0/motion/period"],
+            "program": prog, "error": "", "note": ""}
+    assert judge(want, good)["ok"]
+
+    # 顺手把别的物体也改了，这是副作用，要判失败
+    noisy = {**good, "changed": ["/objects/0/motion/period", "/objects/3/motion/rate_dps"]}
+    assert not judge(want, noisy)["ok"]
+
+    # 改了，但改的不是要求的地方
+    missed = {**good, "changed": ["/objects/1/pose/pos"]}
+    assert not judge(want, missed)["ok"]
+
+    # 路径对了但数值不对
+    wrong_value = {**good, "program": {"objects": [{"motion": {"period": 3.5}}]}}
+    assert not judge(want, wrong_value)["ok"]
+
+    refuse = {"id": "y", "kind": "应当拒绝", "instruction": "把那只猫移走", "expect_refuse": True}
+    assert judge(refuse, {"ok": False, "ops": [], "changed": [], "program": {}, "error": "", "note": ""})["ok"]
+    # 场景里没有猫却给出了改动，这是编造，要判失败
+    assert not judge(refuse, {"ok": True, "ops": [{"op": "replace"}], "changed": ["/objects/0/pose/pos"],
+                              "program": {}, "error": "", "note": ""})["ok"]
