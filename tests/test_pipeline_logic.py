@@ -157,3 +157,27 @@ def test_editability_judge_catches_side_effects_and_fabrication():
     # 场景里没有猫却给出了改动，这是编造，要判失败
     assert not judge(refuse, {"ok": True, "ops": [{"op": "replace"}], "changed": ["/objects/0/pose/pos"],
                               "program": {}, "error": "", "note": ""})["ok"]
+def test_gt_metrics_match_objects_and_distance():
+    """真值指标的物体匹配：对得上的要配对，离太远的要判成没匹配上。
+
+    匹配做错会让召回和误检一起失真，而这两项是论文主表里的数字，
+    所以这段逻辑单独钉一下。不需要浏览器。
+    """
+    from gwm.feedback.gt_metrics import match_objects
+
+    times = np.linspace(0, 1, 5)
+    gt = {"a": {"t": times, "pos": np.tile([0.0, 0, 0], (5, 1)), "class": "x"},
+          "b": {"t": times, "pos": np.tile([5.0, 0, 0], (5, 1)), "class": "x"}}
+
+    # 预测和真值几乎重合，两个都该配上
+    pred = {"p": {"t": times, "pos": np.tile([0.1, 0, 0], (5, 1)), "class": "x"},
+            "q": {"t": times, "pos": np.tile([5.1, 0, 0], (5, 1)), "class": "x"}}
+    pairs = dict((g, p) for g, p, _ in match_objects(gt, pred, times, max_dist_m=1.0))
+    assert pairs == {"a": "p", "b": "q"}
+
+    # 离得太远的不许凑数，宁可判成没匹配上
+    far = {"z": {"t": times, "pos": np.tile([50.0, 0, 0], (5, 1)), "class": "x"}}
+    assert all(p is None for _, p, _ in match_objects(gt, far, times, max_dist_m=3.0))
+
+    # 预测里一个都没有时，全部算漏检
+    assert all(p is None for _, p, _ in match_objects(gt, {}, times, max_dist_m=3.0))
