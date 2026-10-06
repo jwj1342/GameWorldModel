@@ -117,10 +117,11 @@
   {
    "id": "add_event",
    "kind": "事件",
-   "instruction": "让金币在玩家碰到的时候消失",
+   "instruction": "让矿车在玩家碰到的时候消失",
    "expect_paths": [
-    "/objects/3/events"
-   ]
+    "/objects/2/events"
+   ],
+   "note": "原来写的是金币，但金币本来就有这个事件，等于期望一个已满足的状态发生改变。换成矿车。"
   },
   {
    "id": "door_static",

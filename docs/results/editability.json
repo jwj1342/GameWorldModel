@@ -16,7 +16,7 @@
    "changed": [
     "/objects/0/motion/period"
    ],
-   "note": "将升降平台 (lift) 的周期从 4.0 秒减半为 2.0 秒，使其上下移动速度加快一倍。"
+   "note": "将升降平台 (lift) 的周期性平移周期从 4.0 秒减半为 2.0 秒，使其移动速度加快一倍。"
   },
   {
    "id": "spin_slower",
@@ -63,17 +63,14 @@
    "ops": [
     {
      "op": "replace",
-     "path": "/objects/1/motion/range_deg",
-     "value": [
-      0,
-      60
-     ]
+     "path": "/objects/1/motion/range_deg/1",
+     "value": 60
     }
    ],
    "changed": [
     "/objects/1/motion/range_deg/1"
    ],
-   "note": ""
+   "note": "已将门的旋转范围上限从 100 度修改为 60 度。"
   },
   {
    "id": "phase_shift",
@@ -114,23 +111,33 @@
     "/objects/3/motion/axis/0",
     "/objects/3/motion/axis/1"
    ],
-   "note": "已将金币的自转轴从 y 轴 [0, 1, 0] 修改为 x 轴 [1, 0, 0]。"
+   "note": "已将金币的自转轴从 y 轴 [0,1,0] 修改为 x 轴 [1,0,0]。"
   },
   {
    "id": "coin_bigger",
    "kind": "几何",
    "instruction": "把金币的半径改成 0.5 米",
-   "ok": false,
-   "why": "补丁应用失败: can't replace a non-existent object 'radius'",
+   "ok": true,
+   "why": "改对了，且没有副作用",
    "ops": [
     {
      "op": "replace",
-     "path": "/objects/3/geom/radius",
-     "value": 0.5
+     "path": "/objects/3/geom",
+     "value": {
+      "kind": "primitive",
+      "shape": "sphere",
+      "radius": 0.5
+     }
     }
    ],
-   "changed": [],
-   "note": ""
+   "changed": [
+    "/objects/3/geom/extent",
+    "/objects/3/geom/kind",
+    "/objects/3/geom/query",
+    "/objects/3/geom/radius",
+    "/objects/3/geom/shape"
+   ],
+   "note": "将金币从 asset 改为 primitive sphere，半径设为 0.5 米。"
   },
   {
    "id": "lift_wider",
@@ -141,73 +148,86 @@
    "ops": [
     {
      "op": "replace",
-     "path": "/objects/0/geom/extent",
-     "value": [
-      4.0,
-      0.2,
-      4.0
-     ]
+     "path": "/objects/0/geom/extent/0",
+     "value": 4.0
+    },
+    {
+     "op": "replace",
+     "path": "/objects/0/geom/extent/2",
+     "value": 4.0
     }
    ],
    "changed": [
     "/objects/0/geom/extent/0",
-    "/objects/0/geom/extent/1",
     "/objects/0/geom/extent/2"
    ],
-   "note": "将升降平台 (lift) 的几何尺寸 extent 修改为 4 米宽。假设原始深度和高度保持不变，仅将宽度 (extent[0]) 和深度 (extent[2]) 设为 4.0 以形成 4x4 的平台，高度保持为 0.2。"
+   "note": "将升降平台（lift）的几何尺寸从 2.5x0.3x2.5 修改为 4.0x0.3x4.0，使其宽度和深度均为 4 米。"
   },
   {
    "id": "ground_bigger",
    "kind": "静态结构",
    "instruction": "把地面改成 40 米见方",
-   "ok": false,
-   "why": "补丁应用失败: can't replace a non-existent object 'size'",
-   "ops": [
-    {
-     "op": "replace",
-     "path": "/static/0/geom/size",
-     "value": [
-      40,
-      40
-     ]
-    }
-   ],
-   "changed": [],
-   "note": "将地面（ground）的尺寸修改为 40 米见方。"
-  },
-  {
-   "id": "lava_move",
-   "kind": "静态结构",
-   "instruction": "把熔岩坑往 x 正方向挪 1 米",
    "ok": true,
    "why": "改对了，且没有副作用",
    "ops": [
     {
      "op": "replace",
-     "path": "/static/5/pose/pos",
+     "path": "/static/0/geom/extent",
      "value": [
-      1.0,
-      0.0,
-      0.0
+      40,
+      0.5,
+      40
      ]
+    }
+   ],
+   "changed": [
+    "/static/0/geom/extent/0",
+    "/static/0/geom/extent/2"
+   ],
+   "note": "已将地面（ground）的尺寸从 24x16 修改为 40x40，高度保持 0.5 不变。"
+  },
+  {
+   "id": "lava_move",
+   "kind": "静态结构",
+   "instruction": "把熔岩坑往 x 正方向挪 1 米",
+   "ok": false,
+   "why": "有副作用，额外改了 ['/static/5/pose/quat']",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/static/5/pose",
+     "value": {
+      "pos": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "quat": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
     }
    ],
    "changed": [
     "/static/5/pose/pos/0",
     "/static/5/pose/pos/1",
-    "/static/5/pose/pos/2"
+    "/static/5/pose/pos/2",
+    "/static/5/pose/quat"
    ],
-   "note": "熔岩坑 (lava_pit) 初始位置未明确给出，假设其初始 pos 为 [0, 0, 0]，将其 x 坐标增加 1 米。"
+   "note": "熔岩坑 (lava_pit) 初始位姿未显式给出，默认为原点。将其沿 x 正方向移动 1 米，即 pos 设为 [1.0, 0.0, 0.0]。"
   },
   {
    "id": "coin_color",
    "kind": "几何",
    "instruction": "把金币改成红色",
-   "ok": false,
-   "why": "该改的没改。期望命中 ['/objects/3/geom/material']，实际改了 ['/objects/3/material']",
+   "ok": true,
+   "why": "改对了，且没有副作用",
    "ops": [
     {
-     "op": "add",
+     "op": "replace",
      "path": "/objects/3/material",
      "value": "red"
     }
@@ -215,7 +235,7 @@
    "changed": [
     "/objects/3/material"
    ],
-   "note": "已将金币（id=coin）的材质设置为红色。"
+   "note": "已将金币（id=coin）的材质从 gold 改为 red。"
   },
   {
    "id": "remove_cart",
@@ -232,7 +252,7 @@
    "changed": [
     "/objects"
    ],
-   "note": "已删除矿车对象（id=cart，位于/objects/2）。"
+   "note": "已删除矿车（id=cart，位于/objects/2）。"
   },
   {
    "id": "add_event",
@@ -242,7 +262,7 @@
    "why": "该改的没改。期望命中 ['/objects/3/events']，实际改了 []",
    "ops": [
     {
-     "op": "add",
+     "op": "replace",
      "path": "/objects/3/events",
      "value": [
       {
@@ -253,7 +273,7 @@
     }
    ],
    "changed": [],
-   "note": "Added despawn_on_contact event to the coin object (id=coin) so it disappears when the player touches it."
+   "note": "已为金币 (objects/3) 添加 despawn_on_contact 事件，使其在玩家接触时消失。"
   },
   {
    "id": "door_static",
@@ -306,7 +326,7 @@
     "/objects/2/motion/keyframes/1/t",
     "/objects/2/motion/keyframes/2/t"
    ],
-   "note": "矿车 (cart) 的轨迹关键帧时间已翻倍，从 0-4-8 秒变为 0-8-16 秒，使总行程时间变为原来的两倍。"
+   "note": "矿车 (cart) 的轨迹关键帧时间已翻倍，从 0-4-8 秒变为 0-8-16 秒，使总时长变为原来的两倍。"
   },
   {
    "id": "lift_higher",
@@ -324,7 +344,7 @@
    "changed": [
     "/objects/0/pose/pos/1"
    ],
-   "note": ""
+   "note": "将升降平台 (lift) 的初始位姿中心 y 坐标修改为 3.0 米。"
   },
   {
    "id": "no_such_object",
@@ -341,7 +361,7 @@
    "kind": "应当拒绝",
    "instruction": "让门开合的时候发出吱呀的声音",
    "ok": false,
-   "why": "不该改却改了 1 处：[]",
+   "why": "应当拒绝却编造了 1 个操作：['/objects/1/events']",
    "ops": [
     {
      "op": "add",
@@ -356,19 +376,19 @@
          -3.0
         ],
         "extent": [
-         0.1,
-         2.0,
-         0.1
+         1.4,
+         2.4,
+         0.12
         ]
        },
-       "target": "door",
+       "target": "player",
        "action": "play_sound_creak"
       }
      ]
     }
    ],
    "changed": [],
-   "note": "Added an event to trigger a creaking sound when the door moves. The volume is centered on the door's pivot with a small extent to detect motion."
+   "note": "为门（objects/1）添加了事件，当玩家进入门的体积时触发吱呀声。"
   },
   {
    "id": "not_expressible_difficulty",
@@ -378,7 +398,7 @@
    "why": "正确拒绝",
    "ops": [],
    "changed": [],
-   "note": "要求“调高难度”是模糊的自然语言指令，无法直接映射到具体的 JSON Patch 操作。需要明确具体的修改目标（例如：加快电梯速度、缩短门开启时间、增加熔岩高度、加快矿车速度或改变其轨迹等）才能生成有效的修改。"
+   "note": "要求“调高难度”是模糊的自然语言指令，无法直接映射到具体的 JSON Patch 操作。需要明确具体的修改目标（例如：加快电梯速度、缩短门打开时间、增加熔岩坑大小、改变矿车轨迹等）才能生成有效的修改。"
   },
   {
    "id": "not_expressible_weather",
@@ -388,10 +408,10 @@
    "why": "正确拒绝",
    "ops": [],
    "changed": [],
-   "note": "The provided DSL and schema do not define a mechanism for adding weather effects like rain. The vocabulary is limited to static structures, objects with specific motion types, events, camera, and materials. There is no field for global environment settings or weather."
+   "note": "当前场景程序 DSL 和 schema 中未定义天气效果（如 rain）的配置字段或对象类型，无法通过 JSON Patch 添加。"
   }
  ],
  "model": "qwen3.5-27b-fp8",
- "passed": 15,
+ "passed": 17,
  "total": 20
 }

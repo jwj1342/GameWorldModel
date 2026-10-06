@@ -12,7 +12,10 @@
 // idIndex、ID 颜色、碰撞体这些属于管道，不该让模型写——DSL 那边也是编译器生成的，
 // 让模型写会把对比变得不公平。所以下面统一补齐。
 import * as THREE from 'three';
-import { idToColor } from './scene.js';
+import { idToColor } from './scene_dsl.js';
+// 顶层静态导入，不用 await import。main.js 里 buildScene 是同步调用的，
+// 返回 Promise 的话解构出来是 undefined，之前就栽在这。
+import { describe } from './model_scene.js';
 
 function colliderFromObject(obj) {
   const box = new THREE.Box3().setFromObject(obj);
@@ -22,7 +25,7 @@ function colliderFromObject(obj) {
             offset: [centre.x, centre.y, centre.z] }];
 }
 
-export async function buildSceneFromCode(program, kernelCfg) {
+export function buildSceneFromCode(program, kernelCfg) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(program?.style?.background ?? '#dddde3');
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 1.0); scene.add(hemi);
@@ -32,9 +35,8 @@ export async function buildSceneFromCode(program, kernelCfg) {
   sun.shadow.camera.right = sun.shadow.camera.top = 25;
   scene.add(sun);
 
-  const mod = await import('./model_scene.js');
-  if (typeof mod.describe !== 'function') throw new Error('模型写的模块没有导出 describe(THREE)');
-  const described = mod.describe(THREE);
+  if (typeof describe !== 'function') throw new Error('模型写的模块没有导出 describe(THREE)');
+  const described = describe(THREE);
   if (!Array.isArray(described)) throw new Error('describe(THREE) 要返回一个数组');
 
   const registry = [];

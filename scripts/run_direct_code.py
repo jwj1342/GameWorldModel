@@ -87,7 +87,12 @@ def main(argv: list[str]) -> int:
         if REQUIRED not in code:
             row["error"] = "没有导出 describe"; rows.append(row); continue
         (out / "model_scene.js").write_text(code, encoding="utf-8")
-        syn = subprocess.run(["node", "--check", str(out / "model_scene.js")], capture_output=True, text=True)
+        # node --check 把 .js 当成 CommonJS，碰到 export 会报语法错，
+        # 但模型写的本来就是 ES 模块、浏览器里也是 import 加载的。
+        # 所以校验时复制成 .mjs，否则每一份有效输出都会被误判成失败。
+        probe = out / "model_scene.mjs"; probe.write_text(code, encoding="utf-8")
+        syn = subprocess.run(["node", "--check", str(probe)], capture_output=True, text=True)
+        probe.unlink(missing_ok=True)
         row["syntax_ok"] = syn.returncode == 0
         if syn.returncode != 0:
             row["error"] = syn.stderr.strip()[:300]
