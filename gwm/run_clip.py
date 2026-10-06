@@ -1,7 +1,7 @@
 """End-to-end orchestration for one clip: perception -> generation + feedback loop -> binding -> playtest -> report.
 Usage: python -m gwm.run_clip --video data/clips/trimmed/x.mp4 --clip x [--phrases "a,b"] [--no-vlm] [--config configs/ablations/no_feedback.yaml] [--resume]"""
 from __future__ import annotations
-import argparse, json, os, shutil, subprocess, time, uuid
+import argparse, json, os, random, shutil, subprocess, time, uuid
 from pathlib import Path
 import numpy as np
 from .config import load_config, redact, site_name, REPO
@@ -24,12 +24,17 @@ def main(argv=None):
     ap.add_argument("--video", required=True); ap.add_argument("--clip", required=True); ap.add_argument("--out", default=None, help="run dir (default out/<clip>/<run_id>)")
     ap.add_argument("--phrases", default=None); ap.add_argument("--config", action="append", default=[]); ap.add_argument("--no-vlm", action="store_true"); ap.add_argument("--resume", default=None, help="existing run dir to resume")
     ap.add_argument("--prompt", default=None, help="gameplay prompt (MVP: platformer only)")
+    ap.add_argument("--seed", type=int, default=None, help="随机种子；覆盖 vlm.seed，并固定 random / numpy。同一配置换 seed 重跑即可得到多次独立样本")
     a = ap.parse_args(argv)
     cfg = load_config([REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *[REPO / c for c in a.config]])
+    if a.seed is not None:
+        cfg.setdefault("vlm", {})["seed"] = a.seed
+        random.seed(a.seed); np.random.seed(a.seed)
+    seed = (cfg.get("vlm") or {}).get("seed")
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     run_dir = Path(a.resume) if a.resume else Path(a.out or (Path(cfg["paths"]["out"]) / a.clip / run_id)); run_dir.mkdir(parents=True, exist_ok=True)
     log = ErrorLog(run_dir / "errors.jsonl")
-    manifest = {"run_id": run_dir.name, "clip": a.clip, "video": str(a.video), "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "git_commit": git_commit(), "node": os.uname().nodename, "config": redact(cfg), "args": vars(a), "stages": {}}
+    manifest = {"run_id": run_dir.name, "clip": a.clip, "video": str(a.video), "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "git_commit": git_commit(), "node": os.uname().nodename, "seed": seed, "config": redact(cfg), "args": vars(a), "stages": {}}
     (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
     def save(): manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S"); (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
 

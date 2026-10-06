@@ -57,6 +57,7 @@ class OpenAICompatClient:
         self.max_image_side = v.get("max_image_side", 768)
         self.use_response_format = bool(v.get("json_schema_response_format", True))
         self.max_calls = int((cfg.get("budget") or {}).get("max_vlm_calls", 0)) or None
+        self.seed = v.get("seed")          # 运行级随机种子；单次调用可用 chat(seed=...) 覆盖
     def chat(self, system, user_text, images=None, json_schema=None, temperature=None, max_tokens=None, seed=None) -> dict:
         if self.max_calls and self.calls >= self.max_calls:
             raise RuntimeError(f"用掉了 {self.calls} 次模型调用，超过 budget.max_vlm_calls={self.max_calls}")
@@ -74,7 +75,8 @@ class OpenAICompatClient:
             if self.cfg.get("reasoning") is not None: extra["reasoning"] = self.cfg["reasoning"]   # e.g. {"effort": "low"} or {"exclude": true}
             if self.cfg.get("provider_routing"): extra["provider"] = self.cfg["provider_routing"]
             if extra: kwargs["extra_body"] = extra
-        if seed is not None: kwargs["seed"] = seed
+        eff_seed = self.seed if seed is None else seed
+        if eff_seed is not None: kwargs["seed"] = eff_seed
         if json_schema is not None:
             # belt and braces: providers differ in how strictly they honour response_format, so the schema is also spelled out in the prompt
             kwargs["messages"][0]["content"] += "\n\nRespond with a single JSON object only (no prose, no markdown fences), matching exactly this JSON Schema (same keys, same nesting):\n" + json.dumps(json_schema)[:8000]

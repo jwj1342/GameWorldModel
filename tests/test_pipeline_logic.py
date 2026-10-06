@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from gwm.compiler.validate import validate
-from gwm.config import load_config
+from gwm.config import REPO, load_config
 from gwm.perception.evidence import classify_motion, obb_from_points
 from gwm.synthesis.direct import evidence_to_program, recentre_periodic
 
@@ -87,3 +87,37 @@ def test_binding_fills_the_slots_and_stays_valid():
     bound = bind(program, ev, CFG)
     assert validate(bound)["ok"]
     assert bound["binding"]["slots"]["player_spawn"] and bound["binding"]["slots"]["goal_volume"]
+
+
+def test_seed_reaches_the_model_call(monkeypatch):
+    """运行级 seed 要真的发到模型调用上，单次调用可以覆盖它。
+
+    之前 VLMClient 协议里就有 seed 参数、客户端也会透传，但整条管线没有任何地方传它，
+    所以"同一配置多跑几个 seed"这件事实际做不到。这个用例把接线钉住。
+    """
+    import yaml
+    from gwm.synthesis.vlm import OpenAICompatClient
+
+    sent = {}
+
+    def client_with(cfg_seed):
+        cfg = yaml.safe_load((REPO / "configs/default.yaml").read_text())
+        cfg["vlm"]["model"] = "stub"          # 跳过向服务端查询模型列表
+        cfg["vlm"]["seed"] = cfg_seed
+        c = OpenAICompatClient(cfg, None)
+
+        def capture(**kwargs):
+            sent.clear(); sent.update(kwargs); raise RuntimeError("stop before the network")
+
+        c.client.chat.completions.create = capture
+        return c
+
+    def seed_sent(cfg_seed, call_seed=None):
+        c = client_with(cfg_seed)
+        with pytest.raises(RuntimeError):
+            c.chat("sys", "user", **({"seed": call_seed} if call_seed is not None else {}))
+        return sent.get("seed", "absent")
+
+    assert seed_sent(None) == "absent"        # 不配就不发，保持原有行为
+    assert seed_sent(1234) == 1234            # 配了就发
+    assert seed_sent(1234, 99) == 99          # 单次调用覆盖运行级设置

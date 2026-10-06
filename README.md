@@ -73,6 +73,7 @@ python3 -m gwm.run_clip --video data/clips/trimmed/我的视频.mp4 --clip 我�
 
 | 看什么 | 去哪 |
 |---|---|
+| 项目在做什么、关键术语、新人从哪读起 | [docs/overview.md](docs/overview.md) |
 | 怎么装、怎么跑、需要多少资源 | [RUNNING.md](RUNNING.md) |
 | 想改代码，PR 流程和代码约定 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 系统怎么搭的：模块、数据流、接口契约、场景程序 DSL | [docs/architecture.md](docs/architecture.md) |
@@ -80,7 +81,7 @@ python3 -m gwm.run_clip --video data/clips/trimmed/我的视频.mp4 --clip 我�
 | 现在跑出什么结果、和设计差在哪、有哪些已知问题 | [docs/status.md](docs/status.md) |
 | 三段视频的实际产物，报告和截图 | [docs/results/](docs/results/) |
 | 相关工作 | [docs/related-work.md](docs/related-work.md) |
-| 研究提案 | [RP.md](RP.md) |
+| 研究提案（开工前写的，与 issue 冲突处以 issue 为准） | [RP.md](RP.md) |
 | 前期调研的原始报告 | [survey/](survey/) |
 
 ## 项目目录
