@@ -26,16 +26,27 @@ EDIT_SCHEMA = {
 }
 
 
+def _geom_brief(node: dict) -> str:
+    """几何部分要写清楚实际有哪些字段。只给 class 的话，模型会去猜 radius 还是
+    extent，猜错就生成一个指向不存在字段的补丁——第一次跑实测有两条栽在这上面。"""
+    g = node.get("geom") or {}
+    fields = {k: v for k, v in g.items() if k != "kind"}
+    return f"geom.kind={g.get('kind', '?')} {json.dumps(fields, ensure_ascii=False)[:110]}"
+
+
 def outline(program: dict) -> str:
     """给模型一份紧凑的程序结构，而不是整份 JSON，省 token 也少干扰。"""
     lines = []
-    for i, s in enumerate(program.get("static", [])):
-        lines.append(f"/static/{i}  id={s['id']}  class={s.get('class')}")
+    for i, n in enumerate(program.get("static", [])):
+        lines.append(f"/static/{i}  id={n['id']}  class={n.get('class')}  {_geom_brief(n)}"
+                     + (f"  material={n['material']!r}" if n.get("material") else ""))
     for i, o in enumerate(program.get("objects", [])):
         m = o.get("motion") or {}
         params = {k: v for k, v in m.items() if k != "type"}
-        lines.append(f"/objects/{i}  id={o['id']}  class={o.get('class')}  "
-                     f"motion={m.get('type', 'static')} {json.dumps(params, ensure_ascii=False)[:120]}")
+        lines.append(f"/objects/{i}  id={o['id']}  class={o.get('class')}  {_geom_brief(o)}  "
+                     f"motion={m.get('type', 'static')} {json.dumps(params, ensure_ascii=False)[:110]}"
+                     + (f"  material={o['material']!r}" if o.get("material") else "")
+                     + (f"  events={len(o['events'])} 条" if o.get("events") else ""))
     return "\n".join(lines)
 
 

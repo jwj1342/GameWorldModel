@@ -19,7 +19,9 @@ def judge(case: dict, r: dict) -> dict:
     """把一次编辑的结果判成通过或失败，并说明理由。"""
     if case.get("expect_refuse"):
         ok = not r["ops"]
-        return {"ok": ok, "why": "正确拒绝" if ok else f"不该改却改了 {len(r['ops'])} 处：{r['changed']}"}
+        if ok: return {"ok": True, "why": "正确拒绝"}
+        paths = [o.get("path") for o in r["ops"]]
+        return {"ok": False, "why": f"应当拒绝却编造了 {len(r['ops'])} 个操作：{paths}"}
 
     if not r["ok"]:
         return {"ok": False, "why": r["error"]}
