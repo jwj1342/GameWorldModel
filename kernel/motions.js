@@ -48,6 +48,9 @@ export function makePose(motion, base) {
   const ident = () => ({ pos: basePos.clone(), quat: baseQuat.clone() });
   switch (type) {
     case 'static': return ident;
+    // 物理驱动：位姿由 Rapier 仿真决定，不是时间的纯函数。
+    // 这里返回初始位姿，仅用于建体和 reset；运行时由 physics 回写 group。
+    case 'dynamic': return ident;
     case 'trajectory': {
       const kf = motion.keyframes ?? [];
       if (!kf.length) return ident;
@@ -112,4 +115,9 @@ export function makePose(motion, base) {
   }
 }
 
-export const MOTION_TYPES = ['static', 'trajectory', 'revolute', 'prismatic', 'periodic_translate', 'periodic_rotate', 'spin'];
+export const MOTION_TYPES = ['static', 'trajectory', 'revolute', 'prismatic', 'periodic_translate', 'periodic_rotate', 'spin', 'dynamic'];
+
+// 物理驱动的运动不能按时间求值，seek(t) 只能一步步推。
+// 以后加关节链时，它也属于这一类，所以留成一个列表。
+const SIMULATED_MOTION_TYPES = ['dynamic'];
+export function isSimulated(motion) { return SIMULATED_MOTION_TYPES.includes(motion?.type); }

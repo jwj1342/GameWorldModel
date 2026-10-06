@@ -1,0 +1,231 @@
+{
+ "meta": {
+  "clip": "collision_chain",
+  "fps": 30,
+  "duration": 6.0,
+  "units": "m",
+  "up": "y",
+  "notes": "手写场景，用来检验 DSL 的 dynamic 运动类型能不能表达自由刚体与碰撞。五个钢球排成一列放在地面上，最左边那个带初速度撞过去，动量沿链条传到最右边。注意这不是真正的牛顿摆：真实的牛顿摆用绳子把球吊起来，那需要关节约束，而关节链还没做（见 issue #23 的后半部分）。所以 data/clips/raw 里那段牛顿摆视频目前仍然还原不了，这个场景只覆盖了自由刚体加碰撞这一半。"
+ },
+ "style": {
+  "background": "#1b1b22"
+ },
+ "camera": {
+  "intrinsics": {
+   "fov_deg": 45,
+   "aspect": 1.3333,
+   "far": 60
+  },
+  "keyframes": [
+   {
+    "t": 0.0,
+    "pos": [
+     0.0,
+     1.6,
+     4.2
+    ],
+    "quat": [
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  ],
+  "interp": "linear"
+ },
+ "static": [
+  {
+   "id": "ground",
+   "class": "floor",
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     12,
+     0.2,
+     12
+    ],
+    "material": "#3a3a44"
+   },
+   "pose": {
+    "pos": [
+     0,
+     -0.1,
+     0
+    ]
+   },
+   "notes": "地面，球落下来会停在上面"
+  },
+  {
+   "id": "frame_bar",
+   "class": "beam",
+   "geom": {
+    "kind": "primitive",
+    "shape": "box",
+    "extent": [
+     3.2,
+     0.08,
+     0.08
+    ],
+    "material": "wood"
+   },
+   "pose": {
+    "pos": [
+     0,
+     2.3,
+     0
+    ]
+   },
+   "notes": "顶梁，只做视觉参照，不参与碰撞逻辑"
+  }
+ ],
+ "objects": [
+  {
+   "id": "ball_1",
+   "class": "ball",
+   "geom": {
+    "kind": "primitive",
+    "shape": "sphere",
+    "radius": 0.25,
+    "material": "metal"
+   },
+   "pose": {
+    "pos": [
+     -1.004,
+     1.2,
+     0.0
+    ]
+   },
+   "motion": {
+    "type": "dynamic",
+    "mass": 1.0,
+    "restitution": 0.97,
+    "linear_velocity": [
+     2.2,
+     0.0,
+     0.0
+    ]
+   },
+   "notes": "牛顿摆的钢球；运动来自重力与碰撞，不是脚本轨迹"
+  },
+  {
+   "id": "ball_2",
+   "class": "ball",
+   "geom": {
+    "kind": "primitive",
+    "shape": "sphere",
+    "radius": 0.25,
+    "material": "metal"
+   },
+   "pose": {
+    "pos": [
+     -0.502,
+     1.2,
+     0.0
+    ]
+   },
+   "motion": {
+    "type": "dynamic",
+    "mass": 1.0,
+    "restitution": 0.97
+   },
+   "notes": "牛顿摆的钢球；运动来自重力与碰撞，不是脚本轨迹"
+  },
+  {
+   "id": "ball_3",
+   "class": "ball",
+   "geom": {
+    "kind": "primitive",
+    "shape": "sphere",
+    "radius": 0.25,
+    "material": "metal"
+   },
+   "pose": {
+    "pos": [
+     0.0,
+     1.2,
+     0.0
+    ]
+   },
+   "motion": {
+    "type": "dynamic",
+    "mass": 1.0,
+    "restitution": 0.97
+   },
+   "notes": "牛顿摆的钢球；运动来自重力与碰撞，不是脚本轨迹"
+  },
+  {
+   "id": "ball_4",
+   "class": "ball",
+   "geom": {
+    "kind": "primitive",
+    "shape": "sphere",
+    "radius": 0.25,
+    "material": "metal"
+   },
+   "pose": {
+    "pos": [
+     0.502,
+     1.2,
+     0.0
+    ]
+   },
+   "motion": {
+    "type": "dynamic",
+    "mass": 1.0,
+    "restitution": 0.97
+   },
+   "notes": "牛顿摆的钢球；运动来自重力与碰撞，不是脚本轨迹"
+  },
+  {
+   "id": "ball_5",
+   "class": "ball",
+   "geom": {
+    "kind": "primitive",
+    "shape": "sphere",
+    "radius": 0.25,
+    "material": "metal"
+   },
+   "pose": {
+    "pos": [
+     1.004,
+     1.2,
+     0.0
+    ]
+   },
+   "motion": {
+    "type": "dynamic",
+    "mass": 1.0,
+    "restitution": 0.97
+   },
+   "notes": "牛顿摆的钢球；运动来自重力与碰撞，不是脚本轨迹"
+  }
+ ],
+ "binding": {
+  "template": "platformer_3p",
+  "slots": {
+   "player_spawn": [
+    0.0,
+    0.4,
+    2.2
+   ],
+   "goal_volume": {
+    "pos": [
+     3.6,
+     0.4,
+     0.0
+    ],
+    "extent": [
+     1.0,
+     1.4,
+     1.0
+    ]
+   },
+   "walkable": "auto",
+   "collectibles": [],
+   "hazards": []
+  }
+ },
+ "residual": null
+}

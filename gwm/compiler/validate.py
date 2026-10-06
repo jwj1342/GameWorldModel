@@ -105,6 +105,13 @@ def _check_motion(m: dict, path: str, duration, errors: list[dict], warnings: li
     if t in ("revolute", "prismatic", "periodic_translate", "periodic_rotate", "spin"):
         ax = m.get("axis")
         if ax is not None and (not _finite(ax) or sum(x * x for x in ax) < 1e-9): errors.append(_err(path + "/axis", "zero_axis", "axis must be a non-zero vector"))
+    if t == "dynamic":
+        # 物理驱动的物体靠重力和碰撞运动，脚本参数对它没有意义，写了多半是模型搞混了类型
+        stray = [k for k in ("keyframes", "schedule", "period", "amp", "rate_dps", "range_deg", "from_deg", "to_deg") if m.get(k) is not None]
+        if stray: warnings.append(_err(path, "ignored_params", f"dynamic ignores {', '.join(stray)}; motion comes from physics",
+                                       "remove them, or use a scripted motion type if the path is actually known"))
+        rest = m.get("restitution")
+        if rest is not None and not (0.0 <= rest <= 1.0): errors.append(_err(path + "/restitution", "bad_restitution", "restitution must be within [0, 1]"))
     if t == "revolute":
         r = m.get("range_deg")
         if r and r[0] > r[1]: errors.append(_err(path + "/range_deg", "bad_range", "range_deg must be [min, max]"))
