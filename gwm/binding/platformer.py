@@ -1,5 +1,6 @@
 """Rule-based gameplay binding for platformer_3p: spawn, goal, collectibles, hazards; add ground if the scene has none."""
 from __future__ import annotations
+from .affordance import classify, slots_from_roles
 import math
 import numpy as np
 
@@ -106,9 +107,14 @@ def bind(program: dict, evidence: dict | None, cfg: dict, prompt: str | None = N
     slots.setdefault("player_spawn", [float(spawn[0]), float(top + 1.2), float(spawn[2])])
     slots.setdefault("goal_volume", {"pos": [float(goal[0]), float(top + 1.0), float(goal[2])], "extent": [1.5, 2.0, 1.5]})
     slots.setdefault("walkable", "auto")
-    coll = [o["id"] for o in program.get("objects", []) if any(k in (o.get("class") or "").lower() for k in b["collectible_classes"])]
-    haz = [n["id"] for n in program.get("static", []) + program.get("objects", []) if any(k in ((n.get("class") or "") + " " + (n.get("material") or "")).lower() for k in b["hazard_classes"])]
+    # 按属性推断每个物体扮演什么角色，而不是拿 class 名去匹配一份封闭词表。
+    # 旧做法只在我们自己用游戏术语手写的场景上命中，真实视频里的物体叫
+    # toy_train、cardboard box，一个都匹配不上，所以玩法槽位全是空的。
+    roles = classify(program, b.get("affordance"))
+    picked = slots_from_roles(roles)
+    coll, haz = picked["collectibles"], picked["hazards"]
     slots.setdefault("collectibles", coll); slots.setdefault("hazards", haz)
+    notes.append("角色推断：" + "，".join(f"{i} 是{v['role']}" for i, v in roles.items() if v["role"] not in ("static_structure", "decoration")))
     # collectibles get the despawn event if missing
     for o in program.get("objects", []):
         if o["id"] in coll and not any(e.get("type") == "despawn_on_contact" for e in o.get("events", [])):

@@ -181,3 +181,37 @@ def test_gt_metrics_match_objects_and_distance():
 
     # 预测里一个都没有时，全部算漏检
     assert all(p is None for _, p, _ in match_objects(gt, {}, times, max_dist_m=3.0))
+def test_affordance_rules_separate_collectibles_from_structure():
+    """按属性推断角色的几条关键规则。
+
+    这些规则进论文方法章节（「视频展示的是世界，游戏角色是我们发明的」那一节），
+    所以判错会直接影响论文里的定性结果表。几个边界情况是实测踩出来的：
+    一级台阶刚够站人、硬币是扁片、门框是细长条。
+    """
+    from gwm.binding.affordance import classify
+
+    def scene(objects):
+        return {"static": [{"id": "ground", "class": "floor",
+                            "geom": {"kind": "primitive", "shape": "box", "extent": [24, 0.2, 24]},
+                            "pose": {"pos": [0, -0.1, 0]}}],
+                "objects": objects}
+
+    def role(obj):
+        return classify(scene([obj]))[obj["id"]]["role"]
+
+    box = lambda i, e, y=0.5, motion=None, cls="thing": {
+        "id": i, "class": cls, "geom": {"kind": "primitive", "shape": "box", "extent": e},
+        "pose": {"pos": [0, y, 0]}, **({"motion": motion} if motion else {})}
+
+    # 硬币是扁片：站不上去、比玩家小、块状，该是收集物
+    assert role(box("coin", [0.5, 0.06, 0.5], motion={"type": "spin"})) == "collectible"
+    # 门框是细长条，结构件不是收集物
+    assert role(box("frame", [0.22, 1.79, 0.08])) == "decoration"
+    # 一级台阶顶面 0.46 平米，刚够玩家站，是平台不是收集物
+    assert role(box("step", [1.5, 0.28, 0.31])) == "platform"
+    # 大而扁又在动，可以当会移动的平台
+    assert role(box("lift", [2.5, 0.3, 2.5], motion={"type": "periodic_translate"})) == "dynamic_platform"
+    # 在动、站不上去、够得着，会挡路
+    assert role(box("door", [0.1, 2.0, 1.2], motion={"type": "revolute"})) == "moving_obstacle"
+    # 危险物目前只能靠语义关键词，属性推不出来
+    assert role(box("pit", [4, 0.1, 4], y=0.05, cls="lava pool")) == "hazard"

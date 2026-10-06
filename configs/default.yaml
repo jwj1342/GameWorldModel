@@ -65,6 +65,11 @@ feedback:
   min_improvement: 0.01
 binding:
   template: platformer_3p
+  # 危险物还是靠关键词，因为「这东西危险吗」本质是语义判断，光看尺寸形状推不出来。
+  # 收集物、平台、障碍改成按属性推断了，见 gwm/binding/affordance.py。
+  affordance:
+    hazard_keywords: [lava, spike, water, fire, acid, 熔岩, 尖刺, 岩浆]
+  # 内核那边仍然用类名判定（kernel_config），暂时保留这两份词表
   collectible_classes: [coin, gem, key, star, pickup, ball, marble]
   hazard_classes: [lava, spike, water, fire, acid]
   add_ground_if_missing: true
