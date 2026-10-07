@@ -250,3 +250,35 @@ def test_eval_aggregation_pools_objects_not_clips():
 
     md = as_markdown({"甲": a})
     assert "甲" in md and "|" in md
+
+
+def test_gauge_alignment_absorbs_unobservable_but_not_real_errors():
+    """对齐要吃掉观测不到的规范差异，但不能吃掉真实的建模错误。
+
+    单目视频确定不了世界原点的水平位置和整体朝向，所以整体平移和偏航
+    不该算误差。但物体之间的相对结构错了、运动周期错了，必须照样暴露。
+    这个边界划错的话，指标要么永远在罚一个确定不了的量（之前就是这样，
+    实测整体偏了 8.3 米），要么把真错误也一起对齐掉。
+    """
+    from gwm.feedback.gt_metrics import align_gauge
+
+    gt = np.array([[0.0, 0, 0], [4.0, 0, 0], [0.0, 0, 3.0], [4.0, 1, 3.0]])
+
+    # 整体平移：观测不到，对齐之后残差应当接近 0
+    R, t = align_gauge(gt, gt + np.array([8.3, 0, -5.0]))
+    assert np.abs((gt + np.array([8.3, 0, -5.0])) @ R.T + t - gt).max() < 1e-6
+
+    # 整体偏航：同样观测不到
+    a = np.radians(37.0)
+    Ry = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
+    R, t = align_gauge(gt, gt @ Ry.T)
+    assert np.abs((gt @ Ry.T) @ R.T + t - gt).max() < 1e-6
+
+    # 相对结构错了：只挪动其中一个物体，对齐吃不掉，残差必须留下来
+    broken = gt.copy(); broken[1] += np.array([2.0, 0, 0])
+    R, t = align_gauge(gt, broken)
+    assert np.abs(broken @ R.T + t - gt).max() > 0.5
+
+    # 高度不对齐，y 方向是可观测的（地面已经压到 y=0）
+    R, t = align_gauge(gt, gt + np.array([0, 1.5, 0]))
+    assert abs(t[1]) < 1e-9
