@@ -215,3 +215,38 @@ def test_affordance_rules_separate_collectibles_from_structure():
     assert role(box("door", [0.1, 2.0, 1.2], motion={"type": "revolute"})) == "moving_obstacle"
     # 危险物目前只能靠语义关键词，属性推不出来
     assert role(box("pit", [4, 0.1, 4], y=0.05, cls="lava pool")) == "hazard"
+
+
+def test_eval_aggregation_pools_objects_not_clips():
+    """汇总方式决定了论文表格里的数对不对。
+
+    轨迹误差按物体汇总而不是按片段，否则物体少的片段权重会过高：
+    一个只有一个物体的片段，和一个有十个物体的片段，先按片段平均的话
+    前者的那一个物体会和后者的十个物体等权。
+    """
+    from gwm.feedback.report import aggregate, as_markdown
+
+    def run(per_object, acc, recall, precision):
+        return {"metrics": {"full": {
+            "trajectory": {"per_object": per_object, "median_m": 0, "max_m": 0, "n": len(per_object)},
+            "motion_type": {"accuracy": acc, "n": len(per_object), "confusion": {"static": {"spin": 1}}},
+            "objects": {"recall": recall, "precision": precision},
+        }}}
+
+    a = aggregate([run({"x": 1.0}, 1.0, 1.0, 1.0),
+                   run({"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}, 0.5, 0.5, 0.5)])
+
+    # 五个物体：一个 1.0、四个 0.0，所以中位数是 0.0、均值 0.2
+    assert a["trajectory_m"]["n"] == 5
+    assert abs(a["trajectory_m"]["median"] - 0.0) < 1e-9
+    assert abs(a["trajectory_m"]["mean"] - 0.2) < 1e-9
+    # 准确率是片段级的量，按片段汇总：两个片段 1.0 和 0.5
+    assert a["motion_type_accuracy"]["n"] == 2
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.75) < 1e-9
+    # 混淆矩阵要累加
+    assert a["confusion"]["static->spin"] == 2
+    # 没有数据时不能假装有
+    assert aggregate([])["trajectory_m"] is None
+
+    md = as_markdown({"甲": a})
+    assert "甲" in md and "|" in md

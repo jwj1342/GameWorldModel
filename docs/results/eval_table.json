@@ -1,0 +1,106 @@
+{
+ "full": {
+  "local_inline": {
+   "window": "full",
+   "n_runs": 1,
+   "trajectory_m": null,
+   "motion_type_accuracy": null,
+   "object_recall": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_precision": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "confusion": {}
+  }
+ },
+ "holdout": {
+  "local_inline": {
+   "window": "holdout",
+   "n_runs": 1,
+   "trajectory_m": null,
+   "motion_type_accuracy": null,
+   "object_recall": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_precision": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "confusion": {}
+  }
+ },
+ "rows": [
+  {
+   "run": "out/handwritten_playground/20261006-132217-2de6",
+   "clip": "handwritten_playground",
+   "config": "local_inline",
+   "metrics": {
+    "full": {
+     "trajectory": {
+      "median_m": null,
+      "max_m": null,
+      "n": 0,
+      "per_object": {}
+     },
+     "motion_type": {
+      "accuracy": null,
+      "n": 0,
+      "confusion": {}
+     },
+     "objects": {
+      "gt": 4,
+      "pred": 5,
+      "matched": 0,
+      "recall": 0.0,
+      "precision": 0.0
+     },
+     "window_s": [
+      0.0,
+      7.9
+     ]
+    },
+    "holdout": {
+     "trajectory": {
+      "median_m": null,
+      "max_m": null,
+      "n": 0,
+      "per_object": {}
+     },
+     "motion_type": {
+      "accuracy": null,
+      "n": 0,
+      "confusion": {}
+     },
+     "objects": {
+      "gt": 4,
+      "pred": 5,
+      "matched": 0,
+      "recall": 0.0,
+      "precision": 0.0
+     },
+     "window_s": [
+      6.32,
+      7.9
+     ]
+    },
+    "holdout_frac": 0.2,
+    "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+   }
+  }
+ ],
+ "skipped": [],
+ "markdown_full": "| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 物体召回 | 物体精确率 |\n|---|---|---|---|---|---|\n| local_inline | 1 | — | — | 0.000 | 0.000 |",
+ "markdown_holdout": "| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 物体召回 | 物体精确率 |\n|---|---|---|---|---|---|\n| local_inline | 1 | — | — | 0.000 | 0.000 |"
+}
