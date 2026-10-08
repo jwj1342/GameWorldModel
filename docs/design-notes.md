@@ -526,6 +526,16 @@ guess = result["motion_guess"]
 
 标量角度转换不需要改动。此 API 简化不影响 Evidence v1 数据适配。
 
+旋转拟合对绕固定轴的有符号角度执行解缠绕，避免总转角超过 180° 后失效。
+这要求采样足够密集：相邻帧无法唯一确定超过半圈的旋转，遗漏的整圈也无法从四元数恢复。
+相邻观测恰为半圈时返回 unknown，不猜旋转方向。固定轴模型仍不等价于任意三维旋转。
+
+朝向不可靠时保留位置支持的静止候选，但旋转残差与朝向状态标记 unknown。
+`perception.motion.unreliable_orientation_static_confidence_cap` 的内置默认值为 0.50，
+可按需覆盖；这是拟合评分上限，不是实测观测置信度。默认低于主假设门槛 0.55，
+因此输出 unknown 并保留位置支持候选，而非丢弃信息或宣称物体没有转动。
+显式放宽配置后可能输出低置信度 static，朝向未知标记仍保留；位置平移证据不因此清零。
+
 ### Candidate Preflight 与保守 Repair
 
 `validate_candidate(program)` 检查 Schema、引用和几何，包括非有限变换、四元数、穿透及支撑接触。

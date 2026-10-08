@@ -20,6 +20,7 @@ DEFAULTS = {
     "static_pos_thresh_m": 0.05,
     "static_pos_frac_of_size": 0.15,
     "static_rot_thresh_deg": 3.0,
+    "unreliable_orientation_static_confidence_cap": 0.50,
     "translation_min_displacement_m": 0.08,
     "translation_residual_frac": 0.12,
     "rotation_min_angle_deg": 12.0,
@@ -48,7 +49,7 @@ def _settings(cfg: dict) -> dict:
     )
     if any(isinstance(out[key], bool) or not isinstance(out[key], (int, float)) or not math.isfinite(out[key]) or out[key] <= 0 for key in positive):
         raise ValueError("motion evidence thresholds must be finite and positive")
-    ratios = ("max_missing_fraction", "min_mean_visible_fraction", "min_primary_confidence", "min_candidate_confidence", "min_hypothesis_margin", "periodic_min_r2", "revolute_axis_stability")
+    ratios = ("max_missing_fraction", "min_mean_visible_fraction", "min_primary_confidence", "min_candidate_confidence", "min_hypothesis_margin", "periodic_min_r2", "revolute_axis_stability", "unreliable_orientation_static_confidence_cap")
     if any(isinstance(out[key], bool) or not isinstance(out[key], (int, float)) or not 0 <= out[key] <= 1 for key in ratios):
         raise ValueError("motion confidence and coverage thresholds must be in [0, 1]")
     return out
@@ -120,7 +121,9 @@ def _orientation_signal(quaternions: np.ndarray) -> tuple[np.ndarray, np.ndarray
         return np.zeros(len(vectors)), np.array([0.0, 1.0, 0.0]), 1.0
     _u, singular, vt = np.linalg.svd(vectors - vectors.mean(axis=0), full_matrices=False)
     axis = vt[0]
-    angles = vectors @ axis
+    # Principal rotation vectors wrap at +/-pi; fit the continuous signed signal.
+    # This assumes adjacent observations resolve less than a half turn.
+    angles = np.unwrap(vectors @ axis)
     if len(angles) > 1 and angles[-1] < angles[0]:
         axis, angles = -axis, -angles
     stability = float(singular[0] ** 2 / max(float((singular ** 2).sum()), 1e-12))
@@ -191,7 +194,11 @@ def estimate_motion(
     camera_pose_available: bool = True,
     orientation_reliable: bool = True,
 ) -> dict:
-    """Fit competing existing motion types and return a primary guess plus alternatives."""
+    """Fit existing motion types; rotation sampling must resolve sub-half-turn steps.
+
+    Hidden full turns between samples cannot be recovered from quaternions alone.
+    An unreliable orientation preserves positional evidence, not proof of no spin.
+    """
     settings = _settings(cfg)
     ts, local_pos, local_quat = _validate_inputs(times, positions, quaternions)
     support = {"frames": int(len(ts)), "span": round(float(ts[-1] - ts[0]), 6) if len(ts) > 1 else 0.0,
@@ -221,14 +228,22 @@ def estimate_motion(
     static_scale = max(float(settings["static_pos_thresh_m"]), float(settings["static_pos_frac_of_size"]) * size_diag, 1e-6)
     centered = pos - pos.mean(axis=0)
     static_pos_rmse = float(np.sqrt(np.mean(np.sum(centered ** 2, axis=1))))
+    if orientation_reliable:
+        rotations = R.from_quat(world_quat)
+        steps = (rotations[:-1].inv() * rotations[1:]).magnitude()
+        if np.any(np.isclose(steps, math.pi, rtol=0.0, atol=1e-9)):
+            return _unknown("half-turn sampling leaves rotation direction ambiguous", support)
     angles, rotation_axis, axis_stability = _orientation_signal(world_quat)
     rotation_deg = np.degrees(angles)
     static_rot_rmse = float(np.sqrt(np.mean((rotation_deg - rotation_deg.mean()) ** 2)))
     static_score = math.exp(-0.5 * (static_pos_rmse / static_scale) ** 2 - 0.5 * (static_rot_rmse / float(settings["static_rot_thresh_deg"])) ** 2)
     if not orientation_reliable:
-        static_score = 0.0  # position alone cannot prove absence of rotation
+        # Position is still measured, but the absence of rotation is not.
+        static_score = float(settings["unreliable_orientation_static_confidence_cap"]) * math.exp(-0.5 * (static_pos_rmse / static_scale) ** 2)
     candidates = [_candidate("static", static_score, static_pos_rmse, residual_unit="m",
-                             position_residual_m=round(static_pos_rmse, 6), rotation_residual_deg=round(static_rot_rmse, 6))]
+                             position_residual_m=round(static_pos_rmse, 6),
+                             rotation_residual_deg=round(static_rot_rmse, 6) if orientation_reliable else "unknown",
+                             orientation_state="observed" if orientation_reliable else "unknown")]
 
     design = np.column_stack([ts - ts[0], np.ones(len(ts))])
     coeff, *_ = np.linalg.lstsq(design, pos, rcond=None)
@@ -319,5 +334,6 @@ def estimate_motion(
                   "candidate_margin": round(float(margin), 6), "coordinate_space": "world",
                   "missing_fraction": support["missing_fraction"], "max_gap_s": support["max_gap_s"],
                   "mean_visible_fraction": support["mean_visible_fraction"],
-                  "candidate_details": ranked, "notes": "competing hypotheses fitted in aligned world coordinates"})
+                  "candidate_details": ranked,
+                  "notes": "competing hypotheses fitted in aligned world coordinates" if orientation_reliable else "position-supported hypothesis; object orientation is unknown"})
     return {"motion_guess": guess, "hypothesis": _hypothesis(ranked)}

@@ -1,5 +1,6 @@
 """Synthetic observations exercise motion evidence without loading any model."""
 import numpy as np
+import pytest
 from scipy.spatial.transform import Rotation as R
 
 from gwm.perception.motion import estimate_motion
@@ -126,3 +127,70 @@ def test_unreliable_orientation_does_not_force_static_or_spin():
     guess = _result(times, positions, degrees=30 * times, orientation_reliable=False)["motion_guess"]
     assert guess["type"] == "unknown"
     assert "orientation" in guess["notes"]
+    static = next(c for c in guess["candidate_details"] if c["type"] == "static")
+    assert static["confidence"] == 0.5
+    assert static["position_residual_m"] == 0
+    assert static["rotation_residual_deg"] == "unknown"
+    assert static["orientation_state"] == "unknown"
+
+
+@pytest.mark.parametrize("total", [179, 181, 270, 360, 720, -270, -360, -720])
+def test_spin_across_principal_angle_boundary(total):
+    times = np.linspace(0, 8, 65)
+    positions = np.tile([0.0, 0.5, 0.0], (len(times), 1))
+    guess = _result(times, positions, degrees=total * times / 8)["motion_guess"]
+    assert guess["type"] == "spin"
+    assert np.allclose(np.asarray(guess["axis"]) * guess["rate"], [0, total / 8, 0], atol=1e-6)
+    assert guess["residual"] < 1e-6
+
+
+def test_spin_sign_flipped_quaternions_and_arbitrary_axis():
+    times = np.linspace(0, 8, 65)
+    axis = np.array([1., 2., 3.]) / np.sqrt(14)
+    quats = R.from_rotvec(np.radians(720 * times / 8)[:, None] * axis).as_quat()
+    quats[::2] *= -1  # q and -q encode the same physical orientation.
+    positions = np.tile([0.0, 0.5, 0.0], (len(times), 1))
+    guess = estimate_motion(times, positions, quats, CFG)["motion_guess"]
+    assert guess["type"] == "spin"
+    assert np.allclose(np.asarray(guess["axis"]) * guess["rate"], 90 * axis, atol=1e-6)
+
+
+def test_periodic_rotation_crosses_principal_angle_boundary():
+    times = np.linspace(0, 8, 129)
+    degrees = 220 * np.sin(2 * np.pi * times / 4)
+    positions = np.tile([0.0, 0.5, 0.0], (len(times), 1))
+    guess = _result(times, positions, degrees=degrees)["motion_guess"]
+    assert guess["type"] == "periodic_rotate"
+    assert abs(guess["period"] - 4) < 0.15
+    assert abs(guess["amp_deg"] - 220) < 10
+
+
+def test_half_turn_sample_direction_is_unknown():
+    times = np.linspace(0, 4, 5)
+    positions = np.tile([0.0, 0.5, 0.0], (len(times), 1))
+    guess = _result(times, positions, degrees=180 * times)["motion_guess"]
+    assert guess["type"] == "unknown"
+    assert "sampling" in guess["notes"]
+
+
+def test_unreliable_orientation_does_not_erase_translation():
+    times = np.linspace(0, 4, 17)
+    positions = np.stack([0.4 * times, np.ones_like(times), np.zeros_like(times)], axis=1)
+    guess = _result(times, positions, degrees=120 * times, orientation_reliable=False)["motion_guess"]
+    assert guess["type"] == "prismatic"
+    assert guess["conf"] > 0.9
+    assert "orientation is unknown" in guess["notes"]
+
+
+def test_unreliable_orientation_static_cap_is_configurable_and_not_a_measurement():
+    times = np.linspace(0, 3, 13)
+    positions = np.tile([0.0, 0.5, 0.0], (len(times), 1))
+    cfg = {"motion": {"unreliable_orientation_static_confidence_cap": 0.6}}
+    guess = estimate_motion(times, positions, _quats(times), cfg, orientation_reliable=False)["motion_guess"]
+    assert guess["type"] == "static"
+    assert guess["conf"] == 0.6
+    assert guess["rotation_residual_deg"] == "unknown"
+    assert "orientation is unknown" in guess["notes"]
+    with pytest.raises(ValueError):
+        estimate_motion(times, positions, _quats(times), {"motion": {
+            "unreliable_orientation_static_confidence_cap": 1.1}}, orientation_reliable=False)
