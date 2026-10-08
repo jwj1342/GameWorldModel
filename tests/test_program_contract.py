@@ -1,10 +1,12 @@
 """场景程序的契约：模型写出来的东西必须过校验，编译出来的东西必须和内核对得上。
 这两条一旦破了，整条管线会静默产出坏场景，所以值得测。"""
 import copy, json
+from html.parser import HTMLParser
 from pathlib import Path
 
 from gwm.compiler.bundle import kernel_config
-from gwm.compiler.validate import validate
+from gwm.compiler.compile import compile_program
+from gwm.compiler.validate import validate, validate_candidate
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = json.loads((REPO / "examples/handwritten/program.json").read_text())
@@ -14,6 +16,29 @@ def test_shipped_example_is_valid():
     """示例程序是文档和调试的入口，它必须一直能过校验。"""
     r = validate(EXAMPLE)
     assert r["ok"], r["errors"]
+
+
+def test_compiled_html_declares_inline_favicon(tmp_path, monkeypatch):
+    """Avoid an automatic favicon 404 without suppressing browser errors."""
+    monkeypatch.setattr("gwm.compiler.bundle._copy_vendor", lambda _: None)
+    result = compile_program(EXAMPLE, tmp_path / "game")
+    assert result["ok"]
+    html = (tmp_path / "game/index.html").read_bytes()
+    assert html == (REPO / "kernel/index.html").read_bytes()
+
+    class Icons(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.hrefs = []
+
+        def handle_starttag(self, tag, attrs):
+            fields = dict(attrs)
+            if tag == "link" and "icon" in (fields.get("rel") or "").split():
+                self.hrefs.append(fields.get("href"))
+
+    parser = Icons()
+    parser.feed(html.decode("utf-8"))
+    assert parser.hrefs == ["data:,"]
 
 
 def test_validation_catches_what_a_model_gets_wrong():
@@ -40,3 +65,45 @@ def test_kernel_config_matches_the_scene_order():
     assert len(coin) == len(next(o for o in EXAMPLE["objects"] if o["id"] == "coin")["instances"])
     assert len({tuple(r["color"]) for r in kc["registry"]}) == len(kc["registry"])   # 颜色不能撞，否则掩码会混
     assert kc["collectible_classes"] and kc["hazard_classes"]
+
+
+def test_candidate_report_is_stable_and_model_independent():
+    report = validate_candidate(EXAMPLE, evidence={"unused_by_preflight": True})
+    assert report["version"] == "1.0" and report["ok"]
+    assert report["findings"] == report["warnings"]
+    assert all({"stage", "severity", "path", "code", "message", "suggestion"} <= set(f)
+               for f in report["findings"])
+    json.dumps(report)
+
+
+def test_geometry_rejects_zero_and_non_unit_quaternions():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][0]["pose"]["quat"] = [0, 0, 0, 0]
+    report = validate_candidate(program)
+    assert not report["ok"]
+    assert any(e["code"] == "zero_quaternion" and e["stage"] == "geometry" for e in report["errors"])
+    program["objects"][0]["pose"]["quat"] = [0, 0, 0, 2]
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "non_unit_quaternion" for e in report["errors"])
+
+
+def test_geometry_rejects_non_finite_camera_transform():
+    program = copy.deepcopy(EXAMPLE)
+    program["camera"]["keyframes"][0]["pos"][0] = float("inf")
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "non_finite_transform" for e in report["errors"])
+
+
+def test_geometry_rejects_ground_penetration():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][2]["pose"]["pos"][1] = -1.0
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "ground_penetration" for e in report["errors"])
+
+
+def test_geometry_checks_support_contact():
+    program = copy.deepcopy(EXAMPLE)
+    program["objects"][2]["support"] = "ground"
+    program["objects"][2]["pose"]["pos"] = [20.0, 0.4, 20.0]
+    report = validate_candidate(program)
+    assert not report["ok"] and any(e["code"] == "support_no_overlap" for e in report["errors"])
