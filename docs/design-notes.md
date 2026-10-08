@@ -561,3 +561,110 @@ Holodeck（CVPR 2024）的配方去掉几何项再加上图像查询：查询 = 
 - 引入 CC-BY 必须附 attribution 清单；排除 NC / ND / SA。
 - 不打包 Mixamo、Sketchfab 下载物、ShapeNet、Toys4K、3D-FUTURE，改为提供获取脚本。
 - 若生成资产将用于训练数据，选 MIT / Apache 系生成模型（TRELLIS.2、TripoSG、Direct3D-S2、PartCrafter、Step1X-3D），避开 Hunyuan3D 系的地域与训练限制。
+
+## 证据与验证门禁
+
+目前接通的是 Evidence → 候选 Program → 校验与保守修复 → 编译 → 渲染验证 → 试玩。
+主动感知请求、定向 observation 和 Evidence Update 保留在独立功能分支，待 Updated Evidence
+能喂回重新合成后再单独集成；本管线不输出尚无后续消费阶段的请求文件。
+
+### Evidence 契约与质量评估
+
+正式契约位于 `gwm/perception/schema/evidence.schema.json`，统一入口是
+`validate_evidence()`。旧格式数据经 `adapt_legacy_evidence()` 适配，缺失的观测、属性和数值置信度
+保留为 `unknown` 并产生警告，不通过默认值伪造证据。帧顺序、引用、track 身份、范围及必需字段
+使用结构化诊断报告。二维可见状态与数值可见比例分别记录，不相互替代。
+
+`assess_evidence_quality()` 分别记录逐对象覆盖、bbox/mask/depth/可见性实测覆盖、track 缺口、
+相机覆盖、属性 unknown、身份歧义和运动支持。结构损坏与关键引用错误为 `block`，
+信息不足通常为 `warn`；质量决策与诊断会传递给生成器，并保存为 `evidence_quality.json`。
+通过契约检查不等于具备充分的三维重建证据。
+
+文件与接口使用语义化名称，格式版本仍由 Schema 内部的 `schema_version` 约束为 `2.0`；
+此次命名整理不改变数据格式、旧数据适配行为或诊断代码。适配器的公共名称统一为
+`adapt_legacy_evidence()`，模块导入和包导出均已更新，不保留旧编号名称的别名。
+验证入口的适配开关同样命名为 `adapt_legacy`，默认仍为 true；显式关键字调用需使用
+`validate_evidence(data, adapt_legacy=False)`，位置参数调用不受影响。
+
+### 多帧关联与运动接口
+
+`DetectionProvider.detect()` 提供检测记录，`associate_detections()` 独立关联。单关键帧模式保留
+首帧／中帧回退；多关键帧模式允许晚出现与遮挡恢复，身份不可靠时记录候选，不强制合并。
+主分支的 `NullSegmentationBackend` 回退以及 `gwm.taxonomy` 的公共类别和 ID 规则继续使用。
+
+运动统一入口为 `estimate_motion(times, positions, quaternions, config, ...)`，输入分别为
+`[N]` 时间、`[N,3]` 位置和 `[N,4]` 的 xyzw 四元数。相机空间输入需提供相机位姿，转换到
+Y 向上的世界坐标后拟合静态、平移、绕轴和周期假设；证据不足返回未知或竞争候选。
+返回值包含 `motion_guess` 和 `hypothesis`，不再仅返回旧运动字典。
+
+API 变更：移除只为旧 yaw 调用提供转发的 `evidence.classify_motion()` 与
+`motion.classify_motion_legacy()`。生产路径和主分支的数值测试均直接使用 `estimate_motion()`。
+调用方若只有绕 Y 轴的角度，应自行转换；单轴批量角度使用显式列向量，兼容 SciPy 1.13.1 和 1.17.0：
+
+```python
+from scipy.spatial.transform import Rotation
+
+quaternions = Rotation.from_euler("y", yaw.reshape(-1, 1)).as_quat()
+result = estimate_motion(times, positions, quaternions, config, coordinate_space="world")
+guess = result["motion_guess"]
+```
+
+标量角度转换不需要改动。此 API 简化不影响旧格式 Evidence 数据适配。
+
+旋转拟合对绕固定轴的有符号角度执行解缠绕，避免总转角超过 180° 后失效。
+这要求采样足够密集：相邻帧无法唯一确定超过半圈的旋转，遗漏的整圈也无法从四元数恢复。
+相邻观测恰为半圈时返回 unknown，不猜旋转方向。固定轴模型仍不等价于任意三维旋转。
+
+朝向不可靠时保留位置支持的静止候选，但旋转残差与朝向状态标记 unknown。
+`perception.motion.unreliable_orientation_static_confidence_cap` 的内置默认值为 0.50，
+可按需覆盖；这是拟合评分上限，不是实测观测置信度。默认低于主假设门槛 0.55，
+因此输出 unknown 并保留位置支持候选，而非丢弃信息或宣称物体没有转动。
+显式放宽配置后可能输出低置信度 static，朝向未知标记仍保留；位置平移证据不因此清零。
+
+### Candidate Preflight 与保守 Repair
+
+`validate_candidate(program)` 检查 Schema、引用和几何，包括非有限变换、四元数、穿透及支撑接触。
+`repair_candidate(program, evidence, diagnostics, config)` 返回独立副本、repair report 和 unresolved。
+传入诊断必须与当前 Program 的重新验证一致。
+
+默认 `candidate_repair.mode: off`。`report` 在副本上试算，将建议写入 `proposed_repairs`，返回
+未修改的 Program；`apply` 最多执行 `max_passes` 轮 validate → repair → validate。Writer 仅在
+模式不为 `off` 时调用。每次修改记录规则、字段路径、前后值、Evidence 引用、置信度与原因。
+
+规则只允许接近单位的有限四元数归一化，以及明确支撑关系的静态物体沿世界 Y 轴小幅贴面。
+贴面要求质量为 `proceed`、同一来源 clip、米制 Y 向上坐标、可靠且一致的几何和接触观测，以及
+唯一且近水平的静态支撑面。相对尺度、动态物体、合法悬浮物体、非有限坐标、零四元数、
+歧义支撑、较大位移或语义冲突保持 unresolved。修复有界且幂等。
+
+```python
+from gwm.compiler.validate import validate_candidate
+from gwm.compiler.repair import repair_candidate
+
+initial = validate_candidate(program)
+fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
+```
+
+### 渲染验证与配置分组
+
+最终绑定后的 Program 重新渲染 RGB/depth/ID，通过 `validate_render_result()` 检查图像存在、
+解码、尺寸与空白、ID 注册、对象可见性、动态变换、时间戳及浏览器执行错误。
+结果保存为 `render_validation.json`，不使用单一总分。默认 `report` 记录问题继续原流程；
+`enforce` 遇到阻断诊断时停止在试玩前，不自动修改 Program。
+
+`configs/default.yaml` 保留影响证据判定及安全边界的阈值，按功能分组：
+
+| 配置组 | 用途 |
+|---|---|
+| `perception.detection_keyframes` / `association` | 检测采样与多帧关联 |
+| `perception.motion` | 最小证据、假设拟合残差与置信度 |
+| `evidence_quality` | 实测覆盖、缺口与歧义门禁 |
+| `candidate_repair` | 模式、轮数及安全修复容差 |
+| `render_validation` | 图像、可见性、运动与执行验证 |
+
+主动感知和定向观测专属配置随功能拆出；旧 yaw 分类器移除后不再使用的自相关、相机漂移
+和运动一致性阈值一并移除。仍参与判定的阈值保持配置化，重复轴稳定性配置保留原实际生效值 0.9。
+渲染评分默认的 `feedback.passes: [rgb, id]` 与
+最终验证所需的 RGB/depth/ID 三通道是两个不同用途，保持 PR #1 的评分修复。
+
+CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
+安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
