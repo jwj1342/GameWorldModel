@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from gwm.perception.contract import adapt_evidence_v1, validate_evidence
+from gwm.perception.contract import adapt_legacy_evidence, validate_evidence
 from gwm.synthesis.direct import evidence_to_program
 
 
@@ -36,7 +36,7 @@ def _object(object_id="object_1", track_id="track_1"):
     }
 
 
-def _v2():
+def _structured_evidence():
     return {
         "schema_version": "2.0",
         "meta": {"clip": "synthetic", "duration": 1.0, "scale": "relative"},
@@ -57,7 +57,7 @@ def _v2():
     }
 
 
-def _v1():
+def _legacy_evidence():
     return {
         "meta": {"clip": "legacy", "duration": 1.0, "scale": "relative", "geometry_frames": [0, 1],
                  "geometry_backend": "legacy_geometry", "segmentation_backend": "legacy_segmentation", "tracks_backend": "legacy_tracker"},
@@ -73,14 +73,42 @@ def _v1():
     }
 
 
-def test_valid_evidence_v2():
-    report = validate_evidence(_v2())
+def test_semantic_schema_name_preserves_internal_format_version():
+    from gwm.perception import adapt_legacy_evidence as exported_adapter, evidence_schema
+    from gwm.perception.contract import SCHEMA_PATH
+
+    schema = evidence_schema()
+    assert SCHEMA_PATH.name == "evidence.schema.json"
+    assert schema["$id"] == "https://gameworldmodel/evidence.schema.json"
+    assert schema["title"] == "GameWorldModel Structured Evidence"
+    assert schema["properties"]["schema_version"] == {"const": "2.0"}
+    assert exported_adapter is adapt_legacy_evidence
+
+
+def test_structured_evidence_adaptation_returns_unchanged_independent_copy():
+    original = _structured_evidence()
+    adapted, warnings = adapt_legacy_evidence(original)
+    assert adapted == original and adapted is not original and warnings == []
+    adapted["objects"][0]["id"] = "different"
+    assert original["objects"][0]["id"] == "object_1"
+
+
+def test_valid_structured_evidence():
+    report = validate_evidence(_structured_evidence())
     assert report["ok"] and not report["adapted"]
     assert report["errors"] == [] and report["warnings"] == []
 
 
+def test_legacy_adaptation_can_be_disabled_by_semantic_keyword():
+    legacy = _legacy_evidence()
+    report = validate_evidence(legacy, adapt_legacy=False)
+    assert not report["ok"] and not report["adapted"]
+    assert "schema_version" not in legacy
+    assert validate_evidence(_structured_evidence(), adapt_legacy=False)["ok"]
+
+
 def test_unknown_information_is_explicit_and_warned():
-    evidence = _v2()
+    evidence = _structured_evidence()
     observation = evidence["objects"][0]["observations"][0]
     for field in ("bbox", "mask_ref", "visible_fraction", "depth"):
         observation[field] = "unknown"
@@ -93,7 +121,7 @@ def test_unknown_information_is_explicit_and_warned():
 
 
 def test_visibility_state_is_optional_and_does_not_imply_fraction():
-    evidence = _v2()
+    evidence = _structured_evidence()
     observation = evidence["objects"][0]["observations"][0]
     observation["visibility_state"] = "visible"
     observation["visible_fraction"] = "unknown"
@@ -104,14 +132,14 @@ def test_visibility_state_is_optional_and_does_not_imply_fraction():
 
 
 def test_invalid_visibility_state_is_rejected():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["observations"][0]["visibility_state"] = "unverified_occlusion_reason"
     report = validate_evidence(evidence)
     assert not report["ok"] and any(error["code"] == "schema" for error in report["errors"])
 
 
 def test_unknown_visibility_state_warns_without_blocking():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["observations"][0]["visibility_state"] = "unknown"
     report = validate_evidence(evidence)
     assert report["ok"]
@@ -119,28 +147,28 @@ def test_unknown_visibility_state_warns_without_blocking():
 
 
 def test_bad_frame_reference_is_rejected():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["observations"][0]["frame_index"] = 99
     report = validate_evidence(evidence)
     assert not report["ok"] and any(error["code"] == "unknown_frame_ref" for error in report["errors"])
 
 
 def test_invalid_confidence_is_rejected_by_schema():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["attribute_confidence"]["class"] = 1.2
     report = validate_evidence(evidence)
     assert not report["ok"] and any(error["code"] == "schema" for error in report["errors"])
 
 
 def test_unknown_schema_version_is_not_silently_migrated():
-    evidence = _v2(); evidence["schema_version"] = "3.0"
+    evidence = _structured_evidence(); evidence["schema_version"] = "3.0"
     report = validate_evidence(evidence)
     assert not report["ok"] and not report["adapted"]
     assert any(error["code"] == "schema" for error in report["errors"])
 
 
 def test_identity_ambiguity_has_explicit_candidates():
-    evidence = _v2()
+    evidence = _structured_evidence()
     second = _object("object_2", "track_2")
     second["observations"][0]["mask_ref"] = "masks.npz#track_2__0"
     evidence["objects"].append(second)
@@ -156,7 +184,7 @@ def test_identity_ambiguity_has_explicit_candidates():
 
 
 def test_order_and_track_consistency_are_checked():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["observations"] = [
         _observation(frame_index=1, t=1.0),
         _observation(frame_index=0, track_id="other_track", t=0.0),
@@ -166,9 +194,9 @@ def test_order_and_track_consistency_are_checked():
     assert {"observation_time_order", "track_mismatch"} <= codes
 
 
-def test_v1_migration_is_loss_aware_and_does_not_mutate_input():
-    legacy = _v1(); original = copy.deepcopy(legacy)
-    migrated, migration_warnings = adapt_evidence_v1(legacy)
+def test_legacy_adaptation_is_loss_aware_and_does_not_mutate_input():
+    legacy = _legacy_evidence(); original = copy.deepcopy(legacy)
+    migrated, migration_warnings = adapt_legacy_evidence(legacy)
     report = validate_evidence(legacy)
     assert legacy == original
     assert migrated["schema_version"] == "2.0" and report["ok"] and report["adapted"]
@@ -180,7 +208,7 @@ def test_v1_migration_is_loss_aware_and_does_not_mutate_input():
 
 
 def test_program_generation_gate_rejects_invalid_evidence():
-    evidence = _v2()
+    evidence = _structured_evidence()
     evidence["objects"][0]["observations"][0]["frame_index"] = 99
     with pytest.raises(ValueError, match="invalid evidence"):
         evidence_to_program(evidence)

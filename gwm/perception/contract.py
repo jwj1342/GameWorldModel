@@ -1,4 +1,4 @@
-"""Evidence v2 schema, validation, and loss-aware v1 migration."""
+"""Structured Evidence contract, validation, and loss-aware legacy adaptation."""
 from __future__ import annotations
 
 import copy
@@ -10,7 +10,7 @@ from typing import Any
 import jsonschema
 
 
-SCHEMA_PATH = Path(__file__).parent / "schema" / "evidence-v2.schema.json"
+SCHEMA_PATH = Path(__file__).parent / "schema" / "evidence.schema.json"
 _SCHEMA: dict | None = None
 UNKNOWN = "unknown"
 
@@ -49,11 +49,11 @@ def _source(meta: dict) -> dict:
     }
 
 
-def adapt_evidence_v1(evidence: dict) -> tuple[dict, list[dict]]:
-    """Return a v2 copy plus migration warnings; never invent observations.
+def adapt_legacy_evidence(evidence: dict) -> tuple[dict, list[dict]]:
+    """Return a structured copy plus adaptation warnings; never invent observations.
 
     Existing OBB entries are mapped one-for-one to observations.  Fields not
-    carried by v1 are represented by the literal ``"unknown"``.
+    carried by the legacy format are represented by the literal ``"unknown"``.
     """
     if evidence.get("schema_version") == "2.0":
         return copy.deepcopy(evidence), []
@@ -62,13 +62,13 @@ def adapt_evidence_v1(evidence: dict) -> tuple[dict, list[dict]]:
     warnings = [_migration_warning(
         "/schema_version", "legacy_evidence_adapted",
         "Evidence without schema_version=2.0 was adapted in memory",
-        "persist v2 evidence at the perception boundary for future runs",
+        "persist structured Evidence at the perception boundary for future runs",
     )]
     out["schema_version"] = "2.0"
     meta = out.setdefault("meta", {})
     if "scale" not in meta:
         meta["scale"] = UNKNOWN
-        warnings.append(_migration_warning("/meta/scale", "legacy_unknown", "v1 evidence did not record scale"))
+        warnings.append(_migration_warning("/meta/scale", "legacy_unknown", "legacy Evidence did not record scale"))
 
     frame_map: dict[int, dict] = {}
     geometry_frames = meta.get("geometry_frames") or []
@@ -86,7 +86,7 @@ def adapt_evidence_v1(evidence: dict) -> tuple[dict, list[dict]]:
         if "track_id" not in obj:
             warnings.append(_migration_warning(
                 f"/objects/{i}/track_id", "legacy_track_mapping",
-                "v1 object id was retained as its track id",
+                "legacy object id was retained as its track id",
             ))
         obj["track_id"] = track_id
         obj.setdefault("class_guess", UNKNOWN)
@@ -112,7 +112,7 @@ def adapt_evidence_v1(evidence: dict) -> tuple[dict, list[dict]]:
             if not isinstance(t, (int, float)) or not math.isfinite(t):
                 warnings.append(_migration_warning(
                     f"/objects/{i}/obb/{j}", "legacy_observation_skipped",
-                    "OBB without a finite timestamp cannot be represented as a v2 observation",
+                    "OBB without a finite timestamp cannot be represented as a structured observation",
                 ))
                 continue
             frame_index = obb.get("frame") if isinstance(obb.get("frame"), int) else UNKNOWN
@@ -151,7 +151,7 @@ def _schema_findings(evidence: Any) -> list[dict]:
         path = "/" + "/".join(str(part) for part in error.absolute_path)
         findings.append(_diag(
             path, "schema", error.message[:300],
-            "fix the field to match Evidence v2 schema",
+            "fix the field to match the Evidence contract schema",
             "evidence_schema", "error",
         ))
     return findings
@@ -406,15 +406,15 @@ def _semantic_findings(evidence: dict) -> list[dict]:
     return findings
 
 
-def validate_evidence(evidence: Any, adapt_v1: bool = True) -> dict:
-    """Validate Evidence and return the normalized v2 copy with diagnostics."""
+def validate_evidence(evidence: Any, adapt_legacy: bool = True) -> dict:
+    """Validate Evidence and return the normalized structured copy with diagnostics."""
     migration: list[dict] = []
     normalized = copy.deepcopy(evidence)
     adapted = False
     version = normalized.get("schema_version") if isinstance(normalized, dict) else None
     legacy_versions = {None, "1", "1.0", 1}
-    if isinstance(normalized, dict) and version in legacy_versions and adapt_v1:
-        normalized, migration = adapt_evidence_v1(normalized)
+    if isinstance(normalized, dict) and version in legacy_versions and adapt_legacy:
+        normalized, migration = adapt_legacy_evidence(normalized)
         adapted = True
 
     findings = list(migration)

@@ -68,7 +68,7 @@ def test_kernel_config_matches_the_scene_order():
 
 
 def test_candidate_report_is_stable_and_model_independent():
-    report = validate_candidate(EXAMPLE, evidence={"ignored_by_v1": True})
+    report = validate_candidate(EXAMPLE, evidence={"unused_by_preflight": True})
     assert report["version"] == "1.0" and report["ok"]
     assert report["findings"] == report["warnings"]
     assert all({"stage", "severity", "path", "code", "message", "suggestion"} <= set(f)

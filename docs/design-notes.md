@@ -489,10 +489,10 @@ Holodeck（CVPR 2024）的配方去掉几何项再加上图像查询：查询 = 
 主动感知请求、定向 observation 和 Evidence Update 保留在独立功能分支，待 Updated Evidence
 能喂回重新合成后再单独集成；本管线不输出尚无后续消费阶段的请求文件。
 
-### Evidence v2 与质量评估
+### Evidence 契约与质量评估
 
-正式契约位于 `gwm/perception/schema/evidence-v2.schema.json`，统一入口是
-`validate_evidence()`。v1 数据经 `adapt_evidence_v1()` 迁移，缺失的观测、属性和数值置信度
+正式契约位于 `gwm/perception/schema/evidence.schema.json`，统一入口是
+`validate_evidence()`。旧格式数据经 `adapt_legacy_evidence()` 适配，缺失的观测、属性和数值置信度
 保留为 `unknown` 并产生警告，不通过默认值伪造证据。帧顺序、引用、track 身份、范围及必需字段
 使用结构化诊断报告。二维可见状态与数值可见比例分别记录，不相互替代。
 
@@ -500,6 +500,12 @@ Holodeck（CVPR 2024）的配方去掉几何项再加上图像查询：查询 = 
 相机覆盖、属性 unknown、身份歧义和运动支持。结构损坏与关键引用错误为 `block`，
 信息不足通常为 `warn`；质量决策与诊断会传递给生成器，并保存为 `evidence_quality.json`。
 通过契约检查不等于具备充分的三维重建证据。
+
+文件与接口使用语义化名称，格式版本仍由 Schema 内部的 `schema_version` 约束为 `2.0`；
+此次命名整理不改变数据格式、旧数据适配行为或诊断代码。适配器的公共名称统一为
+`adapt_legacy_evidence()`，模块导入和包导出均已更新，不保留旧编号名称的别名。
+验证入口的适配开关同样命名为 `adapt_legacy`，默认仍为 true；显式关键字调用需使用
+`validate_evidence(data, adapt_legacy=False)`，位置参数调用不受影响。
 
 ### 多帧关联与运动接口
 
@@ -524,7 +530,7 @@ result = estimate_motion(times, positions, quaternions, config, coordinate_space
 guess = result["motion_guess"]
 ```
 
-标量角度转换不需要改动。此 API 简化不影响 Evidence v1 数据适配。
+标量角度转换不需要改动。此 API 简化不影响旧格式 Evidence 数据适配。
 
 旋转拟合对绕固定轴的有符号角度执行解缠绕，避免总转角超过 180° 后失效。
 这要求采样足够密集：相邻帧无法唯一确定超过半圈的旋转，遗漏的整圈也无法从四元数恢复。

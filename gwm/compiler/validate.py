@@ -131,7 +131,7 @@ def validate_candidate(program: Any, evidence: dict | None = None) -> dict:
     it in this stable entry point allows later visibility and temporal stages
     to be added without coupling callers to a particular model backend.
     """
-    del evidence  # Explicitly unused by the model-independent v1 preflight.
+    del evidence  # Explicitly unused by the model-independent candidate preflight.
     findings: list[dict] = []
 
     schema_errs = schema_errors(program)

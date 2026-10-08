@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gameworldmodel/evidence-v2.schema.json",
-  "title": "GameWorldModel Evidence v2",
+  "$id": "https://gameworldmodel/evidence.schema.json",
+  "title": "GameWorldModel Structured Evidence",
   "type": "object",
   "required": ["schema_version", "meta", "frames", "camera", "static", "objects", "keyframes"],
   "additionalProperties": false,
