@@ -15,7 +15,7 @@ def registry_order(program: dict) -> list[dict]:
     for s in program.get("static", []): reg.append({"id": s["id"], "kind": "static", "idx": idx, "class": s.get("class", "static"), "instance": 0}); idx += 1
     for o in program.get("objects", []):
         n = len(o["instances"]) if o.get("instances") else 1
-        for k in range(n): reg.append({"id": o["id"], "kind": "object", "idx": idx, "class": o.get("class", ""), "instance": k}); idx += 1
+        for k in range(n): reg.append({"id": o["id"], "kind": "object", "idx": idx, "class": o.get("class", ""), "instance": k + 1 if o.get("instances") else 0}); idx += 1
     return reg
 
 def packed_ids(path: str | Path) -> np.ndarray:

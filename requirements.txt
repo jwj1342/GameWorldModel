@@ -13,7 +13,7 @@ jsonschema>=4.20
 jsonpatch>=1.33
 pyyaml>=6.0
 numpy>=1.26
-scipy>=1.11
+scipy>=1.13.1  # CPU regression suite validated with 1.13.1 and 1.17.0; no old-version cap
 pillow>=10.0
 
 # 调模型（OpenRouter、自托管 vLLM 都是 OpenAI 兼容接口）
