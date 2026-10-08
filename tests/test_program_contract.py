@@ -1,9 +1,11 @@
 """场景程序的契约：模型写出来的东西必须过校验，编译出来的东西必须和内核对得上。
 这两条一旦破了，整条管线会静默产出坏场景，所以值得测。"""
 import copy, json
+from html.parser import HTMLParser
 from pathlib import Path
 
 from gwm.compiler.bundle import kernel_config
+from gwm.compiler.compile import compile_program
 from gwm.compiler.validate import validate, validate_candidate
 
 REPO = Path(__file__).resolve().parents[1]
@@ -14,6 +16,29 @@ def test_shipped_example_is_valid():
     """示例程序是文档和调试的入口，它必须一直能过校验。"""
     r = validate(EXAMPLE)
     assert r["ok"], r["errors"]
+
+
+def test_compiled_html_declares_inline_favicon(tmp_path, monkeypatch):
+    """Avoid an automatic favicon 404 without suppressing browser errors."""
+    monkeypatch.setattr("gwm.compiler.bundle._copy_vendor", lambda _: None)
+    result = compile_program(EXAMPLE, tmp_path / "game")
+    assert result["ok"]
+    html = (tmp_path / "game/index.html").read_bytes()
+    assert html == (REPO / "kernel/index.html").read_bytes()
+
+    class Icons(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.hrefs = []
+
+        def handle_starttag(self, tag, attrs):
+            fields = dict(attrs)
+            if tag == "link" and "icon" in (fields.get("rel") or "").split():
+                self.hrefs.append(fields.get("href"))
+
+    parser = Icons()
+    parser.feed(html.decode("utf-8"))
+    assert parser.hrefs == ["data:,"]
 
 
 def test_validation_catches_what_a_model_gets_wrong():
