@@ -628,3 +628,17 @@ This avoids penalizing a rounded representation of -pi/2 without hiding edits
 to other fields. Tolerances are offline judgment metadata, not model input.
 The lift-width instruction now specifies x only, leaving y and z unchanged.
 Historical experiment success rates are not re-evaluated by these unit tests.
+
+## Non-no-op event editing case
+
+The instruction set now contains 21 cases, including the original satisfied
+coin-contact request and a real event addition. `trigger_door_on_lift` adds a
+`trigger_on_enter` event on lift targeting door, enables the door's motion trigger,
+and replaces its schedule with a 1.5-second opening from trigger time zero.
+The lift is an object entry processed by platformer events; the static door frame
+is not, so using the frame without runtime changes would misrepresent support.
+Current runtime records target trigger time; it does not independently dispatch
+the `action` string. Opening is implemented by the target's triggered schedule.
+Offline reference/negative tests check structure, target identity, all three edits
+and side effects, not measured model performance or real browser contact behavior.
+The previous 20-case experiment rates cannot be reused for this 21-case set.

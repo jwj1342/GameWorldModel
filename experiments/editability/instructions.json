@@ -1,7 +1,7 @@
 {
   "program": "examples/handwritten/program.json",
   "program_sha256": "e80c23101ca7ee08c76048c68e1638951a9eed77c6ad9c18465141d8894b6b90",
-  "notes": "二十条指令，含一条已满足要求的无操作案例与四条拒绝。expect_ops 仅供离线判定，不传给编辑器；完整参考结果同时检查目标值、身份与副作用。金币资产以 extent 明确尺寸，不把资产假定为圆柱。历史成功率不能与修订后结果直接比较。",
+  "notes": "二十一条指令，含一条已满足要求的无操作案例、一条需要实际添加触发事件并修改门运动的案例与四条拒绝。expect_ops 仅供离线判定，不传给编辑器；完整参考结果同时检查目标值、身份与副作用。金币资产以 extent 明确尺寸，不把资产假定为圆柱。历史成功率不能与修订后结果直接比较。",
   "cases": [
     {"id": "period_faster", "kind": "运动参数", "instruction": "让升降平台上下移动得快一倍",
      "expect_paths": ["/objects/0/motion/period"], "expect_value": {"/objects/0/motion/period": 2.0},
@@ -45,6 +45,11 @@
      "expect_ops": [{"op": "remove", "path": "/objects/2"}]},
     {"id": "add_event", "kind": "事件", "instruction": "让金币在玩家碰到的时候消失",
      "expect_paths": ["/objects/3/events"], "expect_ops": []},
+    {"id": "trigger_door_on_lift", "kind": "事件", "instruction": "让玩家接触升降平台 lift 时触发门 door 打开：在 lift 上添加 trigger_on_enter 事件，target 为 door，action 为 open；门的 motion.trigger 设为 true，schedule 改为触发后第 0 秒开始、用 1.5 秒转到 100 度并保持打开。触发前门保持关闭，其他字段不变",
+     "expect_paths": ["/objects/0/events", "/objects/1/motion/trigger", "/objects/1/motion/schedule"],
+     "expect_ops": [{"op": "add", "path": "/objects/0/events", "value": [{"type": "trigger_on_enter", "target": "door", "action": "open"}]},
+                    {"op": "add", "path": "/objects/1/motion/trigger", "value": true},
+                    {"op": "replace", "path": "/objects/1/motion/schedule", "value": [{"t": 0, "to_deg": 100, "duration": 1.5}]}]},
     {"id": "door_static", "kind": "运动类型", "instruction": "让门不要动，一直保持关着",
      "expect_paths": ["/objects/1/motion"],
      "expect_ops": [{"op": "replace", "path": "/objects/1/motion", "value": {"type": "static"}}]},

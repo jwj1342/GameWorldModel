@@ -205,6 +205,48 @@ def test_empty_operations_no_change_and_explicit_refusal_are_different():
     assert not judge(case, duplicate)["ok"]
 
 
+def event_case():
+    return next(c for c in spec()["cases"] if c["id"] == "trigger_door_on_lift")
+
+
+def test_event_edit_requires_real_change_and_preserves_source():
+    case, before = event_case(), sample()
+    assert "events" not in before["objects"][0]
+    assert not before["objects"][1]["motion"].get("trigger", False)
+    assert len(case["expect_ops"]) <= 6  # Supported by the editor response schema.
+    result = apply_edit(before, case["instruction"], response(case["expect_ops"]))
+    assert result["status"] == "applied" and validate(result["program"])["ok"]
+    assert judge(case, result)["ok"]
+    assert result["program"]["objects"][0]["events"][0]["target"] == "door"
+    assert result["program"]["objects"][1]["motion"]["trigger"] is True
+    assert before == sample()
+    unchanged = apply_edit(before, case["instruction"], response([]))
+    assert unchanged["status"] == "no_change" and not judge(case, unchanged)["ok"]
+
+
+@pytest.mark.parametrize("damage", ["wrong_target", "wrong_action", "missing_trigger",
+    "missing_schedule", "wrong_source", "side_effect", "missing_target"])
+def test_event_edit_rejects_incomplete_wrong_or_unrelated_changes(damage):
+    case = event_case()
+    ops = copy.deepcopy(case["expect_ops"])
+    if damage == "wrong_target":
+        ops[0]["value"][0]["target"] = "cart"
+    elif damage == "wrong_action":
+        ops[0]["value"][0]["action"] = "stop"
+    elif damage == "missing_trigger":
+        ops.pop(1)
+    elif damage == "missing_schedule":
+        ops.pop(2)
+    elif damage == "wrong_source":
+        ops[0]["path"] = "/objects/2/events"
+    elif damage == "side_effect":
+        ops.append({"op": "replace", "path": "/objects/0/motion/amp", "value": 2})
+    else:
+        del ops[0]["value"][0]["target"]
+    result = apply_edit(sample(), case["instruction"], response(ops))
+    assert not judge(case, result)["ok"]
+
+
 def test_timeout_preserved_and_batch_continues():
     class SequenceClient:
         calls = 0
