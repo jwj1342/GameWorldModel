@@ -13,7 +13,9 @@ export function inferSlots(program, registry, kernelCfg = null) {
   const topY = ground.max.y;
   if (!slots.player_spawn) slots.player_spawn = [ground.min.x + (ground.max.x - ground.min.x) * 0.2, topY + 1.2, ground.max.z - (ground.max.z - ground.min.z) * 0.2];
   if (!slots.goal_volume) slots.goal_volume = { pos: [ground.max.x - (ground.max.x - ground.min.x) * 0.15, topY + 1.0, ground.min.z + (ground.max.z - ground.min.z) * 0.15], extent: [1.5, 2, 1.5] };
-  // 类别表由编译器写进 kernel_config.json，唯一来源是 configs/default.yaml 的 binding 段
+  // 下面两段是兜底，只在程序没写 binding.slots 时才生效（手写程序直接编译的情况）。
+  // 走过绑定的程序槽位总是填好的，角色由 gwm/binding/affordance.py 按属性推断，
+  // 那套规则不在这里重写一遍——两份实现会漂。类别表仍由编译器写进 kernel_config.json。
   const words = (list, fallback) => new RegExp((kernelCfg?.[list] ?? fallback).join('|'), 'i');
   const uniq = (a) => a.filter((v, i) => a.indexOf(v) === i);
   if (!slots.collectibles) {
