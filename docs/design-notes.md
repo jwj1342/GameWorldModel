@@ -668,3 +668,45 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+
+### 直接代码宿主的几何与位姿契约
+
+`describe(THREE)` 中的 `object3D` 必须是独立根节点。根的 position/quaternion 是初始世界位姿；
+`pose(t)` 返回绝对世界位姿，替换而非叠加到初始根变换。根 scale 和子节点变换属于局部几何。
+宿主克隆输入，将根刚体位姿移到 registry.group，只应用一次；静态根位姿也进入导出状态。
+生成物理碰撞体前，以单位根位姿计算局部包围盒，使用物理内核支持的完整 `extent` 与局部 `offset`。
+因此根旋转不会被重复编码到包围盒，再被刚体旋转一次。
+
+包围盒是局部轴对齐盒近似，不是逐三角形或凹面碰撞体；零厚度轴沿用 0.1 米碰撞厚度。
+带未声明父变换、重复 ID、空/非有限几何、无效位姿以及 static 搭配 pose 明确拒绝，不静默跳过。
+根和所有子节点必须启用 `matrixAutoUpdate` 与 `matrixWorldAutoUpdate`；构建前遍历检查并拒绝
+手动矩阵模式。否则修改 position/quaternion 不会可靠更新实际矩阵，可能重新产生重复位移或
+使用过期世界坐标。不自动改写这些开关，也不猜测手动矩阵的语义。
+已有生成代码需要复核这一约定；若初始朝向需要保留，必须将其包含在 pose 返回的 quat 中。
+手写示例同步迁移，并有回归检查；旧模型产物不自动批量改写。
+
+`tests/test_code_scene_host.py` 使用已安装的 Node/Three.js/Rapier 和手写合成描述验证真实 CPU 物理。
+通过 `GWM_NODE_BINARY`（或 PATH）与 `GWM_NODE_MODULES` 配置依赖，缺失时显式 skip，不自动下载。
+测试临时编译包只替换模块解析路径，不改物理算法。覆盖大地面玩家站立、绝对位姿、旋转/缩放/偏移
+和非法输入；这不是浏览器图像验证，也不是模型重建效果实验。
+
+直接入口先用统一 Evidence 验证器校验输入，保留旧生产者实有的帧注册表并重新校验，不制造缺失帧。
+从 `meta` 读取 clip/duration，并按 keyframes 声明顺序、图片引用和时间发送全部帧，不按目录排序猜测
+或默认截断至8张。引用必须位于 `--keyframes` 目录；兼容相对图片目录和旧生产者相对运行目录的
+路径，但两种解析指向不同合法文件时拒绝，要求明确引用。迁移路径需要显式 `--allow-relocated-keyframes`。
+迁移只证明找到了指定名字的文件：无声明图片哈希时标明未验证对应关系；有哈希则核对所选图片字节。
+原图 image_sha256 不能冒充重新编码的 file_small 哈希。图片必须可解码，重复、缺失或越界时间拒绝。
+宿主相机来自 Evidence poses 与实有内参，不补虚构相机；不完整到无法构造摘要或合法Program时拒绝。
+
+报告保存 Evidence/图片/代码/提示词哈希、声明时间和帧索引、相机政策与安全的预算配置；
+不写入密钥。视频哈希仅记录已有声明，视频来源和PTS没有在此入口重新核验，明确为 not_checked。
+兼容 `meta.source_video_sha256` 与 `meta.video_sha256`；声明必须是合法SHA-256，二者冲突时拒绝。
+传入的配置用于打包，不丢弃CLI覆盖。输入、客户端、调用、响应、语法和打包失败保留明确状态；
+尝试数须为正，非空输出目录拒绝覆盖。
+
+此入口不执行浏览器。打包完成是 `generation_ok=true / status=packaged_unverified`，
+`runtime_ok=null`、`runtime_status=not_checked`，兼容字段 `ok=null`，不能等同于成功重建。
+CLI退出码0只表示生成/打包完成，1表示失败，非法参数或非空输出目录为2；后续消费者须检查
+所需阶段字段。不同于旧 `ok=syntax_ok` 的语义，旧保存报告不自动修改。
+共享运行时不能证明相机或预算公平，fairness_status仍not_established；未执行浏览器验证或模型实验。
+PR25 的修补尚未传播到此分支，旧编辑成功率不自动有效；旧 pilot 结果不能作为正式重建优劣结论。
