@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+from gwm.config import load_config
 
 
 def load_states(path: str | Path) -> list[dict]:
@@ -103,8 +104,14 @@ def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray,
 
 
 def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_states: list[dict],
-             holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120) -> dict:
+             holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120,
+             min_time_coverage: float | None = None) -> dict:
     """Keep existing metric keys, using a GT window and frozen prefix identities."""
+    if min_time_coverage is None:
+        min_time_coverage = load_config().get("gt_evaluation", {}).get("min_time_coverage", 0.9)
+    if (isinstance(min_time_coverage, bool) or not isinstance(min_time_coverage, (int, float))
+            or not np.isfinite(min_time_coverage) or not 0 <= min_time_coverage <= 1):
+        raise ValueError("min_time_coverage must be finite and within [0, 1]")
     if not 0 < holdout_frac < 1 or n_samples < 2 or not np.isfinite(max_dist_m) or max_dist_m < 0:
         raise ValueError("invalid metric configuration")
     try:
@@ -138,14 +145,21 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     matched = [(g, p, d) for g, p, d in pairs if p is not None]
 
     def window(t0: float, t1: float) -> dict:
-        times = np.linspace(t0, t1, n_samples)
-        distances, unavailable = {}, {}
+        distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
         for g, p, _ in pairs:
             if p is None:
+                coverage[g] = None  # No identity pair, not measured zero coverage.
+                evaluated_windows[g] = None
                 unavailable[g] = "not_observed_in_prefix" if g not in observed_gt else "no_prefix_match"
-            elif any(track["t"][0] > t0 or track["t"][-1] < t1 for track in (gt_tr[g], pred_tr[p])):
-                unavailable[g] = "insufficient_time_coverage"
             else:
+                start = max(t0, gt_tr[g]["t"][0], pred_tr[p]["t"][0])
+                end = min(t1, gt_tr[g]["t"][-1], pred_tr[p]["t"][-1])
+                coverage[g] = float(max(0.0, end - start) / (t1 - t0))
+                evaluated_windows[g] = [float(start), float(end)] if end > start else None
+                if end <= start or coverage[g] < min_time_coverage:
+                    unavailable[g] = "insufficient_time_coverage"
+                    continue
+                times = np.linspace(start, end, n_samples)
                 distances[g] = float(np.mean(np.linalg.norm(_sample(gt_tr[g], times) - _sample(pred_tr[p], times), axis=1)))
 
         # 轨迹误差：逐物体算整段平均距离。
@@ -158,7 +172,11 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                 "n": len(errs),
                 "per_object": {g: round(d, 4) for g, d in distances.items()},
                 "unavailable": unavailable,
-                "status": "complete" if len(distances) == len(gt_tr) else "partial" if distances else "unavailable"}
+                "coverage": coverage,
+                "evaluated_window_s": evaluated_windows,
+                "min_time_coverage": min_time_coverage,
+                "status": "complete" if len(distances) == len(gt_tr) and all(c == 1 for c in coverage.values())
+                          else "partial" if distances else "unavailable"}
 
         # 运动类型：只在匹配上的物体里算，没匹配上的属于召回问题，分开记
         hits = [(gt_motion[gt_tr[g]["object_id"]], pred_motion[pred_tr[p]["object_id"]]) for g, p, _ in matched]

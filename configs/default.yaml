@@ -149,3 +149,6 @@ ablations:
   no_evidence: false
   no_feedback: false
   single_stage: false
+gt_evaluation:
+  # Minimum supported duration fraction, independently for full and holdout windows.
+  min_time_coverage: 0.9

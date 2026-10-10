@@ -33,6 +33,61 @@ def test_baseline_missing_extra_and_motion_labels():
     assert wrong["full"]["motion_type"]["accuracy"] == 0
 
 
+@pytest.mark.parametrize("end", [8.0, 8 - 1 / 30, 7.9])
+def test_small_endpoint_shortfall_preserves_measured_error(end):
+    reference = states(["a"], np.linspace(0, 8, 241))
+    prediction = states(["a"], np.linspace(0, end, 240))
+    for frame in prediction:
+        frame["objects"][0]["pos"][0] += 0.3
+    result = evaluate(program(["a"]), program(["a"]), reference, prediction)
+    for name, start in (("full", 0), ("holdout", 6.4)):
+        metric = result[name]["trajectory"]
+        assert metric["median_m"] == pytest.approx(0.3)
+        assert metric["coverage"]["a"] == pytest.approx((end - start) / (8 - start))
+        assert metric["evaluated_window_s"]["a"] == pytest.approx([start, end])
+        assert metric["status"] == ("complete" if end == 8 else "partial")
+        assert result[name]["window_s"] == [start, 8]
+
+
+def test_coverage_threshold_and_no_extrapolation():
+    reference, prediction = states(["a"], (0, 4, 8)), states(["a"], (0, 4, 7))
+    for threshold, available in ((0.9, False), (0.8, True)):
+        metric = evaluate(program(["a"]), program(["a"]), reference, prediction,
+                          min_time_coverage=threshold)["full"]["trajectory"]
+        assert metric["coverage"]["a"] == 0.875
+        assert (metric["median_m"] is not None) == available
+    result = evaluate(program(["a"]), program(["a"]), reference, states(["a"], (0, 1)),
+                      min_time_coverage=0)
+    assert result["holdout"]["trajectory"]["median_m"] is None
+    assert result["holdout"]["trajectory"]["coverage"]["a"] == 0
+
+
+@pytest.mark.parametrize("threshold", [-0.1, 1.1, float("nan"), True, "0.9"])
+def test_invalid_coverage_configuration(threshold):
+    with pytest.raises(ValueError):
+        evaluate(program(["a"]), program(["a"]), states(["a"]), states(["a"]),
+                 min_time_coverage=threshold)
+
+
+def test_configuration_default_and_override(monkeypatch):
+    import gwm.feedback.gt_metrics as metrics
+    monkeypatch.setattr(metrics, "load_config", lambda: {"gt_evaluation": {"min_time_coverage": 0.8}})
+    args = (program(["a"]), program(["a"]), states(["a"], (0, 4, 8)), states(["a"], (0, 4, 7)))
+    assert metrics.evaluate(*args)["full"]["trajectory"]["median_m"] == 0
+    assert metrics.evaluate(*args, min_time_coverage=0.9)["full"]["trajectory"]["median_m"] is None
+
+
+def test_coverage_is_per_object_and_exact_threshold_is_accepted():
+    reference = states(["a", "b"], (0, 4, 8))
+    prediction = states(["a", "b"], (0, 4, 7.2, 8))
+    prediction[-1]["objects"].pop(0)
+    result = evaluate(program(["a", "b"]), program(["a", "b"]), reference, prediction)
+    metric = result["full"]["trajectory"]
+    assert metric["coverage"] == {"a": 0.9, "b": 1.0}
+    assert metric["n"] == 2 and metric["status"] == "partial"
+    assert result["holdout"]["trajectory"]["unavailable"] == {"a": "insufficient_time_coverage"}
+
+
 @pytest.mark.parametrize("prediction_times", [(0, 1), (5, 6)])
 def test_prediction_cannot_shrink_reference_or_extrapolate(prediction_times):
     reference = states(["a"])

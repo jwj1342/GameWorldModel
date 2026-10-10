@@ -597,9 +597,18 @@ state record alone fixes the time window. Instances use runtime `name` with the
 parent object ID retained for motion labels. Identity assignment uses only raw
 samples before the reference's tail cutoff and is frozen for both windows;
 threshold-constrained matching maximizes valid pairs before minimizing distance.
-No endpoint extrapolation is allowed. Incomplete tracks have `None` trajectory
-summaries when no pair covers the whole requested window, with per-object
-`unavailable` reasons. Recall/precision describe frozen identity matches, not
+No endpoint extrapolation is allowed. Each frozen pair is evaluated only on the
+intersection of its measured support and the unchanged reference window.
+`trajectory.coverage` reports supported duration / requested duration per object;
+`evaluated_window_s` reports that intersection (null when there is no positive
+overlap). An unmatched identity has null coverage, not measured zero coverage.
+`gt_evaluation.min_time_coverage` defaults to 0.9 and can be overridden by the
+optional `evaluate(..., min_time_coverage=...)` argument. Below-threshold pairs
+have no trajectory error and retain an `unavailable` reason; missing intervals
+never contribute zero error. Accepted but incomplete coverage has `partial`
+status even if all objects have usable errors. Coverage measures endpoint support,
+not interior sampling density; interpolation still assumes the existing track
+model. Recall/precision describe frozen identity matches, not
 temporal coverage. Objects first recorded after the cutoff cannot be identified
 from the prefix and are explicitly reported as unavailable. Legal empty-object
 records give zero recall; missing or malformed records and state IDs absent from
