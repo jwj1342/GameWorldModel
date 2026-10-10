@@ -463,6 +463,10 @@ three.js 自带的 JSON Object/Scene format 只描述静态层次且几何内联
 
 每条判断都带一句理由字符串，产物里能直接看到为什么某个物体被判成某个角色，方便人工审查。
 
+几何尺寸按形状读取：球体使用直径，圆柱使用直径与沿其轴向的高度，锥体使用直径和高度；不能把圆柱当球体而丢掉高度。缺失或非有限尺寸不默认成小收集物，而保守标为装饰并说明原因。这仍是局部尺寸启发式，不证明旋转后的可站顶面或支撑关系。
+
+已有 `binding.slots.collectibles`（包括空列表）优先于自动推断。绑定只为最终有效收集槽位添加缺失的接触消失事件，不给被排除的对象新增事件；输入中已经手写的事件保持不变。因此空列表阻止的是自动添加，并不删除已有事件。绝对高度可达性、实例级角色和完整理由持久化仍是待完善边界。
+
 ### 实际效果
 
 | 场景 | 推断出来的角色 |
@@ -710,3 +714,138 @@ CLI退出码0只表示生成/打包完成，1表示失败，非法参数或非�
 所需阶段字段。不同于旧 `ok=syntax_ok` 的语义，旧保存报告不自动修改。
 共享运行时不能证明相机或预算公平，fairness_status仍not_established；未执行浏览器验证或模型实验。
 PR25 的修补尚未传播到此分支，旧编辑成功率不自动有效；旧 pilot 结果不能作为正式重建优劣结论。
+
+# Cone dimensions in role inference
+
+Cone extents accept `radius` and explicit `radius_top`/`radius_bottom`, matching
+the cylinder radius fallback. The largest declared radius sets horizontal
+diameter; height remains the y extent as in the renderer. This fixes valid
+top/bottom-radius cones incorrectly becoming decorations. Support-relative
+height, multiple instances and rotated standing surfaces are handled separately
+in the author's PR42; this change does not implement those policies.
+
+## Ground-truth metric protocol
+
+`gt_metrics.evaluate()` retains `full`/`holdout` metric keys, but the reference
+state record alone fixes the time window. Instances use runtime `name` with the
+parent object ID retained for motion labels. Identity assignment uses only raw
+samples before the reference's tail cutoff and is frozen for both windows;
+threshold-constrained matching maximizes valid pairs before minimizing distance.
+No endpoint extrapolation is allowed. Each frozen pair is evaluated only on the
+intersection of its measured support and the unchanged reference window.
+`trajectory.coverage` reports supported duration / requested duration per object;
+`evaluated_window_s` reports that intersection (null when there is no positive
+overlap). An unmatched identity has null coverage, not measured zero coverage.
+`gt_evaluation.min_time_coverage` defaults to 0.9 and can be overridden by the
+optional `evaluate(..., min_time_coverage=...)` argument. Below-threshold pairs
+have no trajectory error and retain an `unavailable` reason; missing intervals
+never contribute zero error. Accepted but incomplete coverage has `partial`
+status even if all objects have usable errors. Coverage measures endpoint support,
+not interior sampling density; interpolation still assumes the existing track
+model. Recall/precision describe frozen identity matches, not
+temporal coverage. Objects first recorded after the cutoff cannot be identified
+from the prefix and are explicitly reported as unavailable. Legal empty-object
+records give zero recall; missing or malformed records and state IDs absent from
+their own Program are errors, not default-static motion credit. Only `object`
+entries are counted by default, not static scene geometry.
+
+The tail is a diagnostic, not proof that reconstruction inputs excluded it.
+Position metrics do not measure rotation, camera or resolve the separate dynamic
+physics evaluation policy. Historical `docs/results/gt_metrics_sensitivity.json`
+uses the old protocol and has not been re-recorded by this fix; do not reuse it
+as validation of the corrected protocol. `check_gt_metrics.py` now records
+pass/fail/not-applicable checks and exits nonzero unless all checks pass;
+an inapplicable or unmeasurable perturbation is not a successful sensitivity test.
+
+### 可编辑性判定边界
+
+`scripts/run_editability.py` 的 `judge()` 不将命中路径等同于编辑成功。
+指令集里的 `expect_ops` 是只提供给判定器的参考补丁，不传入编辑器。
+它作用于原始 Program，形成完整参考结果；判定比较对象 ID、值、数组顺序和其他字段，
+因此删错对象或删除时顺带改动其他对象也会失败。数值允许 1e-6 绝对误差。
+不同补丁写法只要得到相同结果即可通过；未实现任意物理等价表示的判断。
+例如不同但运动等价的相位或保留多余静态参数，不会被自动视为等价。
+参考指令集必须绑定 `program_sha256`：对解析后的 JSON 排序字典键、保留数组顺序后计算 SHA-256。
+格式空白不影响哈希，但对象顺序、身份和初值变化会使基线失效。CLI 在初始化客户端之前拒绝
+不匹配或缺失的参考基线；`evaluate_cases()` 也不调用客户端，保留 `input_mismatch` 记录。
+直接调用 `judge()` 时，参考案例也必须带基线哈希。结果文件保存实际输入哈希。
+旧指令仍支持 `expect_paths` + `expect_value`，但须有 `before`；从目标值构造完整参考结果，
+宽泛父路径不能放过同层副作用。缺少原始 Program、只有路径无目标值或目标字段无法核对时，
+明确标记无法评测，不算成功。该兼容方式支持修改已有字段；新增/删除使用 `expect_ops`。
+
+`apply_edit()` 保留原返回字段，额外返回 `before` 和 `status`。
+只有通过响应 Schema、补丁应用及 Program 校验才是 `applied`；明确拒绝必须提供
+`refused: true`、空操作和非空原因。旧格式的空操作保留为 `no_change`，不猜测拒绝。
+`execution_failed`、`invalid_response`、`invalid_patch` 和 `invalid_program` 单独记录；
+调用失败保留在批次分母中，不冒充正确拒绝。已满足要求的指令允许无操作，
+但仍比较完整结果，禁止重复追加事件。输入完整提供给编辑器，不截断运动或遗漏几何/位姿。
+
+修订后的示例明确资产尺寸和相位，纠正材质路径，并同时修改门的范围和实际调度角度。
+它不是原指令集的同条件重复实验；旧保存结果及其成功率需要按新协议复核或重新运行，
+不能因合成单元测试通过就宣称模型成功率改善。本轮测试不调用模型，也不验证渲染或资产外观。
+# Editing judgment precision
+
+Reference edits still compare the complete resulting Program, preserving IDs,
+array order and unrelated fields. The default numeric absolute tolerance is
+1e-6. A case may specify `tolerance` as a JSON Pointer to absolute tolerance map;
+only finite, non-negative tolerances on numeric fields explicitly added or
+replaced by `expect_ops` are accepted. The phase case uses 0.001 radians only at
+`/objects/0/motion/phase`; other parameters retain the default tolerance.
+This avoids penalizing a rounded representation of -pi/2 without hiding edits
+to other fields. Tolerances are offline judgment metadata, not model input.
+The lift-width instruction now specifies x only, leaving y and z unchanged.
+Historical experiment success rates are not re-evaluated by these unit tests.
+
+## Non-no-op event editing case
+
+The instruction set now contains 21 cases, including the original satisfied
+coin-contact request and a real event addition. `trigger_door_on_lift` adds a
+`trigger_on_enter` event on lift targeting door, enables the door's motion trigger,
+and replaces its schedule with a 1.5-second opening from trigger time zero.
+The lift is an object entry processed by platformer events; the static door frame
+is not, so using the frame without runtime changes would misrepresent support.
+Current runtime records target trigger time; it does not independently dispatch
+the `action` string. Opening is implemented by the target's triggered schedule.
+Offline reference/negative tests check structure, target identity, all three edits
+and side effects, not measured model performance or real browser contact behavior.
+The previous 20-case experiment rates cannot be reused for this 21-case set.
+
+# Dynamic runtime contract
+
+`motion.mass` is the total mass of an object instance. For compound colliders it
+is distributed in proportion to collider volume (uniform density over parts),
+not applied in full to every part. Without an explicit mass, Rapier's default
+collider density is retained. Overlapping parts are counted independently.
+
+When a scene contains `dynamic` motion, `step(dt)` accepts only the runtime's
+fixed `1/60` second step. Unsupported, non-finite or non-positive steps fail
+before advancing state. Existing fixed-step callers are unchanged. `seek(t)`
+requires a finite non-negative time and samples the nearest fixed physics frame;
+it returns that frame's actual time. Repeated requests for the same quantized
+frame do not advance the simulation; backward frame requests reset and replay.
+Script-only scenes retain exact-time seek. This is not variable-step integration
+or a guarantee of cross-platform determinism.
+
+Recording and render indexes use `t`/`actual_t` for the actual simulated state
+time and preserve `requested_t` for the sampling request. For encoded recordings,
+frame `i` has nominal video time `i/fps = requested_t`; these times may differ
+from the simulated state by at most half a physics step. Sample at an aligned
+rate such as 30 or 60 fps when exact frame-time correspondence is required.
+Render filenames still use requested times. Render indexes declare
+`time_sampling` as `exact`, or `nearest_physics_frame` with `dt=1/60` for dynamic
+scenes. Validation compares `requested_t` with external requests, checks actual
+`t` against the nearest physics frame and `actual_t`, and retains the existing
+state-time check. The declaration cannot relax validation for script-only scenes
+or unsupported steps. Legacy indexes without the declaration retain exact-time
+validation. Duplicate actual times still fail the distinct-frame requirement.
+
+Dynamic velocity/mass/restitution must be finite, with positive mass and
+restitution in `[0, 1]`. `dynamic` with `trigger=true`, or a `trigger_on_enter`
+event targeting a dynamic object, is rejected by Program validation: activation
+semantics are not implemented. Scripted triggers remain supported. This change
+does not redesign the motion enumeration or define dynamic ground-truth metrics.
+
+Offline regression: `node --experimental-default-type=module --test
+tests/test_physics_runtime.mjs` (Node 20). Tests use real CPU Three.js/Rapier and
+the runtime control methods, with renderer/template/browser surfaces stubbed;
+they do not certify browser rendering or real-video reconstruction.

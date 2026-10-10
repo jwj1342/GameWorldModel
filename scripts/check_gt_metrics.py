@@ -2,14 +2,14 @@
 """敏感性检查：把一份正确的程序程序化改坏，看指标掉不掉。
 
 issue #4 要求的第一步。指标写出来了但其实测不到东西，是最尴尬的情况，
-这个脚本就是用来挡住它的。每种扰动只破坏一个方面，期望对应的那项指标恶化，
-不相关的项基本不动。
+这个脚本就是用来挡住它的。对每种扰动检查相关指标实际恶化；
+不保证末段误差总比整段更大，也不声称检查了全部不相关指标。
 
 轨迹不在 Python 里重算，两份程序都经 harness 跑出逐帧状态再比，
 所以这个脚本需要一个能跑无头浏览器的环境。
 """
 from __future__ import annotations
-import argparse, copy, json, subprocess, sys, tempfile
+import argparse, copy, json, math, subprocess, sys
 from pathlib import Path
 
 from gwm.config import REPO
@@ -21,7 +21,10 @@ def perturb(program: dict, kind: str) -> dict:
     p = copy.deepcopy(program)
     objs = p["objects"]
     if kind == "运动类型改错":           # 期望：运动类型准确率掉
-        objs[0]["motion"] = {"type": "static"}
+        for obj in objs:
+            if (obj.get("motion") or {}).get("type", "static") != "static":
+                obj["motion"] = {"type": "static"}
+                break
     elif kind == "轨迹整体平移":          # 期望：轨迹误差涨，运动类型不变
         for o in objs:                    # 物体可以用 pose，也可以用 instances 放多份
             if "pose" in o: o["pose"]["pos"][0] += 0.5
@@ -31,12 +34,15 @@ def perturb(program: dict, kind: str) -> dict:
         # 绑定里还引用着它的话编译过不去，一并清掉，保证这次扰动只影响召回
         slots = p.get("binding", {}).get("slots", {})
         for key in ("collectibles", "hazards"):
-            slots[key] = [x for x in slots.get(key, []) if not x.startswith(gone)]
+            slots[key] = [x for x in slots.get(key, []) if x != gone and not x.startswith(gone + "#")]
     elif kind == "多造一个物体":          # 期望：误检涨（precision 掉）
         extra = copy.deepcopy(objs[0]); extra["id"] = "ghost"
-        extra["pose"]["pos"] = [x + 6.0 for x in extra["pose"]["pos"]]
+        while extra["id"] in {obj["id"] for obj in objs}: extra["id"] += "_extra"
+        placements = [extra["pose"]] if "pose" in extra else extra.get("instances", [])
+        for placement in placements:
+            placement["pos"] = [x + 6.0 for x in placement["pos"]]
         objs.append(extra)
-    elif kind == "周期改错":              # 期望：轨迹误差涨，且留出段比整段更明显
+    elif kind == "周期改错":              # 期望：轨迹误差涨；末段不保证总是更大
         for o in objs:
             m = o.get("motion") or {}
             if m.get("type") == "periodic_translate": m["period"] = float(m["period"]) * 1.25
@@ -58,6 +64,32 @@ def states_for(program: dict, harness: str, work: Path, name: str, duration: flo
     return load_states(rec / "gt_states.jsonl")
 
 
+def sensitivity_check(base: dict, result: dict, kind: str) -> dict:
+    """Judge measured degradation, not merely whether recording returned."""
+    def number(report, group, key):
+        value = report.get("full", {}).get(group, {}).get(key)
+        return value if isinstance(value, (int, float)) and math.isfinite(value) else None
+
+    if kind == "基准":
+        values = [number(result, "trajectory", "max_m"), number(result, "motion_type", "accuracy"),
+                  number(result, "objects", "recall"), number(result, "objects", "precision")]
+        passed = (all(value is not None for value in values)
+                  and abs(values[0]) <= 1e-8 and all(abs(value - 1) <= 1e-8 for value in values[1:])
+                  and result.get("full", {}).get("trajectory", {}).get("status") == "complete")
+    else:
+        group, key, direction = {
+            "运动类型改错": ("motion_type", "accuracy", -1),
+            "轨迹整体平移": ("trajectory", "max_m", 1),
+            "删掉一个物体": ("objects", "recall", -1),
+            "多造一个物体": ("objects", "precision", -1),
+            "周期改错": ("trajectory", "max_m", 1),
+        }[kind]
+        before, after = number(base, group, key), number(result, group, key)
+        passed = before is not None and after is not None and direction * (after - before) > 1e-8
+    return {"status": "pass" if passed else "fail",
+            "reason": "expected metric response observed" if passed else "metric unavailable or expected response absent"}
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--program", default="examples/handwritten/program.json")
@@ -71,31 +103,31 @@ def main(argv: list[str]) -> int:
     duration = float(gt.get("meta", {}).get("duration") or 8.0)
     work = Path(a.work)
 
-    gt_states = states_for(gt, a.harness, work, "gt", duration, a.fps)
-    base = evaluate(gt, gt, gt_states, gt_states)
-    print(f"  基准（真值和自己比，应当接近完美）")
-    print(f"    轨迹中位误差 {base['full']['trajectory']['median_m']:.4f} m, "
-          f"运动类型准确率 {base['full']['motion_type']['accuracy']:.2f}, "
-          f"召回 {base['full']['objects']['recall']:.2f}, 误检率 {1-base['full']['objects']['precision']:.2f}")
-    print()
-
-    rows = [{"kind": "基准", **base}]
-    for kind in ("运动类型改错", "轨迹整体平移", "删掉一个物体", "多造一个物体", "周期改错"):
-        bad = perturb(gt, kind)
-        st = states_for(bad, a.harness, work, f"bad_{len(rows)}", duration, a.fps)
-        r = evaluate(gt, bad, gt_states, st)
-        f, h = r["full"], r["holdout"]
-        print(f"  {kind}")
-        print(f"    整段   轨迹 中位{f['trajectory']['median_m']:.3f} 最大{f['trajectory']['max_m']:.3f} m  "
-              f"类型 {f['motion_type']['accuracy']:.2f}  召回 {f['objects']['recall']:.2f}  误检 {1-f['objects']['precision']:.2f}")
-        print(f"    留出段 轨迹 中位{h['trajectory']['median_m']:.3f} 最大{h['trajectory']['max_m']:.3f} m  "
-              f"类型 {h['motion_type']['accuracy']:.2f}")
-        rows.append({"kind": kind, **r})
+    try:
+        gt_states = states_for(gt, a.harness, work, "gt", duration, a.fps)
+        base = evaluate(gt, gt, gt_states, gt_states)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        gt_states, base = [], {"error": str(exc), "status": "execution_failed"}
+    rows = [{"kind": "基准", **base, "check": sensitivity_check(base, base, "基准")}]
+    if rows[0]["check"]["status"] == "pass":
+        for kind in ("运动类型改错", "轨迹整体平移", "删掉一个物体", "多造一个物体", "周期改错"):
+            bad = perturb(gt, kind)
+            if bad == gt:
+                rows.append({"kind": kind, "check": {"status": "not_applicable", "reason": "no eligible target"}})
+                continue
+            try:
+                st = states_for(bad, a.harness, work, f"bad_{len(rows)}", duration, a.fps)
+                r = evaluate(gt, bad, gt_states, st)
+            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+                r = {"error": str(exc), "status": "execution_failed"}
+            rows.append({"kind": kind, **r, "check": sensitivity_check(base, r, kind)})
 
     out = REPO / a.out; out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(rows, ensure_ascii=False, indent=1) + "\n")
+    out.write_text(json.dumps(rows, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    for row in rows:
+        print(f"  {row['kind']}: {row['check']['status']} — {row['check']['reason']}")
     print(f"\n  明细写到 {out}")
-    return 0
+    return 0 if all(row["check"]["status"] == "pass" for row in rows) else 1
 
 
 if __name__ == "__main__":
