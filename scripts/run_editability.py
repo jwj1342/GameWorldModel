@@ -34,17 +34,20 @@ def baseline_error(program: dict, expected_hash: str | None) -> str:
     return "" if actual == expected_hash else "无法评测：原始 Program 与参考编辑的 program_sha256 不匹配"
 
 
-def equivalent(actual, expected) -> bool:
-    """完整结构比较，仅有限数值允许 1e-6 绝对误差；不忽略 ID 或数组顺序。"""
+def equivalent(actual, expected, tolerances=None, path="") -> bool:
+    """完整结构比较；仅指定 JSON Pointer 数值字段可覆盖默认绝对容差。"""
     numeric = (int, float)
     if type(actual) in numeric and type(expected) in numeric:
-        return math.isfinite(actual) and math.isfinite(expected) and abs(actual - expected) <= 1e-6
+        return math.isfinite(actual) and math.isfinite(expected) and abs(actual - expected) <= (tolerances or {}).get(path, 1e-6)
     if type(actual) is not type(expected):
         return False
     if isinstance(expected, dict):
-        return actual.keys() == expected.keys() and all(equivalent(actual[k], v) for k, v in expected.items())
+        return actual.keys() == expected.keys() and all(
+            equivalent(actual[k], v, tolerances, path + "/" + k.replace("~", "~0").replace("/", "~1"))
+            for k, v in expected.items())
     if isinstance(expected, list):
-        return len(actual) == len(expected) and all(equivalent(a, b) for a, b in zip(actual, expected))
+        return len(actual) == len(expected) and all(
+            equivalent(a, b, tolerances, path + "/" + str(i)) for i, (a, b) in enumerate(zip(actual, expected)))
     return actual == expected
 
 
@@ -65,11 +68,24 @@ def judge(case: dict, r: dict) -> dict:
             expected = jsonpatch.JsonPatch(case["expect_ops"]).apply(copy.deepcopy(r["before"]))
         except (jsonpatch.JsonPatchException, jsonpointer.JsonPointerException, TypeError, KeyError, IndexError):
             return {"ok": False, "why": "无法评测：参考补丁与输入不匹配"}
+        tolerances = case.get("tolerance", {})
+        if not isinstance(tolerances, dict):
+            return {"ok": False, "why": "无法评测：tolerance 必须是字段路径到绝对容差的映射"}
+        editable = {op.get("path") for op in case["expect_ops"] if op.get("op") in ("add", "replace")}
+        for path, value in tolerances.items():
+            try:
+                target = jsonpointer.resolve_pointer(expected, path)
+                valid = (path in editable and type(value) in (int, float) and math.isfinite(value)
+                         and value >= 0 and type(target) in (int, float) and math.isfinite(target))
+            except (jsonpointer.JsonPointerException, TypeError):
+                valid = False
+            if not valid:
+                return {"ok": False, "why": "无法评测：容差必须有限、非负且只针对参考编辑的数值字段"}
         if r.get("status") not in ("applied", "no_change"):
             return {"ok": False, "why": r.get("error") or "编辑没有成功执行"}
-        if not equivalent(r["program"], expected):
+        if not equivalent(r["program"], expected, tolerances):
             return {"ok": False, "why": f"目标值/对象错误或有副作用：{changed_paths(expected, r['program'])}"}
-        return {"ok": True, "why": "原输入已经满足要求" if equivalent(r["before"], expected) else "完整结果符合参考编辑，无额外副作用"}
+        return {"ok": True, "why": "原输入已经满足要求" if equivalent(r["before"], expected, tolerances) else "完整结果符合参考编辑，无额外副作用"}
 
     if not r["ok"]:
         return {"ok": False, "why": r["error"]}

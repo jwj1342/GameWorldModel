@@ -38,6 +38,38 @@ def spec():
     return result
 
 
+@pytest.mark.parametrize("phase", [-1.5707963267948966, -1.5708, -1.571, -1.57])
+def test_phase_accepts_explicit_angle_precision(phase):
+    case = next(c for c in spec()["cases"] if c["id"] == "phase_shift")
+    ops = [{"op": "replace", "path": "/objects/0/motion/phase", "value": phase}]
+    assert judge(case, apply_edit(sample(), case["instruction"], response(ops)))["ok"]
+
+
+def test_phase_tolerance_does_not_hide_wrong_value_or_other_field_changes():
+    case = next(c for c in spec()["cases"] if c["id"] == "phase_shift")
+    ops = [{"op": "replace", "path": "/objects/0/motion/phase", "value": -1.56}]
+    assert not judge(case, apply_edit(sample(), case["instruction"], response(ops)))["ok"]
+    ops[0]["value"] = -1.5708
+    ops.append({"op": "replace", "path": "/objects/0/motion/period", "value": 4.0005})
+    assert not judge(case, apply_edit(sample(), case["instruction"], response(ops)))["ok"]
+
+
+@pytest.mark.parametrize("tolerance", [0.001, {"/objects/0/motion/phase": -1},
+    {"/objects/0/motion/phase": float("nan")}, {"/objects/0/motion/phase": float("inf")},
+    {"/objects/0/motion/phase": True}, {"/objects/0/motion/period": 1}, {"/missing": 1}])
+def test_invalid_or_unrelated_tolerance_is_not_success(tolerance):
+    case = next(c for c in spec()["cases"] if c["id"] == "phase_shift")
+    case["tolerance"] = tolerance
+    result = judge(case, apply_edit(sample(), case["instruction"], response(case["expect_ops"])))
+    assert not result["ok"] and "无法评测" in result["why"]
+
+
+def test_default_precision_and_pointer_escaping_are_preserved():
+    assert not equivalent({"phase": -1.5708}, {"phase": -1.5707963267948966})
+    assert equivalent({"a/b": [{"x~y": 1.0005}]}, {"a/b": [{"x~y": 1}]},
+                      {"/a~1b/0/x~0y": .001})
+
+
 def test_program_baseline_is_pinned_and_whitespace_independent():
     program = sample()
     assert not baseline_error(program, spec()["program_sha256"])

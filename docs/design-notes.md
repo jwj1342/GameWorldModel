@@ -616,3 +616,15 @@ CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境�
 修订后的示例明确资产尺寸和相位，纠正材质路径，并同时修改门的范围和实际调度角度。
 它不是原指令集的同条件重复实验；旧保存结果及其成功率需要按新协议复核或重新运行，
 不能因合成单元测试通过就宣称模型成功率改善。本轮测试不调用模型，也不验证渲染或资产外观。
+# Editing judgment precision
+
+Reference edits still compare the complete resulting Program, preserving IDs,
+array order and unrelated fields. The default numeric absolute tolerance is
+1e-6. A case may specify `tolerance` as a JSON Pointer to absolute tolerance map;
+only finite, non-negative tolerances on numeric fields explicitly added or
+replaced by `expect_ops` are accepted. The phase case uses 0.001 radians only at
+`/objects/0/motion/phase`; other parameters retain the default tolerance.
+This avoids penalizing a rounded representation of -pi/2 without hiding edits
+to other fields. Tolerances are offline judgment metadata, not model input.
+The lift-width instruction now specifies x only, leaving y and z unchanged.
+Historical experiment success rates are not re-evaluated by these unit tests.
