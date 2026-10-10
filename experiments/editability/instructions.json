@@ -1,175 +1,69 @@
 {
- "program": "examples/handwritten/program.json",
- "notes": "二十条编辑指令，覆盖改运动参数、改几何、改数量、改事件、改静态结构，外加四条应当被拒绝的。场景里有四个物体：lift 升降平台（周期平移）、door 门（绕轴转）、cart 矿车（关键帧轨迹）、coin 金币（自转）。",
- "cases": [
-  {
-   "id": "period_faster",
-   "kind": "运动参数",
-   "instruction": "让升降平台上下移动得快一倍",
-   "expect_paths": [
-    "/objects/0/motion/period"
-   ],
-   "expect_value": {
-    "/objects/0/motion/period": 2.0
-   }
-  },
-  {
-   "id": "spin_slower",
-   "kind": "运动参数",
-   "instruction": "把金币的自转速度改成每秒 90 度",
-   "expect_paths": [
-    "/objects/3/motion/rate_dps"
-   ],
-   "expect_value": {
-    "/objects/3/motion/rate_dps": 90
-   }
-  },
-  {
-   "id": "amp_bigger",
-   "kind": "运动参数",
-   "instruction": "让升降平台的上下幅度改成 2 米",
-   "expect_paths": [
-    "/objects/0/motion/amp"
-   ],
-   "expect_value": {
-    "/objects/0/motion/amp": 2.0
-   }
-  },
-  {
-   "id": "door_angle",
-   "kind": "运动参数",
-   "instruction": "把门最大只开到 60 度",
-   "expect_paths": [
-    "/objects/1/motion/range_deg"
-   ]
-  },
-  {
-   "id": "phase_shift",
-   "kind": "运动参数",
-   "instruction": "让升降平台从最低点开始运动",
-   "expect_paths": [
-    "/objects/0/motion/phase"
-   ]
-  },
-  {
-   "id": "spin_axis",
-   "kind": "运动参数",
-   "instruction": "让金币绕 x 轴自转，不要绕 y 轴",
-   "expect_paths": [
-    "/objects/3/motion/axis"
-   ],
-   "expect_value": {
-    "/objects/3/motion/axis": [
-     1,
-     0,
-     0
-    ]
-   }
-  },
-  {
-   "id": "coin_bigger",
-   "kind": "几何",
-   "instruction": "把金币的半径改成 0.5 米",
-   "expect_paths": [
-    "/objects/3/geom"
-   ]
-  },
-  {
-   "id": "lift_wider",
-   "kind": "几何",
-   "instruction": "把升降平台做成 4 米宽",
-   "expect_paths": [
-    "/objects/0/geom"
-   ]
-  },
-  {
-   "id": "ground_bigger",
-   "kind": "静态结构",
-   "instruction": "把地面改成 40 米见方",
-   "expect_paths": [
-    "/static/0/geom"
-   ]
-  },
-  {
-   "id": "lava_move",
-   "kind": "静态结构",
-   "instruction": "把熔岩坑往 x 正方向挪 1 米",
-   "expect_paths": [
-    "/static/5/pose/pos"
-   ]
-  },
-  {
-   "id": "coin_color",
-   "kind": "几何",
-   "instruction": "把金币改成红色",
-   "expect_paths": [
-    "/objects/3/material"
-   ]
-  },
-  {
-   "id": "remove_cart",
-   "kind": "数量",
-   "instruction": "把矿车从场景里删掉",
-   "expect_paths": [
-    "/objects"
-   ]
-  },
-  {
-   "id": "add_event",
-   "kind": "事件",
-   "instruction": "让矿车在玩家碰到的时候消失",
-   "expect_paths": [
-    "/objects/2/events"
-   ],
-   "note": "原来写的是金币，但金币本来就有这个事件，等于期望一个已满足的状态发生改变。换成矿车。"
-  },
-  {
-   "id": "door_static",
-   "kind": "运动类型",
-   "instruction": "让门不要动，一直保持关着",
-   "expect_paths": [
-    "/objects/1/motion"
-   ]
-  },
-  {
-   "id": "cart_slower",
-   "kind": "运动参数",
-   "instruction": "让矿车走完整条路线的时间变成原来的两倍",
-   "expect_paths": [
-    "/objects/2/motion/keyframes"
-   ]
-  },
-  {
-   "id": "lift_higher",
-   "kind": "位姿",
-   "instruction": "把升降平台的中心抬高到 3 米",
-   "expect_paths": [
-    "/objects/0/pose/pos"
-   ]
-  },
-  {
-   "id": "no_such_object",
-   "kind": "应当拒绝",
-   "instruction": "把场景里那只猫往左边移两米",
-   "expect_refuse": true
-  },
-  {
-   "id": "not_expressible_sound",
-   "kind": "应当拒绝",
-   "instruction": "让门开合的时候发出吱呀的声音",
-   "expect_refuse": true
-  },
-  {
-   "id": "not_expressible_difficulty",
-   "kind": "应当拒绝",
-   "instruction": "把这个关卡的难度调高一些",
-   "expect_refuse": true
-  },
-  {
-   "id": "not_expressible_weather",
-   "kind": "应当拒绝",
-   "instruction": "给场景加上下雨的天气效果",
-   "expect_refuse": true
-  }
- ]
+  "program": "examples/handwritten/program.json",
+  "program_sha256": "e80c23101ca7ee08c76048c68e1638951a9eed77c6ad9c18465141d8894b6b90",
+  "notes": "二十一条指令，含一条已满足要求的无操作案例、一条需要实际添加触发事件并修改门运动的案例与四条拒绝。expect_ops 仅供离线判定，不传给编辑器；完整参考结果同时检查目标值、身份与副作用。金币资产以 extent 明确尺寸，不把资产假定为圆柱。历史成功率不能与修订后结果直接比较。",
+  "cases": [
+    {"id": "period_faster", "kind": "运动参数", "instruction": "让升降平台上下移动得快一倍",
+     "expect_paths": ["/objects/0/motion/period"], "expect_value": {"/objects/0/motion/period": 2.0},
+     "expect_ops": [{"op": "replace", "path": "/objects/0/motion/period", "value": 2.0}]},
+    {"id": "spin_slower", "kind": "运动参数", "instruction": "把金币的自转速度改成每秒 90 度",
+     "expect_paths": ["/objects/3/motion/rate_dps"], "expect_value": {"/objects/3/motion/rate_dps": 90},
+     "expect_ops": [{"op": "replace", "path": "/objects/3/motion/rate_dps", "value": 90}]},
+    {"id": "amp_bigger", "kind": "运动参数", "instruction": "让升降平台的上下幅度改成 2 米",
+     "expect_paths": ["/objects/0/motion/amp"], "expect_value": {"/objects/0/motion/amp": 2.0},
+     "expect_ops": [{"op": "replace", "path": "/objects/0/motion/amp", "value": 2.0}]},
+    {"id": "door_angle", "kind": "运动参数", "instruction": "把门最大只开到 60 度",
+     "expect_paths": ["/objects/1/motion/range_deg", "/objects/1/motion/schedule/0/to_deg"],
+     "expect_ops": [{"op": "replace", "path": "/objects/1/motion/range_deg/1", "value": 60},
+                    {"op": "replace", "path": "/objects/1/motion/schedule/0/to_deg", "value": 60}]},
+    {"id": "phase_shift", "kind": "运动参数", "instruction": "让升降平台从最低点开始运动，将正弦相位 phase 设为 -π/2 弧度",
+     "tolerance": {"/objects/0/motion/phase": 0.001},
+     "expect_paths": ["/objects/0/motion/phase"],
+     "expect_ops": [{"op": "replace", "path": "/objects/0/motion/phase", "value": -1.5707963267948966}]},
+    {"id": "spin_axis", "kind": "运动参数", "instruction": "让金币绕 x 轴自转，不要绕 y 轴",
+     "expect_paths": ["/objects/3/motion/axis"], "expect_value": {"/objects/3/motion/axis": [1, 0, 0]},
+     "expect_ops": [{"op": "replace", "path": "/objects/3/motion/axis", "value": [1, 0, 0]}]},
+    {"id": "coin_bigger", "kind": "几何", "instruction": "把金币资产 extent 的宽和高改成 1 米，厚度不变",
+     "expect_paths": ["/objects/3/geom/extent"],
+     "expect_ops": [{"op": "replace", "path": "/objects/3/geom/extent/0", "value": 1},
+                    {"op": "replace", "path": "/objects/3/geom/extent/1", "value": 1}]},
+    {"id": "lift_wider", "kind": "几何", "instruction": "将升降平台 extent 的 x 轴宽度改为 4 米，y 轴厚度和 z 轴长度不变",
+     "expect_paths": ["/objects/0/geom/extent/0"],
+     "expect_ops": [{"op": "replace", "path": "/objects/0/geom/extent/0", "value": 4}]},
+    {"id": "ground_bigger", "kind": "静态结构", "instruction": "把地面改成 40 米见方",
+     "expect_paths": ["/static/0/geom/extent"],
+     "expect_ops": [{"op": "replace", "path": "/static/0/geom/extent/0", "value": 40},
+                    {"op": "replace", "path": "/static/0/geom/extent/2", "value": 40}]},
+    {"id": "lava_move", "kind": "静态结构", "instruction": "把熔岩坑往 x 正方向挪 1 米",
+     "expect_paths": ["/static/5/pose/pos/0"],
+     "expect_ops": [{"op": "replace", "path": "/static/5/pose/pos/0", "value": 5}]},
+    {"id": "coin_color", "kind": "几何", "instruction": "把金币改成红色",
+     "expect_paths": ["/objects/3/material"],
+     "expect_ops": [{"op": "replace", "path": "/objects/3/material", "value": "red"}]},
+    {"id": "remove_cart", "kind": "数量", "instruction": "把矿车从场景里删掉",
+     "expect_paths": ["/objects/2"],
+     "expect_ops": [{"op": "remove", "path": "/objects/2"}]},
+    {"id": "add_event", "kind": "事件", "instruction": "让金币在玩家碰到的时候消失",
+     "expect_paths": ["/objects/3/events"], "expect_ops": []},
+    {"id": "trigger_door_on_lift", "kind": "事件", "instruction": "让玩家接触升降平台 lift 时触发门 door 打开：在 lift 上添加 trigger_on_enter 事件，target 为 door，action 为 open；门的 motion.trigger 设为 true，schedule 改为触发后第 0 秒开始、用 1.5 秒转到 100 度并保持打开。触发前门保持关闭，其他字段不变",
+     "expect_paths": ["/objects/0/events", "/objects/1/motion/trigger", "/objects/1/motion/schedule"],
+     "expect_ops": [{"op": "add", "path": "/objects/0/events", "value": [{"type": "trigger_on_enter", "target": "door", "action": "open"}]},
+                    {"op": "add", "path": "/objects/1/motion/trigger", "value": true},
+                    {"op": "replace", "path": "/objects/1/motion/schedule", "value": [{"t": 0, "to_deg": 100, "duration": 1.5}]}]},
+    {"id": "door_static", "kind": "运动类型", "instruction": "让门不要动，一直保持关着",
+     "expect_paths": ["/objects/1/motion"],
+     "expect_ops": [{"op": "replace", "path": "/objects/1/motion", "value": {"type": "static"}}]},
+    {"id": "cart_slower", "kind": "运动参数", "instruction": "让矿车走完整条路线的时间变成原来的两倍",
+     "expect_paths": ["/objects/2/motion/keyframes"],
+     "expect_ops": [{"op": "replace", "path": "/objects/2/motion/keyframes/1/t", "value": 8},
+                    {"op": "replace", "path": "/objects/2/motion/keyframes/2/t", "value": 16}]},
+    {"id": "lift_higher", "kind": "位姿", "instruction": "把升降平台的中心抬高到 3 米",
+     "expect_paths": ["/objects/0/pose/pos/1"],
+     "expect_ops": [{"op": "replace", "path": "/objects/0/pose/pos/1", "value": 3}]},
+
+    {"id": "no_such_object", "kind": "应当拒绝", "instruction": "把场景里那只猫往左边移两米", "expect_refuse": true},
+    {"id": "not_expressible_sound", "kind": "应当拒绝", "instruction": "让门开合的时候发出吱呀的声音", "expect_refuse": true},
+    {"id": "not_expressible_difficulty", "kind": "应当拒绝", "instruction": "把这个关卡的难度调高一些", "expect_refuse": true},
+    {"id": "not_expressible_weather", "kind": "应当拒绝", "instruction": "给场景加上下雨的天气效果", "expect_refuse": true}
+  ]
 }

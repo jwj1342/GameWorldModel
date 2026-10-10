@@ -9,7 +9,7 @@
 做法是两份程序都经 harness 跑一遍、导出逐帧状态，这里只消费状态。
 
 指标范围刻意收窄到能撑论文主表的四项：运动类型准确率、轨迹误差、
-物体召回与误检、以及留出时间段的外推。尺度误差、相机位姿、事件时序这些
+物体召回与误检、以及末段诊断。没有输入隔离记录时不能称为外推。尺度误差、相机位姿、事件时序这些
 等主表立住了再加。
 """
 from __future__ import annotations
@@ -18,20 +18,44 @@ from pathlib import Path
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+from gwm.config import load_config
 
 
 def load_states(path: str | Path) -> list[dict]:
-    return [json.loads(l) for l in Path(path).read_text().splitlines() if l.strip()]
+    return [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 def tracks(states: list[dict], kinds=("object",)) -> dict[str, dict]:
-    """把逐帧状态整理成 {id: {t: [...], pos: Nx3, class: str}}。"""
+    """Group instances by runtime name, retaining the parent id for motion labels."""
     out: dict[str, dict] = {}
+    previous = None
+    if not states:
+        raise ValueError("missing state frames")
     for s in states:
-        for o in s.get("objects", []):
+        if not isinstance(s, dict):
+            raise ValueError("state frame must be an object")
+        t = s.get("t")
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(t):
+            raise ValueError("state time must be finite")
+        if previous is not None and t <= previous:
+            raise ValueError("state times must be strictly increasing")
+        previous = t
+        if not isinstance(s.get("objects"), list):
+            raise ValueError("state objects must be an array (empty is allowed)")
+        seen = set()
+        for o in s["objects"]:
+            if not isinstance(o, dict):
+                raise ValueError("state entry must be an object")
             if kinds and o.get("kind") not in kinds: continue
-            d = out.setdefault(o["id"], {"t": [], "pos": [], "class": o.get("class")})
-            d["t"].append(s["t"]); d["pos"].append(o["pos"])
+            identity = o.get("name") or o["id"]
+            pos = np.asarray(o.get("pos"), float)
+            if identity in seen or pos.shape != (3,) or not np.isfinite(pos).all():
+                raise ValueError("duplicate instance or invalid position")
+            seen.add(identity)
+            d = out.setdefault(identity, {"t": [], "pos": [], "class": o.get("class"), "object_id": o["id"]})
+            if d["object_id"] != o["id"]:
+                raise ValueError("instance changes parent object id")
+            d["t"].append(t); d["pos"].append(pos)
     for d in out.values():
         d["t"] = np.asarray(d["t"], float); d["pos"] = np.asarray(d["pos"], float)
     return out
@@ -42,7 +66,9 @@ def motion_types(program: dict) -> dict[str, str]:
 
 
 def _sample(track: dict, times: np.ndarray) -> np.ndarray:
-    """按时间线性插值取位置，两边程序的帧时刻不一定对齐。"""
+    """Interpolate within measured support only; never clamp outside endpoints."""
+    if not len(times) or times.min() < track["t"][0] or times.max() > track["t"][-1]:
+        raise ValueError("requested times are outside track support")
     return np.column_stack([np.interp(times, track["t"], track["pos"][:, k]) for k in range(3)])
 
 
@@ -77,7 +103,7 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
 
 
 def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray, max_dist_m: float) -> list[tuple]:
-    """按整段轨迹的平均距离做最优匹配，返回 [(gt_id, pred_id 或 None, 平均距离)]。
+    """Match within available requested times, maximizing valid pairs before distance.
 
     超过 max_dist_m 的匹配不算数，两边都记成未匹配，避免把八竿子打不着的物体凑成一对。
     """
@@ -85,68 +111,137 @@ def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray,
     if not gt_ids: return []
     if not pred_ids: return [(g, None, float("inf")) for g in gt_ids]
 
-    cost = np.zeros((len(gt_ids), len(pred_ids)))
+    if not np.isfinite(max_dist_m) or max_dist_m < 0:
+        raise ValueError("max_dist_m must be finite and non-negative")
+    cost = np.full((len(gt_ids), len(pred_ids)), np.inf)
     for i, g in enumerate(gt_ids):
-        a = _sample(gt[g], times)
         for j, p in enumerate(pred_ids):
-            cost[i, j] = float(np.mean(np.linalg.norm(a - _sample(pred[p], times), axis=1)))
+            supported = times[(times >= max(gt[g]["t"][0], pred[p]["t"][0]))
+                              & (times <= min(gt[g]["t"][-1], pred[p]["t"][-1]))]
+            if len(supported):
+                cost[i, j] = float(np.mean(np.linalg.norm(_sample(gt[g], supported) - _sample(pred[p], supported), axis=1)))
 
-    rows, cols = linear_sum_assignment(cost)
-    paired = {int(r): int(c) for r, c in zip(rows, cols) if cost[r, c] <= max_dist_m}
+    # Dummy columns represent unmatched GTs. Normalized feasible distances are
+    # <=1, so one extra valid pair dominates any possible distance reduction.
+    penalty = min(len(gt_ids), len(pred_ids)) + 1
+    feasible = cost <= max_dist_m
+    assignment = np.full((len(gt_ids), len(pred_ids) + len(gt_ids)), float(penalty))
+    assignment[:, :len(pred_ids)] = np.where(feasible, cost / max(max_dist_m, 1e-12), penalty * 2)
+    rows, cols = linear_sum_assignment(assignment)
+    paired = {int(r): int(c) for r, c in zip(rows, cols) if c < len(pred_ids) and feasible[r, c]}
     return [(g, pred_ids[paired[i]] if i in paired else None,
              cost[i, paired[i]] if i in paired else float("inf")) for i, g in enumerate(gt_ids)]
 
 
 def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_states: list[dict],
-             holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120) -> dict:
-    """返回主表需要的四项指标，整段和留出段各算一遍。"""
-    gt_tr, pred_tr = tracks(gt_states), tracks(pred_states)
+             holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120,
+             min_time_coverage: float | None = None) -> dict:
+    """Keep existing metric keys, using a GT window and frozen prefix identities."""
+    if min_time_coverage is None:
+        min_time_coverage = load_config().get("gt_evaluation", {}).get("min_time_coverage", 0.9)
+    if (isinstance(min_time_coverage, bool) or not isinstance(min_time_coverage, (int, float))
+            or not np.isfinite(min_time_coverage) or not 0 <= min_time_coverage <= 1):
+        raise ValueError("min_time_coverage must be finite and within [0, 1]")
+    if not 0 < holdout_frac < 1 or n_samples < 2 or not np.isfinite(max_dist_m) or max_dist_m < 0:
+        raise ValueError("invalid metric configuration")
+    try:
+        gt_tr, pred_tr = tracks(gt_states), tracks(pred_states)
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"error": str(exc), "status": "invalid_states"}
     if not gt_tr:
         return {"error": "真值里没有可比的物体"}
 
-    t_end = min(max(d["t"].max() for d in gt_tr.values()),
-                max(d["t"].max() for d in pred_tr.values()) if pred_tr else 0.0)
-    if t_end <= 0:
-        return {"error": "两份状态没有重叠的时间段"}
-
     gt_motion, pred_motion = motion_types(gt_program), motion_types(pred_program)
+    for side, source, labels in (("gt", gt_tr, gt_motion), ("pred", pred_tr, pred_motion)):
+        unknown = sorted({track["object_id"] for track in source.values()} - labels.keys())
+        if unknown:
+            return {"error": f"{side} state objects are absent from its Program: {unknown}",
+                    "status": "state_program_mismatch"}
 
-    def window(t0: float, t1: float) -> dict:
-        times = np.linspace(t0, t1, n_samples)
+    t_start, t_end = float(gt_states[0]["t"]), float(gt_states[-1]["t"])
+    if t_end <= t_start:
+        return {"error": "reference needs a positive time span", "status": "invalid_states"}
+    cut = t_start + (t_end - t_start) * (1 - holdout_frac)
 
-        # 先用整体质心做一次粗对齐，破开「匹配要先对齐、对齐要先匹配」这个循环。
-        # 两边物体数一般不同，所以粗对齐只能比质心，不能逐点配对——
-        # Kabsch 要求一一对应，直接 vstack 会维度不等。
-        gt_c = np.vstack([_sample(d, times).mean(0) for d in gt_tr.values()])
-        pred_c = (np.vstack([_sample(d, times).mean(0) for d in pred_tr.values()])
-                  if pred_tr else gt_c)
+    # Truncate actual source samples, not just query times: interpolating at cut
+    # through a later sample would leak the tail into the identity assignment.
+    def prefix(source):
+        return {key: {**track, "t": track["t"][track["t"] <= cut], "pos": track["pos"][track["t"] <= cut]}
+                for key, track in source.items() if np.any(track["t"] <= cut)}
+
+    observed_gt, observed_pred = prefix(gt_tr), prefix(pred_tr)
+    obs_times = np.linspace(t_start, cut, n_samples)
+
+    def _supported(ts, *tracks):
+        """取这几条轨迹共同覆盖得到的查询时刻；_sample 不许外推，所以要先裁。"""
+        lo = max([ts[0]] + [t["t"][0] for t in tracks])
+        hi = min([ts[-1]] + [t["t"][-1] for t in tracks])
+        return ts[(ts >= lo) & (ts <= hi)]
+
+    # 规范对齐和身份对应必须定在同一段上。水平平移与偏航是单目视频观测不到的
+    # 规范自由度，不先对齐掉，整体差着 8 米时一对都配不上；而配对已经冻在观察段，
+    # 对齐就不能再留在 window() 里按窗口各算各的——那样留出段会重新拟合，
+    # 把末段的共同偏移当成规范差异吸收掉。
+    R0, t0v = np.eye(3), np.zeros(3)
+    if observed_pred:
+        def centroid(track):
+            ts = _supported(obs_times, track)
+            return _sample(track, ts).mean(0) if len(ts) else track["pos"].mean(0)
+        gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
+        pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
         t0v = np.array([gt_c[:, 0].mean() - pred_c[:, 0].mean(), 0.0,
                         gt_c[:, 2].mean() - pred_c[:, 2].mean()])
-        R0 = np.eye(3)      # 粗对齐只平移，偏航等匹配上之后再估
-        pred_rough = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
+        rough = {k: {**d, "pos": d["pos"] + t0v} for k, d in observed_pred.items()}
+        gp, pp = [], []
+        for g, q, _ in match_objects(observed_gt, rough, obs_times, max_dist_m):
+            if q is None: continue
+            ts = _supported(obs_times, observed_gt[g], observed_pred[q])
+            if len(ts):
+                gp.append(_sample(observed_gt[g], ts)); pp.append(_sample(observed_pred[q], ts))
+        if gp:
+            R0, t0v = align_gauge(np.vstack(gp), np.vstack(pp))
+    aligned = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
 
-        pairs = match_objects(gt_tr, pred_rough, times, max_dist_m)
-        matched_rough = [(g, p) for g, p, _ in pairs if p is not None]
-        if matched_rough:
-            gp = np.vstack([_sample(gt_tr[g], times) for g, _ in matched_rough])
-            pp = np.vstack([_sample(pred_tr[p], times) for _, p in matched_rough])
-            R0, t0v = align_gauge(gp, pp)
-        pred_aligned = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
-        pairs = match_objects(gt_tr, pred_aligned, times, max_dist_m)
-        matched = [(g, p, d) for g, p, d in pairs if p is not None]
+    pairs = match_objects(observed_gt, prefix(aligned), obs_times, max_dist_m)
+    pairs += [(g, None, float("inf")) for g in sorted(set(gt_tr) - set(observed_gt))]
+    matched = [(g, p, d) for g, p, d in pairs if p is not None]
+
+    def window(t0: float, t1: float) -> dict:
+        distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
+        for g, p, _ in pairs:
+            if p is None:
+                coverage[g] = None  # No identity pair, not measured zero coverage.
+                evaluated_windows[g] = None
+                unavailable[g] = "not_observed_in_prefix" if g not in observed_gt else "no_prefix_match"
+            else:
+                start = max(t0, gt_tr[g]["t"][0], pred_tr[p]["t"][0])
+                end = min(t1, gt_tr[g]["t"][-1], pred_tr[p]["t"][-1])
+                coverage[g] = float(max(0.0, end - start) / (t1 - t0))
+                evaluated_windows[g] = [float(start), float(end)] if end > start else None
+                if end <= start or coverage[g] < min_time_coverage:
+                    unavailable[g] = "insufficient_time_coverage"
+                    continue
+                times = np.linspace(start, end, n_samples)
+                distances[g] = float(np.mean(np.linalg.norm(_sample(gt_tr[g], times) - _sample(aligned[p], times), axis=1)))
 
         # 轨迹误差：逐物体算整段平均距离。
         # 只报两个汇总数：中位数抗少数崩掉的物体，但场景里只有一个物体出问题时
         # 它会归零（敏感性检查里实测到了），所以最大值也要报。
         # 别的统计量从 per_object 里都能算出来，不在这里重复。
-        errs = sorted(d for _, _, d in matched)
+        errs = sorted(distances.values())
         traj = {"median_m": float(np.median(errs)) if errs else None,
                 "max_m": float(max(errs)) if errs else None,
                 "n": len(errs),
-                "per_object": {g: round(d, 4) for g, _, d in matched}}
+                "per_object": {g: round(d, 4) for g, d in distances.items()},
+                "unavailable": unavailable,
+                "coverage": coverage,
+                "evaluated_window_s": evaluated_windows,
+                "min_time_coverage": min_time_coverage,
+                "status": "complete" if len(distances) == len(gt_tr) and all(c == 1 for c in coverage.values())
+                          else "partial" if distances else "unavailable"}
 
         # 运动类型：只在匹配上的物体里算，没匹配上的属于召回问题，分开记
-        hits = [(gt_motion.get(g, "static"), pred_motion.get(p, "static")) for g, p, _ in matched]
+        hits = [(gt_motion[gt_tr[g]["object_id"]], pred_motion[pred_tr[p]["object_id"]]) for g, p, _ in matched]
         acc = float(np.mean([a == b for a, b in hits])) if hits else None
         confusion: dict[str, dict[str, int]] = {}
         for a, b in hits: confusion.setdefault(a, {}).setdefault(b, 0); confusion[a][b] += 1
@@ -155,8 +250,11 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         return {
             "gauge_alignment": {"yaw_deg": round(float(np.degrees(np.arctan2(R0[0, 2], R0[0, 0]))), 2),
                                 "translation_xz_m": [round(float(t0v[0]), 3), round(float(t0v[2]), 3)],
+                                "fitted_on_s": [round(t_start, 3), round(cut, 3)],
                                 "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，"
-                                        "否则是在罚一个确定不了的量。只做刚性对齐，相对结构错了仍会暴露。"},
+                                        "否则是在罚一个确定不了的量。变换与身份对应都在观察段定死后冻住，"
+                                        "每个窗口共用同一个，留出段不重新拟合。"
+                                        "只做刚性对齐，相对结构错了仍会暴露。"},
             "trajectory": traj,
             "motion_type": {"accuracy": acc, "n": len(hits), "confusion": confusion},
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
@@ -165,9 +263,9 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             "window_s": [round(t0, 3), round(t1, 3)],
         }
 
-    cut = t_end * (1.0 - holdout_frac)
-    return {"full": window(0.0, t_end),
+    return {"full": window(t_start, t_end),
             "holdout": window(cut, t_end),
             "holdout_frac": holdout_frac,
-            "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，"
-                    "所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"}
+            "matching": {"window_s": [t_start, cut], "pairs": {g: p for g, p, _ in pairs}},
+            "note": "holdout仅为参考末段诊断；对应关系只用前段样本并冻结。"
+                    "未提供重建输入隔离证明，不宣称留出外推。位置误差不覆盖旋转、相机或物理发散协议。"}
