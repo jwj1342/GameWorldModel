@@ -672,6 +672,28 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+
+玩法角色推断的三个参照系要说清楚，否则同一个场景换个写法就换一套角色。
+
+够不够得着从玩家站的那一层量起，不拿世界坐标的绝对高度。场景落在哪一层由尺度对齐
+怎么定原点决定，是观测不到的规范自由度，整体抬高十米不改变玩家和物体的任何相对关系。
+站立面取静态几何里水平投影最大的那块的顶面；物体声明了 `support` 就从所支撑节点的
+顶面量起，这样三米高台子上的硬币仍然算够得着，因为玩家能爬上台子。
+
+一个物体的多个 `instances` 全都要算，取最宽松的那个，不只看第一个。只认 `instances[0]`
+会让角色跟着数组顺序走：同样五枚硬币，够得着的那枚写在开头还是末尾，整组的角色就不一样。
+
+能不能站上去要把姿态算进去。盒子三组对面各自算水平投影面积和法线偏离竖直的余弦，
+只要有一组面积够大又不太陡就算站得住。只看局部 `extent[0] * extent[2]` 分不出躺着和
+立着——一块 2 x 0.1 x 2 的板子绕 x 轴转九十度，extent 一个字没变，顶上已经没法站人。
+三组面都要比，不能只挑法线最接近竖直的那一组：板子倾斜五十度时窄边比大面更接近水平，
+但人踩的是那块四平米的大面。坡度上限 `max_slope_deg` 默认 55 度，跟 `kernel/physics.js`
+里 `setMaxSlopeClimbAngle` 的设置对齐，再陡角色控制器就爬不上去了。
+
+原来的 `scene_scale()` 没有调用者，也和本模块「阈值一律以玩家为基准，不以场景尺度为
+基准」的前提相反，一并删掉。四元数转旋转矩阵提成 `gwm/compiler/geometry.rotation_matrix`，
+几何预检和绑定共用一份，免得两处对姿态的读法漂开。
+
 # Cone dimensions in role inference
 
 Cone extents accept `radius` and explicit `radius_top`/`radius_bottom`, matching
