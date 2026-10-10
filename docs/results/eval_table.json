@@ -1,0 +1,168 @@
+{
+ "full": {
+  "local_inline": {
+   "window": "full",
+   "n_runs": 1,
+   "trajectory_m": {
+    "median": 1.18865,
+    "mean": 1.18865,
+    "std": 0.14927024150848023,
+    "n": 2
+   },
+   "motion_type_accuracy": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_recall": {
+    "median": 0.5,
+    "mean": 0.5,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_precision": {
+    "median": 0.4,
+    "mean": 0.4,
+    "std": 0.0,
+    "n": 1
+   },
+   "confusion": {
+    "revolute->static": 1,
+    "periodic_translate->static": 1
+   }
+  }
+ },
+ "holdout": {
+  "local_inline": {
+   "window": "holdout",
+   "n_runs": 1,
+   "trajectory_m": {
+    "median": 1.0309,
+    "mean": 1.0309,
+    "std": 0.07820600999923218,
+    "n": 2
+   },
+   "motion_type_accuracy": {
+    "median": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_recall": {
+    "median": 0.5,
+    "mean": 0.5,
+    "std": 0.0,
+    "n": 1
+   },
+   "object_precision": {
+    "median": 0.4,
+    "mean": 0.4,
+    "std": 0.0,
+    "n": 1
+   },
+   "confusion": {
+    "revolute->static": 1,
+    "periodic_translate->static": 1
+   }
+  }
+ },
+ "rows": [
+  {
+   "run": "out/handwritten_playground/20261006-132217-2de6",
+   "clip": "handwritten_playground",
+   "config": "local_inline",
+   "metrics": {
+    "full": {
+     "gauge_alignment": {
+      "yaw_deg": 59.44,
+      "translation_xz_m": [
+       12.812,
+       3.851
+      ],
+      "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，否则是在罚一个确定不了的量。只做刚性对齐，相对结构错了仍会暴露。"
+     },
+     "trajectory": {
+      "median_m": 1.1886633393261583,
+      "max_m": 1.2942003648383476,
+      "n": 2,
+      "per_object": {
+       "door": 1.0831,
+       "lift": 1.2942
+      }
+     },
+     "motion_type": {
+      "accuracy": 0.0,
+      "n": 2,
+      "confusion": {
+       "revolute": {
+        "static": 1
+       },
+       "periodic_translate": {
+        "static": 1
+       }
+      }
+     },
+     "objects": {
+      "gt": 4,
+      "pred": 5,
+      "matched": 2,
+      "recall": 0.5,
+      "precision": 0.4
+     },
+     "window_s": [
+      0.0,
+      7.9
+     ]
+    },
+    "holdout": {
+     "gauge_alignment": {
+      "yaw_deg": 64.23,
+      "translation_xz_m": [
+       13.562,
+       3.088
+      ],
+      "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，否则是在罚一个确定不了的量。只做刚性对齐，相对结构错了仍会暴露。"
+     },
+     "trajectory": {
+      "median_m": 1.0308928433877984,
+      "max_m": 1.0861508651606608,
+      "n": 2,
+      "per_object": {
+       "door": 0.9756,
+       "lift": 1.0862
+      }
+     },
+     "motion_type": {
+      "accuracy": 0.0,
+      "n": 2,
+      "confusion": {
+       "revolute": {
+        "static": 1
+       },
+       "periodic_translate": {
+        "static": 1
+       }
+      }
+     },
+     "objects": {
+      "gt": 4,
+      "pred": 5,
+      "matched": 2,
+      "recall": 0.5,
+      "precision": 0.4
+     },
+     "window_s": [
+      6.32,
+      7.9
+     ]
+    },
+    "holdout_frac": 0.2,
+    "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+   }
+  }
+ ],
+ "skipped": [],
+ "markdown_full": "| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 物体召回 | 物体精确率 |\n|---|---|---|---|---|---|\n| local_inline | 1 | 1.189 | 0.000 | 0.500 | 0.400 |",
+ "markdown_holdout": "| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 物体召回 | 物体精确率 |\n|---|---|---|---|---|---|\n| local_inline | 1 | 1.031 | 0.000 | 0.500 | 0.400 |"
+}

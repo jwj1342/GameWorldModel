@@ -1,0 +1,14 @@
+# 和 vllm_local.yaml 的区别：服务和实验在同一个作业里，所以端点直接从环境变量读，
+# 不用写端点文件再让另一个作业去读。
+vlm:
+  provider: openai_compat
+  provider_kind: vllm
+  endpoint: ${GWM_VLM_ENDPOINT}
+  api_key: EMPTY
+  model: qwen3.5-27b-fp8
+  temperature: 0.0          # 编辑任务要确定性，不要采样
+  top_p: 1.0
+  enable_thinking: false
+  max_tokens: 1200
+  timeout_s: 300
+  max_retries: 3
