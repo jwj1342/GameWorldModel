@@ -25,7 +25,14 @@ def perturb(program: dict, kind: str) -> dict:
             if (obj.get("motion") or {}).get("type", "static") != "static":
                 obj["motion"] = {"type": "static"}
                 break
-    elif kind == "轨迹整体平移":          # 期望：轨迹误差涨，运动类型不变
+    elif kind == "单个物体平移":          # 期望：轨迹误差涨，运动类型不变
+        # 只挪一个。全场景一起挪是规范自由度，评测前会被 align_gauge 对齐掉，
+        # 拿它当敏感性探针探的是指标故意不测的量。
+        for o in objs:
+            if "pose" in o: o["pose"]["pos"][0] += 0.5
+            for inst in o.get("instances", []): inst["pos"][0] += 0.5
+            break
+    elif kind == "整体平移（规范自由度）":  # 期望：轨迹误差**不**涨，这是在验对齐有没有生效
         for o in objs:                    # 物体可以用 pose，也可以用 instances 放多份
             if "pose" in o: o["pose"]["pos"][0] += 0.5
             for inst in o.get("instances", []): inst["pos"][0] += 0.5
@@ -79,13 +86,19 @@ def sensitivity_check(base: dict, result: dict, kind: str) -> dict:
     else:
         group, key, direction = {
             "运动类型改错": ("motion_type", "accuracy", -1),
-            "轨迹整体平移": ("trajectory", "max_m", 1),
+            "单个物体平移": ("trajectory", "max_m", 1),
+            "整体平移（规范自由度）": ("trajectory", "max_m", 0),
             "删掉一个物体": ("objects", "recall", -1),
             "多造一个物体": ("objects", "precision", -1),
             "周期改错": ("trajectory", "max_m", 1),
         }[kind]
         before, after = number(base, group, key), number(result, group, key)
-        passed = before is not None and after is not None and direction * (after - before) > 1e-8
+        if direction == 0:
+            # 整体平移是观测不到的规范差异，指标该把它对齐掉。涨了说明对齐没生效，
+            # 那是在罚一个视频里确定不了的量；这一项查的是「不该动」。
+            passed = before is not None and after is not None and abs(after - before) <= 1e-6
+        else:
+            passed = before is not None and after is not None and direction * (after - before) > 1e-8
     return {"status": "pass" if passed else "fail",
             "reason": "expected metric response observed" if passed else "metric unavailable or expected response absent"}
 
@@ -110,7 +123,8 @@ def main(argv: list[str]) -> int:
         gt_states, base = [], {"error": str(exc), "status": "execution_failed"}
     rows = [{"kind": "基准", **base, "check": sensitivity_check(base, base, "基准")}]
     if rows[0]["check"]["status"] == "pass":
-        for kind in ("运动类型改错", "轨迹整体平移", "删掉一个物体", "多造一个物体", "周期改错"):
+        for kind in ("运动类型改错", "单个物体平移", "整体平移（规范自由度）",
+                     "删掉一个物体", "多造一个物体", "周期改错"):
             bad = perturb(gt, kind)
             if bad == gt:
                 rows.append({"kind": kind, "check": {"status": "not_applicable", "reason": "no eligible target"}})

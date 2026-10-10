@@ -224,3 +224,70 @@ def test_affordance_rules_separate_collectibles_from_structure():
     assert role(box("door", [0.1, 2.0, 1.2], motion={"type": "revolute"})) == "moving_obstacle"
     # 危险物目前只能靠语义关键词，属性推不出来
     assert role(box("pit", [4, 0.1, 4], y=0.05, cls="lava pool")) == "hazard"
+
+
+def test_eval_aggregation_pools_objects_not_clips():
+    """汇总方式决定了论文表格里的数对不对。
+
+    轨迹误差按物体汇总而不是按片段，否则物体少的片段权重会过高：
+    一个只有一个物体的片段，和一个有十个物体的片段，先按片段平均的话
+    前者的那一个物体会和后者的十个物体等权。
+    """
+    from gwm.feedback.report import aggregate, as_markdown
+
+    def run(per_object, acc, recall, precision):
+        return {"metrics": {"full": {
+            "trajectory": {"per_object": per_object, "median_m": 0, "max_m": 0, "n": len(per_object)},
+            "motion_type": {"accuracy": acc, "n": len(per_object), "confusion": {"static": {"spin": 1}}},
+            "objects": {"recall": recall, "precision": precision},
+        }}}
+
+    a = aggregate([run({"x": 1.0}, 1.0, 1.0, 1.0),
+                   run({"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}, 0.5, 0.5, 0.5)])
+
+    # 五个物体：一个 1.0、四个 0.0，所以中位数是 0.0、均值 0.2
+    assert a["trajectory_m"]["n"] == 5
+    assert abs(a["trajectory_m"]["median"] - 0.0) < 1e-9
+    assert abs(a["trajectory_m"]["mean"] - 0.2) < 1e-9
+    # 准确率是片段级的量，按片段汇总：两个片段 1.0 和 0.5
+    assert a["motion_type_accuracy"]["n"] == 2
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.75) < 1e-9
+    # 混淆矩阵要累加
+    assert a["confusion"]["static->spin"] == 2
+    # 没有数据时不能假装有
+    assert aggregate([])["trajectory_m"] is None
+
+    md = as_markdown({"甲": a})
+    assert "甲" in md and "|" in md
+
+
+def test_gauge_alignment_absorbs_unobservable_but_not_real_errors():
+    """对齐要吃掉观测不到的规范差异，但不能吃掉真实的建模错误。
+
+    单目视频确定不了世界原点的水平位置和整体朝向，所以整体平移和偏航
+    不该算误差。但物体之间的相对结构错了、运动周期错了，必须照样暴露。
+    这个边界划错的话，指标要么永远在罚一个确定不了的量（之前就是这样，
+    实测整体偏了 8.3 米），要么把真错误也一起对齐掉。
+    """
+    from gwm.feedback.gt_metrics import align_gauge
+
+    gt = np.array([[0.0, 0, 0], [4.0, 0, 0], [0.0, 0, 3.0], [4.0, 1, 3.0]])
+
+    # 整体平移：观测不到，对齐之后残差应当接近 0
+    R, t = align_gauge(gt, gt + np.array([8.3, 0, -5.0]))
+    assert np.abs((gt + np.array([8.3, 0, -5.0])) @ R.T + t - gt).max() < 1e-6
+
+    # 整体偏航：同样观测不到
+    a = np.radians(37.0)
+    Ry = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
+    R, t = align_gauge(gt, gt @ Ry.T)
+    assert np.abs((gt @ Ry.T) @ R.T + t - gt).max() < 1e-6
+
+    # 相对结构错了：只挪动其中一个物体，对齐吃不掉，残差必须留下来
+    broken = gt.copy(); broken[1] += np.array([2.0, 0, 0])
+    R, t = align_gauge(gt, broken)
+    assert np.abs(broken @ R.T + t - gt).max() > 0.5
+
+    # 高度不对齐，y 方向是可观测的（地面已经压到 y=0）
+    R, t = align_gauge(gt, gt + np.array([0, 1.5, 0]))
+    assert abs(t[1]) < 1e-9
