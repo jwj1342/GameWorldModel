@@ -1,6 +1,6 @@
 // scene.js — 把 program.json 的 static[] 与 objects[] 变成 three.js 节点，并给每个物体分配 24 位 ID 颜色
 import * as THREE from 'three';
-import { makePose } from './motions.js';
+import { makePose, isSimulated } from './motions.js';
 
 // 调色板是 DSL 契约的一部分：schema 的 $defs.materialName 列的就是这些词，
 // tests/test_style_kernel.mjs 盯着两边不许漂。名字写错了会悄悄变成灰色，
@@ -142,7 +142,9 @@ export function buildScene(program, kernelCfg = null) {
   sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = sun.shadow.camera.bottom = -25; sun.shadow.camera.right = sun.shadow.camera.top = 25;
   scene.add(sun);
 
-  const registry = []; // {id, kind:'static'|'object', group, colliders, pose(t), base, idIndex, idColor, class, dynamic, spec, instanceIndex}
+  const registry = []; // {id, kind:'static'|'object', group, colliders, pose(t), base, idIndex, idColor, class, dynamic, simulated, spec, instanceIndex}
+  // dynamic  = 有脚本运动，位姿由 pose(t) 算出来再推给物理
+  // simulated = 物理驱动，位姿由 Rapier 算出来再读回 group，方向相反
   let idIndex = 1;
   const add = (spec, kind, base, motion, instanceIndex = 0) => {
     const { group, colliders } = buildNode(spec);
@@ -156,7 +158,7 @@ export function buildScene(program, kernelCfg = null) {
       ? new THREE.Color(fromCfg.color[0] / 255, fromCfg.color[1] / 255, fromCfg.color[2] / 255)
       : idToColor(idIndex);
     const entry = { id: spec.id, name: group.name, kind, group, colliders, base, spec, class: spec.class ?? kind,
-      pose: makePose(motion, base), dynamic: !!motion && motion.type !== 'static', idIndex, idColor, instanceIndex,
+      pose: makePose(motion, base), dynamic: !!motion && motion.type !== 'static', simulated: isSimulated(motion), base, idIndex, idColor, instanceIndex,
       visible: true, events: spec.events ?? [] };
     idIndex++;
     group.traverse(o => { if (o.isMesh) o.userData.entry = entry; });
