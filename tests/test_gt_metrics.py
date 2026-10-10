@@ -35,16 +35,20 @@ def test_baseline_missing_extra_and_motion_labels():
 
 @pytest.mark.parametrize("end", [8.0, 8 - 1 / 30, 7.9])
 def test_small_endpoint_shortfall_preserves_measured_error(end):
-    reference = states(["a"], np.linspace(0, 8, 241))
-    prediction = states(["a"], np.linspace(0, end, 240))
+    # 两个物体，只挪其中一个。全都挪那是规范自由度，align_gauge 会对齐掉、量不到东西；
+    # 只挪一个，剩下的才是相对结构误差，这一项查的是覆盖不足不该把它抹掉。
+    reference = states(["a", "b"], np.linspace(0, 8, 241))
+    prediction = states(["a", "b"], np.linspace(0, end, 240))
     for frame in prediction:
         frame["objects"][0]["pos"][0] += 0.3
-    result = evaluate(program(["a"]), program(["a"]), reference, prediction)
+    result = evaluate(program(["a", "b"]), program(["a", "b"]), reference, prediction)
     for name, start in (("full", 0), ("holdout", 6.4)):
         metric = result[name]["trajectory"]
-        assert metric["median_m"] == pytest.approx(0.3)
-        assert metric["coverage"]["a"] == pytest.approx((end - start) / (8 - start))
-        assert metric["evaluated_window_s"]["a"] == pytest.approx([start, end])
+        # 对齐把这 0.3 的相对偏移平摊到两个物体上，各剩一半
+        assert metric["median_m"] == pytest.approx(0.15)
+        for key in ("a", "b"):
+            assert metric["coverage"][key] == pytest.approx((end - start) / (8 - start))
+            assert metric["evaluated_window_s"][key] == pytest.approx([start, end])
         assert metric["status"] == ("complete" if end == 8 else "partial")
         assert result[name]["window_s"] == [start, 8]
 
@@ -208,8 +212,12 @@ def sensitivity_module():
 
 def test_sensitivity_script_fails_when_all_perturbations_look_perfect(tmp_path, monkeypatch):
     module = sensitivity_module()
+    # 至少三个物体：只有一个的时候，挪它就等于挪整个场景，那是规范自由度，
+    # 对齐会吃掉，「单个物体平移」这一项探不到东西；删一个之后还要剩得下可配对的。
     fixture = {"objects": [{"id": "a", "pose": {"pos": [0, 0, 0]},
-                             "motion": {"type": "periodic_translate", "period": 2}}]}
+                            "motion": {"type": "periodic_translate", "period": 2}},
+                           {"id": "b", "pose": {"pos": [3, 0, 0]}, "motion": {"type": "static"}},
+                           {"id": "c", "pose": {"pos": [0, 0, 3]}, "motion": {"type": "static"}}]}
     source, output = tmp_path / "program.json", tmp_path / "checks.json"
     source.write_text(json.dumps(fixture), encoding="utf-8")
     perfect = evaluate(program(["a"]), program(["a"]), states(["a"]), states(["a"]))
@@ -218,7 +226,11 @@ def test_sensitivity_script_fails_when_all_perturbations_look_perfect(tmp_path, 
     assert module.main(["--program", str(source), "--work", str(tmp_path), "--out", str(output)]) == 1
     rows = json.loads(output.read_text(encoding="utf-8"))
     assert rows[0]["check"]["status"] == "pass"
-    assert all(row["check"]["status"] == "fail" for row in rows[1:])
+    # 「整体平移」查的是指标**不该**动，所以指标纹丝不动的时候它理应通过。
+    # 也就是说单靠这一项发现不了一个卡死的指标——那要靠基准行和另外五项。
+    stuck = {row["kind"]: row["check"]["status"] for row in rows[1:]}
+    assert stuck.pop("整体平移（规范自由度）") == "pass"
+    assert all(status == "fail" for status in stuck.values()), stuck
 
 
 def test_sensitivity_script_records_execution_failure(tmp_path, monkeypatch):
@@ -247,8 +259,12 @@ def test_sensitivity_checks_degradation_and_undefined_metrics():
 
 def test_sensitivity_script_success_and_inapplicable_period(tmp_path, monkeypatch):
     module = sensitivity_module()
+    # 至少三个物体：只有一个的时候，挪它就等于挪整个场景，那是规范自由度，
+    # 对齐会吃掉，「单个物体平移」这一项探不到东西；删一个之后还要剩得下可配对的。
     fixture = {"objects": [{"id": "a", "pose": {"pos": [0, 0, 0]},
-                             "motion": {"type": "periodic_translate", "period": 2}}]}
+                            "motion": {"type": "periodic_translate", "period": 2}},
+                           {"id": "b", "pose": {"pos": [3, 0, 0]}, "motion": {"type": "static"}},
+                           {"id": "c", "pose": {"pos": [0, 0, 3]}, "motion": {"type": "static"}}]}
     source, output = tmp_path / "program.json", tmp_path / "checks.json"
     def synthetic_records(candidate, *args):
         records = []
