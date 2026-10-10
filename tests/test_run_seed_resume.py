@@ -150,8 +150,21 @@ def test_changed_seed_cli_is_rejected_before_reusing_evidence(inputs, monkeypatc
     monkeypatch.setattr(run_clip, "run_perception", lambda *a, **k: pytest.fail("provider must not run"))
     with pytest.raises(SystemExit) as result:
         run_clip.main(["--video", args.video, "--clip", args.clip, "--no-vlm", "--resume", str(directory), "--seed", "99"])
-    assert result.value.code == 2
+    assert result.value.code == 3          # 3 是用法错误；2 留给证据质量 block 和编译失败
     assert (directory / "run.json").read_bytes() == before
+
+
+def test_resume_survives_a_source_video_that_is_no_longer_on_disk(inputs, monkeypatch):
+    """作业超时之后靠 --resume 续跑是文档承诺的恢复路径，而 scratch 是 60 天轮转的，
+    clip 也可能被 stage 到 $SLURM_TMPDIR。缓存的 Evidence 自带 source_video_sha256，
+    来源有据可查，不该因为此刻读不到视频文件就把一次完好的运行判死。"""
+    existing(inputs, monkeypatch)
+    directory, args, cfg = inputs
+    from pathlib import Path
+    Path(args.video).unlink()
+    manifest = run_clip.prepare_run_manifest(directory, args, cfg, cfg["vlm"]["seed"])
+    assert manifest["stages"]["perception"]["status"] == "reused"
+    assert manifest["resume_attempts"][-1]["reused_artifacts"]["perception/evidence.json"]
 
 
 def test_source_hash_can_be_verified_from_evidence(inputs, monkeypatch):
@@ -244,13 +257,15 @@ def test_malformed_evidence_metadata_is_refused(inputs, monkeypatch, malformed):
         run_clip.prepare_run_manifest(directory, args, cfg, 123)
 
 
-def test_orphan_output_is_not_silently_overwritten(inputs):
+def test_stray_artifacts_do_not_block_a_new_run(inputs):
+    """只有 run.json 才代表一次有来源记录的运行。目录里剩下的零散产物不该让新运行直接失败，
+    否则任何固定了 --out 的重投脚本第二次就跑不起来。"""
     directory, args, cfg = inputs
     directory.mkdir()
     orphan = directory / "program.json"
     orphan.write_text("synthetic old artifact", encoding="utf-8")
-    with pytest.raises(ValueError, match="existing run"):
-        run_clip.prepare_run_manifest(directory, args, cfg, 123)
+    manifest = run_clip.prepare_run_manifest(directory, args, cfg, 123)
+    assert manifest["seed"] == 123 and manifest["stages"] == {}
     assert orphan.read_text(encoding="utf-8") == "synthetic old artifact"
 
 

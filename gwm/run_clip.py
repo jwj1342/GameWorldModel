@@ -1,7 +1,7 @@
 """End-to-end orchestration for one clip: perception -> generation + feedback loop -> binding -> playtest -> report.
 Usage: python -m gwm.run_clip --video data/clips/trimmed/x.mp4 --clip x [--phrases "a,b"] [--no-vlm] [--config configs/ablations/no_feedback.yaml] [--resume]"""
 from __future__ import annotations
-import argparse, copy, hashlib, json, platform, random, re, shutil, subprocess, time, uuid
+import argparse, copy, hashlib, json, platform, random, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
 import numpy as np
 from .config import load_config, redact, site_name, REPO
@@ -58,7 +58,6 @@ def prepare_run_manifest(run_dir: Path, args, cfg: dict, seed: int | None) -> di
     previous stage summaries preserves history when stages are rerun.
     """
     video = Path(args.video)
-    video_hash = file_sha256(video)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     config = json.loads(json.dumps(redact(cfg), default=str))
     config_id = configuration_identity(cfg)
@@ -98,7 +97,10 @@ def prepare_run_manifest(run_dir: Path, args, cfg: dict, seed: int | None) -> di
             if not isinstance(evidence, dict) or not isinstance(evidence.get("meta"), dict):
                 raise ValueError("resume cached Evidence metadata must be an object")
             evidence_source = (evidence.get("meta") or {}).get("source_video_sha256")
-            if evidence_source != video_hash:
+            # The Evidence already fingerprints the video it was built from, so a source
+            # that scratch has since rotated out does not block a resume. Compare against
+            # the file itself only while it is still there.
+            if not evidence_source or (video.is_file() and evidence_source != file_sha256(video)):
                 raise ValueError("resume cached Evidence source hash is missing or mismatched")
             evidence_hash = file_sha256(evidence_path)
             if not isinstance(previous_hash, str) or not previous_hash:
@@ -107,7 +109,8 @@ def prepare_run_manifest(run_dir: Path, args, cfg: dict, seed: int | None) -> di
                 raise ValueError("resume cached Evidence content differs from the recorded stage")
             recorded_hash = recorded_hash or evidence_source
             reused["perception/evidence.json"] = evidence_hash
-        if recorded_hash != video_hash:
+        # Without cached Evidence perception reruns, so then the source must be readable.
+        if recorded_hash != (evidence_source if reused else file_sha256(video)):
             raise ValueError("resume video hash is missing or mismatched; source cannot be verified")
         attempts = manifest.setdefault("resume_attempts", [])
         if not isinstance(attempts, list):
@@ -119,9 +122,10 @@ def prepare_run_manifest(run_dir: Path, args, cfg: dict, seed: int | None) -> di
                          "reused_artifacts": reused})
         manifest["stages"] = {"perception": {**previous_stage, "status": "reused"}} if reused else {}
         return manifest
-    if run_dir.exists() and any(run_dir.iterdir()):
-        raise ValueError("output contains an existing run; use --resume or a new output directory")
-    return {"run_id": run_dir.name, "clip": args.clip, "video": str(video.resolve()), "video_sha256": video_hash,
+    # Only a run.json carries provenance worth refusing to overwrite; stray artifacts do not.
+    if (run_dir / "run.json").is_file():
+        raise ValueError("output already holds an existing run.json; use --resume or a new output directory")
+    return {"run_id": run_dir.name, "clip": args.clip, "video": str(video.resolve()), "video_sha256": file_sha256(video),
             "started_at": now, "git_commit": git_commit(), "node": platform.node(), "seed": seed,
             "config": config, "config_identity": config_id, "args": copy.deepcopy(vars(args)), "stages": {}}
 
@@ -133,16 +137,20 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=None, help="随机种子；覆盖 vlm.seed，并固定 random / numpy。同一配置换 seed 重跑即可得到多次独立样本")
     a = ap.parse_args(argv)
     cfg = load_config([REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *[REPO / c for c in a.config]])
+    def usage_error(exc):
+        # Exit 3: 2 already means the run was blocked on evidence quality or a failed compile.
+        print(f"{ap.prog}: error: {exc}", file=sys.stderr)
+        raise SystemExit(3)
     try:
         seed = resolve_seed(cfg, a.seed)
     except ValueError as exc:
-        ap.error(str(exc))
+        usage_error(exc)
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     run_dir = Path(a.resume) if a.resume else Path(a.out or (Path(cfg["paths"]["out"]) / a.clip / run_id))
     try:
         manifest = prepare_run_manifest(run_dir, a, cfg, seed)
     except (ValueError, OSError) as exc:
-        ap.error(str(exc))
+        usage_error(exc)
     def outcome(status, error=None):
         # Error fields describe this attempt only; prior results live in history.
         for key in ("error_type", "exit_code"):
