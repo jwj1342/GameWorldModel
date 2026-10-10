@@ -61,6 +61,12 @@ def semantic_errors(program: dict) -> tuple[list[dict], list[dict]]:
         for k, ev in enumerate(o.get("events", [])):
             tgt = ev.get("target")
             if tgt and tgt not in ids: errors.append(_err(f"{p}/events/{k}/target", "unknown_ref", f"target '{tgt}' is not a known id"))
+            if ev["type"] == "trigger_on_enter" and any(
+                target["id"] == tgt and (target.get("motion") or {}).get("type") == "dynamic"
+                for target in program.get("objects", [])
+            ):
+                errors.append(_err(f"{p}/events/{k}/target", "unsupported_dynamic_trigger",
+                                   "trigger_on_enter cannot drive a dynamic object", "use an untriggered dynamic object or a scripted motion"))
             w = ev.get("with")
             if w and w != "player" and w not in ids: errors.append(_err(f"{p}/events/{k}/with", "unknown_ref", f"with '{w}' is not 'player' or a known id"))
     # support cycles
@@ -106,6 +112,20 @@ def _check_motion(m: dict, path: str, duration, errors: list[dict], warnings: li
     if t in ("revolute", "prismatic", "periodic_translate", "periodic_rotate", "spin"):
         ax = m.get("axis")
         if ax is not None and (not _finite(ax) or sum(x * x for x in ax) < 1e-9): errors.append(_err(path + "/axis", "zero_axis", "axis must be a non-zero vector"))
+    if t == "dynamic":
+        for key in ("linear_velocity", "mass", "restitution"):
+            value = m.get(key)
+            if value is not None and not _finite(value if key == "linear_velocity" else [value]):
+                errors.append(_err(path + "/" + key, "non_finite", f"{key} must contain finite numbers"))
+        if m.get("trigger"):
+            errors.append(_err(path + "/trigger", "unsupported_dynamic_trigger",
+                               "dynamic trigger is not supported", "remove trigger or use a scripted motion"))
+        # 物理驱动的物体靠重力和碰撞运动，脚本参数对它没有意义，写了多半是模型搞混了类型
+        stray = [k for k in ("keyframes", "schedule", "period", "amp", "rate_dps", "range_deg", "from_deg", "to_deg") if m.get(k) is not None]
+        if stray: warnings.append(_err(path, "ignored_params", f"dynamic ignores {', '.join(stray)}; motion comes from physics",
+                                       "remove them, or use a scripted motion type if the path is actually known"))
+        rest = m.get("restitution")
+        if rest is not None and not (0.0 <= rest <= 1.0): errors.append(_err(path + "/restitution", "bad_restitution", "restitution must be within [0, 1]"))
     if t == "revolute":
         r = m.get("range_deg")
         if r and r[0] > r[1]: errors.append(_err(path + "/range_deg", "bad_range", "range_deg must be [min, max]"))

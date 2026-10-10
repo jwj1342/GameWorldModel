@@ -247,6 +247,11 @@ scene "clip_0042" {
 | `periodic_translate` | `axis`、`amp`、`period`、`phase` | 正弦往复平移。**`pose.pos` 是振荡中心**，求值为 `pose.pos + axis*amp*sin(2πt/period + phase)` |
 | `periodic_rotate` | `axis`、`amp_deg`、`period`、`phase`、`pivot?` | 正弦往复转动，幅度是单边幅度；不给 `pivot` 就绕自身中心 |
 | `spin` | `axis`、`rate_dps` | 匀速自转 |
+| `dynamic` | `linear_velocity?`、`mass?`、`restitution?` | 物理驱动。位姿不是时间的函数，由 Rapier 的重力与碰撞算出来，`pose.pos` 只是初始位置 |
+
+`dynamic` 和上面六种在方向上是相反的：脚本运动是先算出位姿再推给物理，`dynamic` 是物理算完再读回来。因此 `seek(t)` 对它没法直接跳，只能一步步推；往前走从当前状态接着推，往回跳才重置重放。固定步长加固定初值保证结果可复现。
+
+目前还表达不了关节链（父子相连的多节结构，比如机械臂）。真实的牛顿摆也需要它，因为球是吊着的，所以 `data/clips/raw` 里那段牛顿摆视频暂时还原不了，见 issue #23。
 
 #### 4.3 事件 `events[].type`
 

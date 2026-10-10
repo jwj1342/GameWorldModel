@@ -40,9 +40,11 @@ async function boot() {
   template.camera.aspect = W / H; template.camera.updateProjectionMatrix();
   const far = program.camera?.intrinsics?.far ?? 100;
 
+  const hasSimulated = registry.some(e => e.simulated);
+
   function updateMotions(t) {
     for (const e of registry) {
-      if (!e.dynamic) continue;
+      if (!e.dynamic || e.simulated) continue;   // 物理驱动的由 Rapier 决定位姿，不在这里算
       const tt = e.spec.motion?.trigger ? (e.triggerTime == null ? 0 : t - e.triggerTime) : t;
       const p = e.pose(tt);
       e.delta = p.pos.clone().sub(e.group.position);
@@ -57,21 +59,35 @@ async function boot() {
     dt: DT, registry, scene, renderer, physics, template,
     mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); return game.modeName; },
     step(dt = DT) {
-      game.t += dt; game.frame++;
+      if (!Number.isFinite(dt) || dt <= 0) throw new Error('step needs a positive finite dt');
+      if (hasSimulated && Math.abs(dt - DT) > 1e-12) throw new Error('dynamic step requires the fixed dt (1/60 s); use seek for sampling');
+      game.frame++;
+      game.t = hasSimulated ? game.frame * DT : game.t + dt;
       updateMotions(game.t);
       if (game.modeName === 'play') template.update(game.input, game.t);
       physics.step();
+      for (const e of registry) physics.syncSimulated(e);   // 仿真之后把位姿读回来
       updateCamera();
       return game.t;
     },
-    seek(t) { // replay-only: motions are pure functions of t
-      game.t = t; game.frame = Math.round(t / DT); updateMotions(t); updateCamera(); return game.t;
+    // 脚本运动是时间的纯函数，可以直接跳到 t。
+    // 物理驱动的物体是仿真出来的，跳不过去，只能一步步推。固定步长加固定初值保证可复现。
+    // 往前走就从当前状态接着推，只有往回跳才重置，这样顺序录制是线性而不是平方的。
+    seek(t) {
+      if (!Number.isFinite(t) || t < 0) throw new Error('seek needs a non-negative finite time');
+      if (!hasSimulated) { game.t = t; game.frame = Math.round(t / DT); updateMotions(t); updateCamera(); return game.t; }
+      const targetFrame = Math.round(t / DT);
+      if (!Number.isSafeInteger(targetFrame)) throw new Error('seek time is outside the supported frame range');
+      if (targetFrame < game.frame) game.reset();
+      const steps = targetFrame - game.frame;
+      for (let i = 0; i < steps; i++) game.step(DT);
+      updateCamera(); return game.t;
     },
     render(pass = 'rgb') { return renderPass(renderer, scene, activeCamera(), registry, pass, { far }); },
     draw() { renderer.render(scene, activeCamera()); },
     setSize(w, h) { renderer.setSize(w, h, false); replay.camera.aspect = w / h; replay.camera.updateProjectionMatrix(); template.camera.aspect = w / h; template.camera.updateProjectionMatrix(); },
     setInput(i) { if (i.move !== undefined) game.input.move = i.move; if (i.jump !== undefined) game.input.jump = !!i.jump; if (i.keys) game.input.keys = new Set(i.keys.map(k => k.toLowerCase())); },
-    reset(seed = 0) { game.t = 0; game.frame = 0; for (const e of registry) { e.triggerTime = null; if (!e.visible) { e.visible = true; e.group.visible = true; physics.addEntry(e); } } template.collected = 0; template.deaths = 0; template.won = false; template.wonAt = null; physics.teleportPlayer(template.spawn); updateMotions(0); updateCamera(); },
+    reset(seed = 0) { game.t = 0; game.frame = 0; for (const e of registry) { e.triggerTime = null; if (!e.visible) { e.visible = true; e.group.visible = true; physics.addEntry(e); } physics.respawnSimulated(e); } template.collected = 0; template.deaths = 0; template.won = false; template.wonAt = null; physics.teleportPlayer(template.spawn); updateMotions(0); updateCamera(); },
     state() {
       return { t: game.t, frame: game.frame, mode: game.modeName, player: template.state(),
         objects: registry.map(e => ({ id: e.id, name: e.name, kind: e.kind, class: e.class, pos: e.group.position.toArray(), quat: e.group.quaternion.toArray(), visible: e.visible, dynamic: e.dynamic })) };

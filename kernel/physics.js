@@ -39,15 +39,69 @@ export class Physics {
   }
   addEntry(entry) {
     const p = entry.group.position, q = entry.group.quaternion;
-    const desc = (entry.kind === 'static' || !entry.dynamic ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.kinematicPositionBased())
+    // 三种刚体，对应三种位姿来源：
+    //   fixed                  静态几何，位姿不变
+    //   kinematicPositionBased 脚本运动，pose(t) 算出来推给物理
+    //   dynamic                物理驱动，Rapier 算出来读回 group
+    const m = entry.spec?.motion ?? {};
+    if (entry.simulated) {
+      if (m.trigger) throw new Error('dynamic trigger is not supported');
+      const velocity = m.linear_velocity ?? [0, 0, 0];
+      if (!Array.isArray(velocity) || velocity.length !== 3 || !velocity.every(Number.isFinite)) throw new Error('dynamic velocity must be a finite vec3');
+      if (m.mass != null && (!Number.isFinite(m.mass) || m.mass <= 0)) throw new Error('dynamic mass must be finite and positive');
+      if (m.restitution != null && (!Number.isFinite(m.restitution) || m.restitution < 0 || m.restitution > 1)) throw new Error('dynamic restitution must be within [0, 1]');
+    }
+    const desc = (entry.simulated ? RAPIER.RigidBodyDesc.dynamic()
+                  : entry.kind === 'static' || !entry.dynamic ? RAPIER.RigidBodyDesc.fixed()
+                  : RAPIER.RigidBodyDesc.kinematicPositionBased())
       .setTranslation(p.x, p.y, p.z).setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+    if (entry.simulated) {
+      const lv = m.linear_velocity ?? [0, 0, 0];
+      desc.setLinvel(lv[0], lv[1], lv[2]);
+    }
     const body = this.world.createRigidBody(desc);
     entry.body = body; entry.colliderHandles = [];
     for (const c of entry.colliders) {
-      const col = this.world.createCollider(colliderDescFor(c), body);
+      const cd = colliderDescFor(c);
+      if (entry.simulated) {
+        if (m.restitution != null) cd.setRestitution(m.restitution);
+        if (m.friction != null) cd.setFriction(m.friction);
+      }
+      const col = this.world.createCollider(cd, body);
       entry.colliderHandles.push(col.handle); this.colliderToEntry.set(col.handle, entry);
     }
+    if (entry.simulated && m.mass != null) {
+      // mass is the object's total, not a separate mass for every part.
+      const colliders = entry.colliderHandles.map(handle => this.world.getCollider(handle));
+      const volume = colliders.reduce((sum, col) => sum + col.volume(), 0);
+      if (!Number.isFinite(volume) || volume <= 0) throw new Error('dynamic colliders need positive finite volume');
+      for (const col of colliders) col.setMass(m.mass * col.volume() / volume);
+      body.recomputeMassPropertiesFromColliders();
+    }
     this.bodyToEntry.set(body.handle, entry);
+  }
+
+  // 物理驱动的物体：仿真之后把位姿读回 three.js，方向和 syncKinematic 相反
+  syncSimulated(entry) {
+    if (!entry.body || !entry.simulated) return;
+    const t = entry.body.translation(), r = entry.body.rotation();
+    entry.delta = new THREE.Vector3(t.x, t.y, t.z).sub(entry.group.position);
+    entry.group.position.set(t.x, t.y, t.z);
+    entry.group.quaternion.set(r.x, r.y, r.z, r.w);
+  }
+
+  // 把物理驱动的物体放回初始位姿与初速度，供 reset 使用
+  respawnSimulated(entry) {
+    if (!entry.body || !entry.simulated) return;
+    const m = entry.spec?.motion ?? {};
+    const b = entry.base, lv = m.linear_velocity ?? [0, 0, 0];
+    entry.body.setTranslation({ x: b.pos[0], y: b.pos[1], z: b.pos[2] }, true);
+    entry.body.setRotation({ x: b.quat[0], y: b.quat[1], z: b.quat[2], w: b.quat[3] }, true);
+    entry.body.setLinvel({ x: lv[0], y: lv[1], z: lv[2] }, true);
+    entry.body.setAngvel({ x: 0, y: 0, z: 0 }, true);   // 清掉碰撞攒下来的自转
+    entry.delta = new THREE.Vector3();
+    entry.group.position.set(b.pos[0], b.pos[1], b.pos[2]);
+    entry.group.quaternion.set(b.quat[0], b.quat[1], b.quat[2], b.quat[3]);
   }
   removeEntry(entry) {
     if (!entry.body) return;
@@ -56,7 +110,7 @@ export class Physics {
     this.bodyToEntry.delete(entry.body.handle); entry.body = null;
   }
   syncKinematic(entry) {
-    if (!entry.body || !entry.dynamic) return;
+    if (!entry.body || !entry.dynamic || entry.simulated) return;   // 物理驱动的不往回推
     const p = entry.group.position, q = entry.group.quaternion;
     entry.body.setNextKinematicTranslation({ x: p.x, y: p.y, z: p.z });
     entry.body.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
