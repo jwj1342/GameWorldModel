@@ -642,3 +642,43 @@ the `action` string. Opening is implemented by the target's triggered schedule.
 Offline reference/negative tests check structure, target identity, all three edits
 and side effects, not measured model performance or real browser contact behavior.
 The previous 20-case experiment rates cannot be reused for this 21-case set.
+
+# Dynamic runtime contract
+
+`motion.mass` is the total mass of an object instance. For compound colliders it
+is distributed in proportion to collider volume (uniform density over parts),
+not applied in full to every part. Without an explicit mass, Rapier's default
+collider density is retained. Overlapping parts are counted independently.
+
+When a scene contains `dynamic` motion, `step(dt)` accepts only the runtime's
+fixed `1/60` second step. Unsupported, non-finite or non-positive steps fail
+before advancing state. Existing fixed-step callers are unchanged. `seek(t)`
+requires a finite non-negative time and samples the nearest fixed physics frame;
+it returns that frame's actual time. Repeated requests for the same quantized
+frame do not advance the simulation; backward frame requests reset and replay.
+Script-only scenes retain exact-time seek. This is not variable-step integration
+or a guarantee of cross-platform determinism.
+
+Recording and render indexes use `t`/`actual_t` for the actual simulated state
+time and preserve `requested_t` for the sampling request. For encoded recordings,
+frame `i` has nominal video time `i/fps = requested_t`; these times may differ
+from the simulated state by at most half a physics step. Sample at an aligned
+rate such as 30 or 60 fps when exact frame-time correspondence is required.
+Render filenames still use requested times. Render indexes declare
+`time_sampling` as `exact`, or `nearest_physics_frame` with `dt=1/60` for dynamic
+scenes. Validation compares `requested_t` with external requests, checks actual
+`t` against the nearest physics frame and `actual_t`, and retains the existing
+state-time check. The declaration cannot relax validation for script-only scenes
+or unsupported steps. Legacy indexes without the declaration retain exact-time
+validation. Duplicate actual times still fail the distinct-frame requirement.
+
+Dynamic velocity/mass/restitution must be finite, with positive mass and
+restitution in `[0, 1]`. `dynamic` with `trigger=true`, or a `trigger_on_enter`
+event targeting a dynamic object, is rejected by Program validation: activation
+semantics are not implemented. Scripted triggers remain supported. This change
+does not redesign the motion enumeration or define dynamic ground-truth metrics.
+
+Offline regression: `node --experimental-default-type=module --test
+tests/test_physics_runtime.mjs` (Node 20). Tests use real CPU Three.js/Rapier and
+the runtime control methods, with renderer/template/browser surfaces stubbed;
+they do not certify browser rendering or real-video reconstruction.
