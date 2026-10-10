@@ -1,12 +1,13 @@
 """End-to-end orchestration for one clip: perception -> generation + feedback loop -> binding -> playtest -> report.
 Usage: python -m gwm.run_clip --video data/clips/trimmed/x.mp4 --clip x [--phrases "a,b"] [--no-vlm] [--config configs/ablations/no_feedback.yaml] [--resume]"""
 from __future__ import annotations
-import argparse, json, os, random, shutil, subprocess, time, uuid
+import argparse, copy, hashlib, json, platform, random, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
 import numpy as np
 from .config import load_config, redact, site_name, REPO
 from .errors import ErrorLog
 from .perception.run import run_perception, load_masks
+from .perception.provenance import file_sha256
 from .perception.contract import format_evidence_errors
 from .perception.quality import assess_evidence_quality
 from .synthesis.direct import evidence_to_program
@@ -23,6 +24,111 @@ def git_commit() -> str:
 
 def stage_done(d: Path, marker: str) -> bool: return (d / marker).exists()
 
+
+def resolve_seed(cfg: dict, override: int | None = None) -> int | None:
+    """Resolve CLI precedence without changing RNG state or accepting invalid seeds."""
+    seed = override if override is not None else (cfg.get("vlm") or {}).get("seed")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2 ** 32):
+        raise ValueError("seed must be null or an integer in [0, 2**32)")
+    cfg.setdefault("vlm", {})["seed"] = seed
+    return seed
+
+
+def configuration_identity(cfg: dict) -> str:
+    """Fingerprint effective settings, excluding credential fields, not keyframes.
+
+    The old display redactor also masks names containing 'key' (e.g. keyframes),
+    so its output alone cannot establish that sampling settings are unchanged.
+    """
+    credentials = re.compile(r"(?:^|_)(?:key|token|secret|password|authorization|credential)(?:$|_)", re.I)
+    def public(value):
+        if isinstance(value, dict):
+            return {key: "<redacted>" if credentials.search(key) else public(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [public(item) for item in value]
+        return value
+    payload = json.dumps(public(cfg), sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def prepare_run_manifest(run_dir: Path, args, cfg: dict, seed: int | None) -> dict:
+    """Validate before writing: cached Evidence must not acquire a new seed/source.
+
+    Original identity/config/arguments stay intact on resume. A snapshot of the
+    previous stage summaries preserves history when stages are rerun.
+    """
+    video = Path(args.video)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    config = json.loads(json.dumps(redact(cfg), default=str))
+    config_id = configuration_identity(cfg)
+    if args.resume:
+        path = run_dir / "run.json"
+        if not path.is_file():
+            raise ValueError("resume requires the original run.json; use a new output directory")
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        required = ("run_id", "seed", "clip", "video", "config", "args", "started_at", "git_commit", "stages")
+        if not isinstance(manifest, dict) or any(key not in manifest for key in required):
+            raise ValueError("resume metadata is incomplete; use a new output directory")
+        if not isinstance(manifest["args"], dict) or not isinstance(manifest["stages"], dict):
+            raise ValueError("resume arguments/stages must be objects")
+        recorded_seed = manifest["seed"]
+        if recorded_seed is not None and (isinstance(recorded_seed, bool) or not isinstance(recorded_seed, int) or not 0 <= recorded_seed < 2 ** 32):
+            raise ValueError("resume metadata contains an invalid seed")
+        if recorded_seed != seed or manifest["clip"] != args.clip:
+            raise ValueError("resume seed/clip differs from the original run; use a new output directory")
+        if not isinstance(manifest["video"], str) or Path(manifest["video"]).resolve() != video.resolve():
+            raise ValueError("resume video/config differs from the original run; use a new output directory")
+        if manifest.get("config_identity") != config_id:
+            raise ValueError("resume effective config identity is missing or mismatched; use a new output directory")
+        for key in ("no_vlm", "phrases", "prompt"):
+            if key not in manifest["args"] or manifest["args"][key] != getattr(args, key):
+                raise ValueError(f"resume {key} differs from the original run; use a new output directory")
+        recorded_hash = manifest.get("video_sha256")
+        evidence_path = run_dir / "perception" / "evidence.json"
+        reused = {}
+        previous_stage = manifest["stages"].get("perception", {})
+        if not isinstance(previous_stage, dict):
+            raise ValueError("resume perception stage metadata must be an object")
+        previous_hash = previous_stage.get("evidence_sha256")
+        if previous_hash and not evidence_path.is_file():
+            raise ValueError("resume recorded Evidence artifact is missing; use a new output directory")
+        if evidence_path.is_file():
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            if not isinstance(evidence, dict) or not isinstance(evidence.get("meta"), dict):
+                raise ValueError("resume cached Evidence metadata must be an object")
+            evidence_source = (evidence.get("meta") or {}).get("source_video_sha256")
+            # The Evidence already fingerprints the video it was built from, so a source
+            # that scratch has since rotated out does not block a resume. Compare against
+            # the file itself only while it is still there.
+            if not evidence_source or (video.is_file() and evidence_source != file_sha256(video)):
+                raise ValueError("resume cached Evidence source hash is missing or mismatched")
+            evidence_hash = file_sha256(evidence_path)
+            if not isinstance(previous_hash, str) or not previous_hash:
+                raise ValueError("resume cached Evidence has no recorded content hash; use a new output directory")
+            if previous_hash != evidence_hash:
+                raise ValueError("resume cached Evidence content differs from the recorded stage")
+            recorded_hash = recorded_hash or evidence_source
+            reused["perception/evidence.json"] = evidence_hash
+        # Without cached Evidence perception reruns, so then the source must be readable.
+        if recorded_hash != (evidence_source if reused else file_sha256(video)):
+            raise ValueError("resume video hash is missing or mismatched; source cannot be verified")
+        attempts = manifest.setdefault("resume_attempts", [])
+        if not isinstance(attempts, list):
+            raise ValueError("resume_attempts must be an array")
+        attempts.append({"started_at": now, "git_commit": git_commit(), "node": platform.node(),
+                         "args": copy.deepcopy(vars(args)), "previous_stages": copy.deepcopy(manifest["stages"]),
+                         "previous_result": {key: copy.deepcopy(manifest[key]) for key in
+                                             ("status", "error_type", "exit_code", "updated_at") if key in manifest},
+                         "reused_artifacts": reused})
+        manifest["stages"] = {"perception": {**previous_stage, "status": "reused"}} if reused else {}
+        return manifest
+    # Only a run.json carries provenance worth refusing to overwrite; stray artifacts do not.
+    if (run_dir / "run.json").is_file():
+        raise ValueError("output already holds an existing run.json; use --resume or a new output directory")
+    return {"run_id": run_dir.name, "clip": args.clip, "video": str(video.resolve()), "video_sha256": file_sha256(video),
+            "started_at": now, "git_commit": git_commit(), "node": platform.node(), "seed": seed,
+            "config": config, "config_identity": config_id, "args": copy.deepcopy(vars(args)), "stages": {}}
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True); ap.add_argument("--clip", required=True); ap.add_argument("--out", default=None, help="run dir (default out/<clip>/<run_id>)")
@@ -31,14 +137,55 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=None, help="随机种子；覆盖 vlm.seed，并固定 random / numpy。同一配置换 seed 重跑即可得到多次独立样本")
     a = ap.parse_args(argv)
     cfg = load_config([REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *[REPO / c for c in a.config]])
-    if a.seed is not None:
-        cfg.setdefault("vlm", {})["seed"] = a.seed
-        random.seed(a.seed); np.random.seed(a.seed)
-    seed = (cfg.get("vlm") or {}).get("seed")
+    def usage_error(exc):
+        # Exit 3: 2 already means the run was blocked on evidence quality or a failed compile.
+        print(f"{ap.prog}: error: {exc}", file=sys.stderr)
+        raise SystemExit(3)
+    try:
+        seed = resolve_seed(cfg, a.seed)
+    except ValueError as exc:
+        usage_error(exc)
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
-    run_dir = Path(a.resume) if a.resume else Path(a.out or (Path(cfg["paths"]["out"]) / a.clip / run_id)); run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = Path(a.resume) if a.resume else Path(a.out or (Path(cfg["paths"]["out"]) / a.clip / run_id))
+    try:
+        manifest = prepare_run_manifest(run_dir, a, cfg, seed)
+    except (ValueError, OSError) as exc:
+        usage_error(exc)
+    def outcome(status, error=None):
+        # Error fields describe this attempt only; prior results live in history.
+        for key in ("error_type", "exit_code"):
+            manifest.pop(key, None)
+            if a.resume:
+                manifest["resume_attempts"][-1].pop(key, None)
+        record = {"status": status, "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        if error is not None:
+            record["error_type"] = type(error).__name__
+            if isinstance(error, SystemExit):
+                record["exit_code"] = error.code if isinstance(error.code, int) else 1
+        manifest.update(record)
+        if a.resume:
+            manifest["resume_attempts"][-1].update(record)
+            manifest["resume_attempts"][-1]["stages"] = copy.deepcopy(manifest["stages"])
+    outcome("running")
+    try:
+        _execute_run(a, cfg, run_dir, manifest)
+    except BaseException as exc:
+        outcome("failed", exc)
+        if (run_dir / "run.json").is_file():
+            (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
+        raise
+    else:
+        outcome("completed")
+        (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
+
+
+def _execute_run(a, cfg: dict, run_dir: Path, manifest: dict):
+    """Execute only after resume preflight; main records the attempt outcome."""
+    seed = manifest["seed"]
+    if seed is not None:
+        random.seed(seed); np.random.seed(seed)
+    run_dir.mkdir(parents=True, exist_ok=True)
     log = ErrorLog(run_dir / "errors.jsonl")
-    manifest = {"run_id": run_dir.name, "clip": a.clip, "video": str(a.video), "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "git_commit": git_commit(), "node": os.uname().nodename, "seed": seed, "config": redact(cfg), "args": vars(a), "stages": {}}
     (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
     def save(): manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S"); (run_dir / "run.json").write_text(json.dumps(manifest, indent=1, default=str))
 
@@ -56,6 +203,10 @@ def main(argv=None):
         ev = json.loads((pdir / "evidence.json").read_text())
     else:
         ev = run_perception(a.video, a.clip, pdir, cfg, phrases=[p.strip() for p in a.phrases.split(",")] if a.phrases else None, client=client, log=log)
+    # Record generated content before a quality block or exception can interrupt us.
+    if (pdir / "evidence.json").is_file():
+        manifest["stages"].setdefault("perception", {})["evidence_sha256"] = file_sha256(pdir / "evidence.json")
+        save()
     quality_report = assess_evidence_quality(ev, cfg)
     evidence_report = quality_report["validation"]
     manifest["stages"]["evidence_validation"] = {
@@ -78,7 +229,8 @@ def main(argv=None):
     ev = quality_report["evidence"]
     frames = json.loads((pdir / "frames" / "frames.json").read_text())["frames"]
     sam_masks = load_masks(pdir)
-    manifest["stages"]["perception"] = {"seconds": round(time.time() - t0, 1), "objects": len(ev["objects"]), "geometry_backend": ev["meta"]["geometry_backend"], "fallbacks": ev["meta"]["fallbacks"]}; save()
+    perception_status = manifest["stages"].get("perception", {}).get("status", "completed")
+    manifest["stages"]["perception"] = {"status": perception_status, "seconds": round(time.time() - t0, 1), "objects": len(ev["objects"]), "geometry_backend": ev["meta"]["geometry_backend"], "fallbacks": ev["meta"]["fallbacks"], "evidence_sha256": file_sha256(pdir / "evidence.json")}; save()
     key_times = [k["t"] for k in ev["keyframes"]]
     kf_files = [k.get("file_small") or k["file"] for k in ev["keyframes"]]
 
