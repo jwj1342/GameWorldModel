@@ -59,7 +59,12 @@ def judge(case: dict, r: dict) -> dict:
             return {"ok": False, "why": error}
     if case.get("expect_refuse"):
         ok = r.get("status") == "refused" and not r["ops"] and bool(r.get("note", "").strip())
-        return {"ok": ok, "why": "正确拒绝" if ok else "未明确拒绝，或响应/执行失败"}
+        if ok: return {"ok": True, "why": "正确拒绝"}
+        # 判据用 #39 那版（光是没产出操作不够，得明确拒绝并给理由），
+        # 理由沿用 #28 那版：编造了什么路径要写出来，不然查不动。
+        paths = [o.get("path") for o in r["ops"]]
+        return {"ok": False, "why": f"应当拒绝却编造了 {len(r['ops'])} 个操作：{paths}"
+                if r["ops"] else "未明确拒绝，或响应/执行失败"}
 
     if "expect_ops" in case:
         if "before" not in r:

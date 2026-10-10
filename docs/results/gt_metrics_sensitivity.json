@@ -1,0 +1,528 @@
+[
+ {
+  "kind": "基准",
+  "full": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ },
+ {
+  "kind": "运动类型改错",
+  "full": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.7650563125161747,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.7651
+    }
+   },
+   "motion_type": {
+    "accuracy": 0.75,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "static": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.8950558922994281,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.8951
+    }
+   },
+   "motion_type": {
+    "accuracy": 0.75,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "static": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ },
+ {
+  "kind": "轨迹整体平移",
+  "full": {
+   "trajectory": {
+    "median_m": 0.49989370326346877,
+    "max_m": 0.5,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.5,
+     "door": 0.4998,
+     "lift": 0.5
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.49978845549432066,
+    "max_m": 0.5,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.5,
+     "door": 0.4996,
+     "lift": 0.5
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ },
+ {
+  "kind": "删掉一个物体",
+  "full": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 3,
+    "per_object": {
+     "cart": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 3,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 3,
+    "matched": 3,
+    "recall": 0.75,
+    "precision": 1.0
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 3,
+    "per_object": {
+     "cart": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 3,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 3,
+    "matched": 3,
+    "recall": 0.75,
+    "precision": 1.0
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ },
+ {
+  "kind": "多造一个物体",
+  "full": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 5,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 0.8
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.0,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.0
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 5,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 0.8
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ },
+ {
+  "kind": "周期改错",
+  "full": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 0.8034254183852004,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 0.8034
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    0.0,
+    7.9
+   ]
+  },
+  "holdout": {
+   "trajectory": {
+    "median_m": 0.0,
+    "max_m": 1.4028019740779765,
+    "n": 4,
+    "per_object": {
+     "cart": 0.0,
+     "coin": 0.0,
+     "door": 0.0,
+     "lift": 1.4028
+    }
+   },
+   "motion_type": {
+    "accuracy": 1.0,
+    "n": 4,
+    "confusion": {
+     "trajectory": {
+      "trajectory": 1
+     },
+     "spin": {
+      "spin": 1
+     },
+     "revolute": {
+      "revolute": 1
+     },
+     "periodic_translate": {
+      "periodic_translate": 1
+     }
+    }
+   },
+   "objects": {
+    "gt": 4,
+    "pred": 4,
+    "matched": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "window_s": [
+    6.32,
+    7.9
+   ]
+  },
+  "holdout_frac": 0.2,
+  "note": "holdout 是视频末尾的一段。模型在生成时看不到这段，所以它能区分「真的建模了动力学」和「只是对看过的画面做了拟合」。"
+ }
+]
