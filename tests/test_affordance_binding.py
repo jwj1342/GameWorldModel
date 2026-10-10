@@ -29,6 +29,16 @@ def test_cylinder_height_follows_axis(axis, expected):
 def test_declared_shape_dimensions(geom, expected):
     assert _extent(node(geom))==pytest.approx(expected)
 
+
+@pytest.mark.parametrize("radii", [{"radius": 1}, {"radius_top": 0, "radius_bottom": 1},
+                                  {"radius_top": 1, "radius_bottom": 0},
+                                  {"radius": .2, "radius_top": 0, "radius_bottom": 1}])
+def test_cone_radius_forms_preserve_dimensions_and_dynamic_role(radii):
+    o = node({"kind": "primitive", "shape": "cone", "height": 2, **radii})
+    o["motion"] = {"type": "trajectory", "keyframes": []}
+    assert _extent(o) == [2, 2, 2]
+    assert classify(scene([o]))["target"]["role"] == "dynamic_platform"
+
 @pytest.mark.parametrize("geom", [{"kind":"primitive","shape":"box"},
     {"kind":"primitive","shape":"cylinder","radius":.2},
     {"kind":"primitive","shape":"box","extent":[float("nan"),1,1]},

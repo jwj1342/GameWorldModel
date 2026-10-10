@@ -672,3 +672,11 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+# Cone dimensions in role inference
+
+Cone extents accept `radius` and explicit `radius_top`/`radius_bottom`, matching
+the cylinder radius fallback. The largest declared radius sets horizontal
+diameter; height remains the y extent as in the renderer. This fixes valid
+top/bottom-radius cones incorrectly becoming decorations. Support-relative
+height, multiple instances and rotated standing surfaces are handled separately
+in the author's PR42; this change does not implement those policies.
