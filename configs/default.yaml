@@ -91,6 +91,7 @@ vlm:
   api_key_file: .secrets/openrouter.key   # 相对仓库根目录；不入 git
   model: z-ai/glm-4.6v             # 约 106B（A12B）的视觉模型，$0.30 / $0.90 每百万 token；备选见 configs/openrouter_*.yaml
   temperature: 0.4
+  seed: null                       # 固定它可让同一配置多次运行可比；--seed 覆盖本项
   top_p: 0.9
   max_tokens: 6000
   reasoning: {enabled: false}      # GLM-4.6V 默认会思考并占满 max_tokens；关闭（OpenRouter 统一参数）
