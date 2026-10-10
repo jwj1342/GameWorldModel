@@ -102,6 +102,47 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
     return R, t
 
 
+_AXIS_YAWS_DEG = (0.0, 90.0, 180.0, 270.0)
+
+
+def _rot_y(deg: float) -> np.ndarray:
+    a = np.radians(deg); c, s = np.cos(a), np.sin(a)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) -> tuple[np.ndarray, np.ndarray, dict]:
+    """粗对齐：枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取对上最多的那个。
+
+    拿两边质心之差做粗对齐有两个毛病。一是多一个假物体、或者少检出一个真物体，
+    质心就被拽走，原本对得上的也对不上了——完美感知下跑真实场景实测过一次，
+    十二个本该进 static 的结构落进了 objects，质心被拽偏 1.4 米。二是整体转了
+    九十度的时候，光靠平移永远凑不到阈值以内，一对都匹配不上，后面估偏航那步
+    根本启动不了。
+
+    单对物体的隐含平移不受别的物体影响，再按阈值内的个数投票，天然忽略掉少数
+    离群的。只枚举四个轴向偏航是因为这一步只要够得着就行，精确的偏航在匹配
+    建立之后由 align_gauge 解析求出。非轴向的大角度整体旋转仍可能启动失败。
+    """
+    best_R, best_t, best_in, best_cost = np.eye(3), np.zeros(3), -1, np.inf
+    if not len(gt_pts) or not len(pred_pts):
+        return best_R, best_t, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
+    for yaw in _AXIS_YAWS_DEG:
+        R = _rot_y(yaw)
+        rotated = pred_pts @ R.T
+        for g in gt_pts:
+            for q in rotated:
+                t = g - q
+                t[1] = 0.0                                  # 高度可观测，不参与对齐
+                nearest = np.linalg.norm(gt_pts[:, None, :] - (rotated + t)[None, :, :], axis=2).min(1)
+                inside = nearest <= max_dist_m
+                inliers = int(inside.sum())
+                cost = float(nearest[inside].sum()) if inliers else np.inf
+                if (inliers, -cost) > (best_in, -best_cost):
+                    best_R, best_t, best_in, best_cost = R, t.copy(), inliers, cost
+    return best_R, best_t, {"yaw_deg": round(float(np.degrees(np.arctan2(best_R[0, 2], best_R[0, 0]))), 2),
+                            "inliers": best_in, "candidates": len(_AXIS_YAWS_DEG) * len(gt_pts) * len(pred_pts)}
+
+
 def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray, max_dist_m: float) -> list[tuple]:
     """Match within available requested times, maximizing valid pairs before distance.
 
@@ -182,16 +223,15 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     # 规范自由度，不先对齐掉，整体差着 8 米时一对都配不上；而配对已经冻在观察段，
     # 对齐就不能再留在 window() 里按窗口各算各的——那样留出段会重新拟合，
     # 把末段的共同偏移当成规范差异吸收掉。
-    R0, t0v = np.eye(3), np.zeros(3)
+    R0, t0v, coarse = np.eye(3), np.zeros(3), {"inliers": 0, "candidates": 0, "yaw_deg": 0.0}
     if observed_pred:
         def centroid(track):
             ts = _supported(obs_times, track)
             return _sample(track, ts).mean(0) if len(ts) else track["pos"].mean(0)
         gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
         pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
-        t0v = np.array([gt_c[:, 0].mean() - pred_c[:, 0].mean(), 0.0,
-                        gt_c[:, 2].mean() - pred_c[:, 2].mean()])
-        rough = {k: {**d, "pos": d["pos"] + t0v} for k, d in observed_pred.items()}
+        R0, t0v, coarse = coarse_gauge(gt_c, pred_c, max_dist_m)
+        rough = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in observed_pred.items()}
         gp, pp = [], []
         for g, q, _ in match_objects(observed_gt, rough, obs_times, max_dist_m):
             if q is None: continue
@@ -250,7 +290,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         return {
             "gauge_alignment": {"yaw_deg": round(float(np.degrees(np.arctan2(R0[0, 2], R0[0, 0]))), 2),
                                 "translation_xz_m": [round(float(t0v[0]), 3), round(float(t0v[2]), 3)],
-                                "fitted_on_s": [round(t_start, 3), round(cut, 3)],
+                                "fitted_on_s": [round(t_start, 3), round(cut, 3)], "coarse": coarse,
                                 "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，"
                                         "否则是在罚一个确定不了的量。变换与身份对应都在观察段定死后冻住，"
                                         "每个窗口共用同一个，留出段不重新拟合。"

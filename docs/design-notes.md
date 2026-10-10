@@ -870,3 +870,17 @@ Offline regression: `node --experimental-default-type=module --test
 tests/test_physics_runtime.mjs` (Node 20). Tests use real CPU Three.js/Rapier and
 the runtime control methods, with renderer/template/browser surfaces stubbed;
 they do not certify browser rendering or real-video reconstruction.
+
+规范对齐的启动用投票，不用质心。
+
+对齐本身要先建立起一批匹配才能解析求解，而匹配又要先对齐——破这个循环的是粗对齐。
+原来用两边质心之差，有两个毛病。整体转了九十度时，光靠平移永远够不到配对阈值，
+一对都建不起来，后面估偏航那步根本启动不了。多一个假物体或少检出一个真物体时，
+质心被拽走，原本对得上的也散了。
+
+改成枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取阈值内对上最多的那组。
+单对的隐含平移不受别的物体影响，投票天然忽略少数离群的。四个轴向够不够精确不重要，
+这一步只要够得着，精确偏航由 align_gauge 在匹配建立之后解析求出。非轴向的大角度
+整体旋转仍可能启动失败，这是已知边界。
+
+报告里记 `gauge_alignment.coarse`，出问题时能分清是粗对齐没起来还是精对齐偏了。
