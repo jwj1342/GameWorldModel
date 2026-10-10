@@ -463,6 +463,10 @@ three.js 自带的 JSON Object/Scene format 只描述静态层次且几何内联
 
 每条判断都带一句理由字符串，产物里能直接看到为什么某个物体被判成某个角色，方便人工审查。
 
+几何尺寸按形状读取：球体使用直径，圆柱使用直径与沿其轴向的高度，锥体使用直径和高度；不能把圆柱当球体而丢掉高度。缺失或非有限尺寸不默认成小收集物，而保守标为装饰并说明原因。这仍是局部尺寸启发式，不证明旋转后的可站顶面或支撑关系。
+
+已有 `binding.slots.collectibles`（包括空列表）优先于自动推断。绑定只为最终有效收集槽位添加缺失的接触消失事件，不给被排除的对象新增事件；输入中已经手写的事件保持不变。因此空列表阻止的是自动添加，并不删除已有事件。绝对高度可达性、实例级角色和完整理由持久化仍是待完善边界。
+
 ### 实际效果
 
 | 场景 | 推断出来的角色 |
@@ -668,3 +672,11 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+# Cone dimensions in role inference
+
+Cone extents accept `radius` and explicit `radius_top`/`radius_bottom`, matching
+the cylinder radius fallback. The largest declared radius sets horizontal
+diameter; height remains the y extent as in the renderer. This fixes valid
+top/bottom-radius cones incorrectly becoming decorations. Support-relative
+height, multiple instances and rotated standing surfaces are handled separately
+in the author's PR42; this change does not implement those policies.
