@@ -59,7 +59,10 @@ async function boot() {
     dt: DT, registry, scene, renderer, physics, template,
     mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); return game.modeName; },
     step(dt = DT) {
-      game.t += dt; game.frame++;
+      if (!Number.isFinite(dt) || dt <= 0) throw new Error('step needs a positive finite dt');
+      if (hasSimulated && Math.abs(dt - DT) > 1e-12) throw new Error('dynamic step requires the fixed dt (1/60 s); use seek for sampling');
+      game.frame++;
+      game.t = hasSimulated ? game.frame * DT : game.t + dt;
       updateMotions(game.t);
       if (game.modeName === 'play') template.update(game.input, game.t);
       physics.step();
@@ -71,9 +74,12 @@ async function boot() {
     // 物理驱动的物体是仿真出来的，跳不过去，只能一步步推。固定步长加固定初值保证可复现。
     // 往前走就从当前状态接着推，只有往回跳才重置，这样顺序录制是线性而不是平方的。
     seek(t) {
+      if (!Number.isFinite(t) || t < 0) throw new Error('seek needs a non-negative finite time');
       if (!hasSimulated) { game.t = t; game.frame = Math.round(t / DT); updateMotions(t); updateCamera(); return game.t; }
-      if (t < game.t - 1e-9) game.reset();
-      let steps = Math.round((t - game.t) / DT);
+      const targetFrame = Math.round(t / DT);
+      if (!Number.isSafeInteger(targetFrame)) throw new Error('seek time is outside the supported frame range');
+      if (targetFrame < game.frame) game.reset();
+      const steps = targetFrame - game.frame;
       for (let i = 0; i < steps; i++) game.step(DT);
       updateCamera(); return game.t;
     },
