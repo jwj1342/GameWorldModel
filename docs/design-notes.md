@@ -673,6 +673,28 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
 
+评测入口 `scripts/eval.py` 的四件事，都属于不会报错、只会让表里的数悄悄变成另一个意思的那一类。
+
+录制缓存按输入内容认，不按文件在不在认。缓存键是真值或候选 Program 的 SHA-256、
+时长、帧率、画幅，加上 `kernel/` 下所有 js 的哈希——内核改了，同一份程序录出来的
+轨迹就可能不一样。复用之前还要核对 `record.json` 里的帧数和 `gt_states.jsonl` 的
+实际行数一致，录到一半断掉的不算完整结果。缓存目录名带上身份摘要，否则
+`out/clipA/run1` 和 `out/clipB/run1` 会共用同一份预测缓存。
+
+真值按名字定位，但名字不构成来源证据。每一行记下匹配是靠目录名还是靠 `meta.clip`
+（`truth_link`），报告末尾单独列出所有靠名字定位的片段。有多份候选同时匹配的直接
+拒绝，不按 glob 顺序挑第一个——选错一份真值，算出来的误差是假的，而且从表上完全
+看不出来。等 #29 那条线上的 `ground_truth_source` 带上生成工具之后，这里改成调用它，
+本地这套轻量记录就退役。
+
+执行失败和没有真值是两件事。`evaluate()` 判不了的时候返回 `error`，这种行既不能进表
+也不能当成跳过；一条都没评出来还退 0 的话，作业脚本会把一次全盘失败当成成功，所以
+有失败或者零有效行就退 1。
+
+分组按配置内容分，不按文件名分。`config_label()` 用 run.json 里的 `config_identity`
+作后缀，两份都叫 `no_feedback.yaml` 但内容不同的不会被并进同一行。重复给出的运行目录
+按解析后的绝对路径去重，并在报告里记下去掉了几条。
+
 ### 直接代码宿主的几何与位姿契约
 
 `describe(THREE)` 中的 `object3D` 必须是独立根节点。根的 position/quaternion 是初始世界位姿；
@@ -870,3 +892,17 @@ Offline regression: `node --experimental-default-type=module --test
 tests/test_physics_runtime.mjs` (Node 20). Tests use real CPU Three.js/Rapier and
 the runtime control methods, with renderer/template/browser surfaces stubbed;
 they do not certify browser rendering or real-video reconstruction.
+
+规范对齐的启动用投票，不用质心。
+
+对齐本身要先建立起一批匹配才能解析求解，而匹配又要先对齐——破这个循环的是粗对齐。
+原来用两边质心之差，有两个毛病。整体转了九十度时，光靠平移永远够不到配对阈值，
+一对都建不起来，后面估偏航那步根本启动不了。多一个假物体或少检出一个真物体时，
+质心被拽走，原本对得上的也散了。
+
+改成枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取阈值内对上最多的那组。
+单对的隐含平移不受别的物体影响，投票天然忽略少数离群的。四个轴向够不够精确不重要，
+这一步只要够得着，精确偏航由 align_gauge 在匹配建立之后解析求出。非轴向的大角度
+整体旋转仍可能启动失败，这是已知边界。
+
+报告里记 `gauge_alignment.coarse`，出问题时能分清是粗对齐没起来还是精对齐偏了。
