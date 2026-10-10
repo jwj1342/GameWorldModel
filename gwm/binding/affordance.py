@@ -17,6 +17,7 @@ lava/spike/water 这几个词，只在我们自己用游戏术语手写的合成
 这里保留一个可配置的关键词信号，并把置信度标低，等以后接语义模型再改。
 """
 from __future__ import annotations
+import math
 
 ROLES = ("static_structure", "platform", "dynamic_platform", "collectible", "moving_obstacle", "hazard", "decoration")
 
@@ -38,12 +39,36 @@ DEFAULTS = {
 }
 
 
-def _extent(node: dict) -> list[float]:
+def _extent(node: dict) -> list[float] | None:
+    """Local dimensions of the declared geometry, not a guessed small object.
+
+    Cylinder height follows its axis; pose rotation and support-aware standing
+    remain separate concerns. Primitive defaults match the renderer where used.
+    """
     g = node.get("geom") or {}
-    if g.get("extent"): return [float(v) for v in g["extent"]]
-    if g.get("radius"): r = float(g["radius"]); return [2 * r, 2 * r, 2 * r]
-    if g.get("size"): s = g["size"]; return [float(s[0]), 0.1, float(s[1])]
-    return [0.1, 0.1, 0.1]
+    try:
+        if g.get("extent") and g.get("shape") not in {"sphere", "cylinder", "cone"}:
+            dims = [float(v) for v in g["extent"]]
+        elif g.get("shape") == "sphere":
+            dims = [2 * float(g["radius"])] * 3
+        elif g.get("shape") == "cylinder":
+            radius = g.get("radius", 0.5)
+            r = max(float(g.get("radius_top", radius)), float(g.get("radius_bottom", radius)))
+            dims = [2 * r] * 3
+            dims[{"x": 0, "y": 1, "z": 2}[g.get("axis", "y")]] = float(g["height"])
+        elif g.get("shape") == "cone":
+            # The current renderer creates cones on the y axis.
+            r = float(g["radius"])
+            dims = [2 * r, float(g["height"]), 2 * r]
+        elif g.get("size"):
+            dims = [float(g["size"][0]), 0.1, float(g["size"][1])]
+        elif g.get("kind") == "heightfield":
+            dims = [float(v) for v in g["scale"]]
+        else:
+            return None
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return dims if len(dims) == 3 and all(math.isfinite(v) and v > 0 for v in dims) else None
 
 
 def _pos(node: dict) -> list[float]:
@@ -56,7 +81,8 @@ def scene_scale(program: dict) -> float:
     """场景尺度取静态几何里最大的水平尺寸，所有相对阈值都以它为准。"""
     best = 1.0
     for n in program.get("static", []):
-        e = _extent(n); best = max(best, e[0], e[2])
+        e = _extent(n)
+        if e is not None: best = max(best, e[0], e[2])
     return best
 
 
@@ -77,6 +103,9 @@ def classify(program: dict, settings: dict | None = None) -> dict[str, dict]:
 
     for o in program.get("objects", []):
         e, p = _extent(o), _pos(o)
+        if e is None:
+            out[o["id"]] = {"role": "decoration", "reason": "几何尺寸缺失或无效，不自动推断收集或平台交互"}
+            continue
         top_area, longest = e[0] * e[2], max(e)
         moving = (o.get("motion") or {}).get("type", "static") != "static"
         name = ((o.get("class") or "") + " " + (o.get("material") or "")).lower()
@@ -100,7 +129,7 @@ def classify(program: dict, settings: dict | None = None) -> dict[str, dict]:
         elif moving and reachable:
             role, why = "moving_obstacle", f"在动、站不上去（顶面只有 {top_area:.1f} 平米）、又在够得着的高度，会挡路"
         else:
-            role, why = "decoration", f"站不上去也够不着（顶面 {top_area:.1f} 平米，高度 {p[1]:.1f} 米）"
+            role, why = "decoration", f"不满足平台、收集物或移动障碍规则（顶面 {top_area:.1f} 平米，最大边长 {longest:.2f} 米，高度 {p[1]:.1f} 米）"
         out[o["id"]] = {"role": role, "reason": why}
 
     return out
