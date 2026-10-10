@@ -589,3 +589,27 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+
+## Ground-truth metric protocol
+
+`gt_metrics.evaluate()` retains `full`/`holdout` metric keys, but the reference
+state record alone fixes the time window. Instances use runtime `name` with the
+parent object ID retained for motion labels. Identity assignment uses only raw
+samples before the reference's tail cutoff and is frozen for both windows;
+threshold-constrained matching maximizes valid pairs before minimizing distance.
+No endpoint extrapolation is allowed. Incomplete tracks have `None` trajectory
+summaries when no pair covers the whole requested window, with per-object
+`unavailable` reasons. Recall/precision describe frozen identity matches, not
+temporal coverage. Objects first recorded after the cutoff cannot be identified
+from the prefix and are explicitly reported as unavailable. Legal empty-object
+records give zero recall; missing or malformed records and state IDs absent from
+their own Program are errors, not default-static motion credit. Only `object`
+entries are counted by default, not static scene geometry.
+
+The tail is a diagnostic, not proof that reconstruction inputs excluded it.
+Position metrics do not measure rotation, camera or resolve the separate dynamic
+physics evaluation policy. Historical `docs/results/gt_metrics_sensitivity.json`
+uses the old protocol and has not been re-recorded by this fix; do not reuse it
+as validation of the corrected protocol. `check_gt_metrics.py` now records
+pass/fail/not-applicable checks and exits nonzero unless all checks pass;
+an inapplicable or unmeasurable perturbation is not a successful sensitivity test.
