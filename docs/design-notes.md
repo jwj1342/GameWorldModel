@@ -589,3 +589,56 @@ fixed, report, unresolved = repair_candidate(program, evidence, initial, config)
 
 CPU 单元测试不需要模型或权重。依赖矩阵使用两个独立环境，固定相同的 NumPy 1.26.4，分别
 安装 SciPy 1.13.1 与 1.17.0 后运行 `python -m pytest -q tests`。通用依赖不设置旧版本上限。
+
+### 可编辑性判定边界
+
+`scripts/run_editability.py` 的 `judge()` 不将命中路径等同于编辑成功。
+指令集里的 `expect_ops` 是只提供给判定器的参考补丁，不传入编辑器。
+它作用于原始 Program，形成完整参考结果；判定比较对象 ID、值、数组顺序和其他字段，
+因此删错对象或删除时顺带改动其他对象也会失败。数值允许 1e-6 绝对误差。
+不同补丁写法只要得到相同结果即可通过；未实现任意物理等价表示的判断。
+例如不同但运动等价的相位或保留多余静态参数，不会被自动视为等价。
+参考指令集必须绑定 `program_sha256`：对解析后的 JSON 排序字典键、保留数组顺序后计算 SHA-256。
+格式空白不影响哈希，但对象顺序、身份和初值变化会使基线失效。CLI 在初始化客户端之前拒绝
+不匹配或缺失的参考基线；`evaluate_cases()` 也不调用客户端，保留 `input_mismatch` 记录。
+直接调用 `judge()` 时，参考案例也必须带基线哈希。结果文件保存实际输入哈希。
+旧指令仍支持 `expect_paths` + `expect_value`，但须有 `before`；从目标值构造完整参考结果，
+宽泛父路径不能放过同层副作用。缺少原始 Program、只有路径无目标值或目标字段无法核对时，
+明确标记无法评测，不算成功。该兼容方式支持修改已有字段；新增/删除使用 `expect_ops`。
+
+`apply_edit()` 保留原返回字段，额外返回 `before` 和 `status`。
+只有通过响应 Schema、补丁应用及 Program 校验才是 `applied`；明确拒绝必须提供
+`refused: true`、空操作和非空原因。旧格式的空操作保留为 `no_change`，不猜测拒绝。
+`execution_failed`、`invalid_response`、`invalid_patch` 和 `invalid_program` 单独记录；
+调用失败保留在批次分母中，不冒充正确拒绝。已满足要求的指令允许无操作，
+但仍比较完整结果，禁止重复追加事件。输入完整提供给编辑器，不截断运动或遗漏几何/位姿。
+
+修订后的示例明确资产尺寸和相位，纠正材质路径，并同时修改门的范围和实际调度角度。
+它不是原指令集的同条件重复实验；旧保存结果及其成功率需要按新协议复核或重新运行，
+不能因合成单元测试通过就宣称模型成功率改善。本轮测试不调用模型，也不验证渲染或资产外观。
+# Editing judgment precision
+
+Reference edits still compare the complete resulting Program, preserving IDs,
+array order and unrelated fields. The default numeric absolute tolerance is
+1e-6. A case may specify `tolerance` as a JSON Pointer to absolute tolerance map;
+only finite, non-negative tolerances on numeric fields explicitly added or
+replaced by `expect_ops` are accepted. The phase case uses 0.001 radians only at
+`/objects/0/motion/phase`; other parameters retain the default tolerance.
+This avoids penalizing a rounded representation of -pi/2 without hiding edits
+to other fields. Tolerances are offline judgment metadata, not model input.
+The lift-width instruction now specifies x only, leaving y and z unchanged.
+Historical experiment success rates are not re-evaluated by these unit tests.
+
+## Non-no-op event editing case
+
+The instruction set now contains 21 cases, including the original satisfied
+coin-contact request and a real event addition. `trigger_door_on_lift` adds a
+`trigger_on_enter` event on lift targeting door, enables the door's motion trigger,
+and replaces its schedule with a 1.5-second opening from trigger time zero.
+The lift is an object entry processed by platformer events; the static door frame
+is not, so using the frame without runtime changes would misrepresent support.
+Current runtime records target trigger time; it does not independently dispatch
+the `action` string. Opening is implemented by the target's triggered schedule.
+Offline reference/negative tests check structure, target identity, all three edits
+and side effects, not measured model performance or real browser contact behavior.
+The previous 20-case experiment rates cannot be reused for this 21-case set.
