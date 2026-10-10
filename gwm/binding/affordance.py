@@ -68,7 +68,8 @@ def _extent(node: dict) -> list[float] | None:
             dims[{"x": 0, "y": 1, "z": 2}[g.get("axis", "y")]] = float(g["height"])
         elif g.get("shape") == "cone":
             # The current renderer creates cones on the y axis.
-            r = float(g["radius"])
+            radius = g.get("radius", 0.5)
+            r = max(float(g.get("radius_top", radius)), float(g.get("radius_bottom", radius)))
             dims = [2 * r, float(g["height"]), 2 * r]
         elif g.get("size"):
             dims = [float(g["size"][0]), 0.1, float(g["size"][1])]
