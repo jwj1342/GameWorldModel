@@ -4,7 +4,7 @@ import pytest
 from scipy.spatial.transform import Rotation as R
 
 from gwm.compiler.validate import validate
-from gwm.config import REPO, load_config
+from gwm.config import load_config
 from gwm.perception.evidence import obb_from_points
 from gwm.perception.motion import estimate_motion
 from gwm.synthesis.direct import evidence_to_program, recentre_periodic
@@ -100,29 +100,30 @@ def test_seed_reaches_the_model_call(monkeypatch):
     之前 VLMClient 协议里就有 seed 参数、客户端也会透传，但整条管线没有任何地方传它，
     所以"同一配置多跑几个 seed"这件事实际做不到。这个用例把接线钉住。
     """
-    import yaml
+    from types import SimpleNamespace
+    import openai
     from gwm.synthesis.vlm import OpenAICompatClient
 
     sent = {}
 
     def client_with(cfg_seed):
-        cfg = yaml.safe_load((REPO / "configs/default.yaml").read_text())
-        cfg["vlm"]["model"] = "stub"          # 跳过向服务端查询模型列表
-        cfg["vlm"]["seed"] = cfg_seed
-        c = OpenAICompatClient(cfg, None)
-
         def capture(**kwargs):
-            sent.clear(); sent.update(kwargs); raise RuntimeError("stop before the network")
-
-        c.client.chat.completions.create = capture
-        return c
+            sent.clear(); sent.update(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}"),
+                                                           finish_reason="stop")], usage=None)
+        fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=capture)))
+        monkeypatch.setattr(openai, "OpenAI", lambda **kwargs: fake)
+        cfg = {"vlm": {"provider_kind": "openai", "endpoint": "http://127.0.0.1:1/v1",
+                       "api_key": "unit-test-placeholder", "model": "stub", "seed": cfg_seed,
+                       "temperature": 0.4, "max_tokens": 100, "max_retries": 1}}
+        return OpenAICompatClient(cfg, None)
 
     def seed_sent(cfg_seed, call_seed=None):
         c = client_with(cfg_seed)
-        with pytest.raises(RuntimeError):
-            c.chat("sys", "user", **({"seed": call_seed} if call_seed is not None else {}))
+        c.chat("sys", "user", **({"seed": call_seed} if call_seed is not None else {}))
         return sent.get("seed", "absent")
 
     assert seed_sent(None) == "absent"        # 不配就不发，保持原有行为
     assert seed_sent(1234) == 1234            # 配了就发
     assert seed_sent(1234, 99) == 99          # 单次调用覆盖运行级设置
+    assert seed_sent(0) == 0                 # 零是合法seed，不应当作未配置
