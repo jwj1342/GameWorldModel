@@ -145,7 +145,7 @@ def test_editability_judge_catches_side_effects_and_fabrication():
     prog = {"objects": [{"motion": {"period": 2.0}}]}
 
     good = {"ok": True, "ops": [{"op": "replace"}], "changed": ["/objects/0/motion/period"],
-            "program": prog, "error": "", "note": ""}
+            "program": prog, "before": {"objects": [{"motion": {"period": 4.0}}]}, "error": "", "note": ""}
     assert judge(want, good)["ok"]
 
     # 顺手把别的物体也改了，这是副作用，要判失败
@@ -161,7 +161,8 @@ def test_editability_judge_catches_side_effects_and_fabrication():
     assert not judge(want, wrong_value)["ok"]
 
     refuse = {"id": "y", "kind": "应当拒绝", "instruction": "把那只猫移走", "expect_refuse": True}
-    assert judge(refuse, {"ok": False, "ops": [], "changed": [], "program": {}, "error": "", "note": ""})["ok"]
+    assert judge(refuse, {"ok": False, "ops": [], "changed": [], "program": {}, "error": "",
+                          "status": "refused", "note": "场景没有该对象"})["ok"]
     # 场景里没有猫却给出了改动，这是编造，要判失败
     assert not judge(refuse, {"ok": True, "ops": [{"op": "replace"}], "changed": ["/objects/0/pose/pos"],
                               "program": {}, "error": "", "note": ""})["ok"]
