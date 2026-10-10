@@ -14,10 +14,12 @@ const t0 = Date.now();
 const g = await openGame(gameDir, { width, height, logFile: path.join(outDir, 'browser.log') });
 await g.page.evaluate(() => window.__game.mode('replay'));
 const index = { width, height, passes, frames: [], camera_far: null };
+index.time_sampling = await g.page.evaluate(() => window.__game.registry.some(entry => entry.simulated)
+  ? { mode: 'nearest_physics_frame', dt: window.__game.dt } : { mode: 'exact' });
 for (const t of times) {
-  await g.page.evaluate((t) => window.__game.seek(t), t);
+  const actualTime = await g.page.evaluate((t) => window.__game.seek(t), t);
   const cam = await g.page.evaluate(() => window.__game.cameraInfo());
-  const frame = { t, files: {}, camera: cam };
+  const frame = { t: actualTime, requested_t: t, actual_t: actualTime, files: {}, camera: cam };
   for (const pass of passes) {
     const b64 = await g.page.evaluate((p) => window.__game.render(p), pass);
     const file = `${pass}_${t.toFixed(3)}.png`; savePng(b64, path.join(outDir, file)); frame.files[pass] = file;

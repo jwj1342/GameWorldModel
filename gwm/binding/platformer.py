@@ -115,9 +115,11 @@ def bind(program: dict, evidence: dict | None, cfg: dict, prompt: str | None = N
     coll, haz = picked["collectibles"], picked["hazards"]
     slots.setdefault("collectibles", coll); slots.setdefault("hazards", haz)
     notes.append("角色推断：" + "，".join(f"{i} 是{v['role']}" for i, v in roles.items() if v["role"] not in ("static_structure", "decoration")))
-    # collectibles get the despawn event if missing
+    # Explicit slots (including []) override inference. Use the resolved slots
+    # for new events; preserve events already authored in the input Program.
+    effective_collectibles = set(slots["collectibles"])
     for o in program.get("objects", []):
-        if o["id"] in coll and not any(e.get("type") == "despawn_on_contact" for e in o.get("events", [])):
+        if o["id"] in effective_collectibles and not any(e.get("type") == "despawn_on_contact" for e in o.get("events", [])):
             o.setdefault("events", []).append({"type": "despawn_on_contact", "with": "player"})
     if prompt: notes.append(f"prompt ignored in MVP binder: {prompt[:80]}")
     # schema 的 binding 只允许 template 和 slots（additionalProperties: false），notes 记到 meta 里
