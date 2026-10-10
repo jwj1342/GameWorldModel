@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from gwm.compiler.ids import id_to_color, registry_order
@@ -183,3 +184,79 @@ def test_feedback_two_pass_scoring_keeps_three_pass_validation(tmp_path, monkeyp
     assert result["ok"] and result["render_validation"]["decision"] == "proceed"
     assert config == before
     assert json.loads((round_dir / "render_validation.json").read_text())["mode"] == "enforce"
+
+
+def _quantized_fixture(tmp_path):
+    program, index = _fixture(tmp_path)
+    program["objects"][0]["motion"] = {"type": "dynamic"}
+    requested = [0, 1 / 24, 2 / 24]
+    index["time_sampling"] = {"mode": "nearest_physics_frame", "dt": 1 / 60}
+    for frame, request, actual in zip(index["frames"], requested, [0, 3 / 60, 5 / 60]):
+        frame.update(t=actual, actual_t=actual, requested_t=request)
+        frame["state"]["t"] = actual
+        for obj in frame["state"]["objects"]:
+            if obj["id"] == "moving":
+                obj["pos"][0] = actual
+    return program, index, requested
+
+
+def test_quantized_render_passes_the_enforced_feedback_gate(tmp_path, monkeypatch):
+    from gwm.synthesis import loop
+
+    render_dir = tmp_path / "round" / "render"
+    render_dir.mkdir(parents=True)
+    program, index, requested = _quantized_fixture(render_dir)
+    before = deepcopy(index)
+    monkeypatch.setattr(loop, "compile_program", lambda *args: {"ok": True})
+    monkeypatch.setattr(loop, "render", lambda *args: index)
+    monkeypatch.setattr(loop, "compute_metrics", lambda *args: {"summary": {"score": 0.8}})
+    config = {"feedback": {"render_width": 16, "render_height": 12, "passes": ["rgb", "id"]},
+              "render_validation": {"mode": "enforce"}}
+    result = loop.evaluate(program, tmp_path / "round", {}, [], {}, config, None, requested)
+    assert result["ok"] and result["render_validation"]["decision"] == "proceed"
+    assert index == before
+
+
+@pytest.mark.parametrize("change,code", [
+    ("request", "timestamp_mismatch"), ("actual", "actual_time_mismatch"),
+    ("grid", "quantized_time_mismatch"), ("state", "state_time_mismatch"),
+    ("missing_request", "invalid_requested_time"),
+])
+def test_quantization_does_not_hide_wrong_times(tmp_path, change, code):
+    program, index, requested = _quantized_fixture(tmp_path)
+    frame = index["frames"][1]
+    if change == "request":
+        requested[1] = 0.02  # Wrong external request, despite internally consistent metadata.
+    elif change == "actual":
+        frame["actual_t"] += 1 / 60
+    elif change == "grid":
+        frame["t"] = frame["actual_t"] = frame["state"]["t"] = 4 / 60
+    elif change == "state":
+        frame["state"]["t"] += 1 / 60
+    else:
+        del frame["requested_t"]
+    report = validate_render_result(program, index, tmp_path, expected_times=requested)
+    assert not report["ok"] and code in _codes(report)
+
+
+@pytest.mark.parametrize("policy", [
+    {"mode": "nearest_physics_frame", "dt": 0.1},
+    {"mode": "nearest_physics_frame", "dt": float("nan")},
+    {"mode": "invented"},
+])
+def test_unsupported_sampling_cannot_relax_validation(tmp_path, policy):
+    program, index, requested = _quantized_fixture(tmp_path)
+    index["time_sampling"] = policy
+    report = validate_render_result(program, index, tmp_path, expected_times=requested)
+    assert {"invalid_time_sampling", "timestamp_mismatch"} <= _codes(report)
+
+
+def test_scripted_or_legacy_indexes_do_not_get_physics_tolerance(tmp_path):
+    program, index, requested = _quantized_fixture(tmp_path)
+    program["objects"][0]["motion"] = {"type": "prismatic", "axis": [1, 0, 0], "rate": 1}
+    assert "invalid_time_sampling" in _codes(validate_render_result(program, index, tmp_path, expected_times=requested))
+    for policy in (None, {"mode": "exact"}):
+        index.pop("time_sampling", None)
+        if policy is not None:
+            index["time_sampling"] = policy
+        assert "timestamp_mismatch" in _codes(validate_render_result(program, index, tmp_path, expected_times=requested))
