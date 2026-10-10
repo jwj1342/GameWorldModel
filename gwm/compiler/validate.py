@@ -32,10 +32,26 @@ def _finite(v) -> bool:
     except TypeError:
         return False
 
+def _check_style(program: dict, errors: list[dict], warnings: list[dict]) -> None:
+    """样式那一半里 schema 说不了的两条。"""
+    key = ((program.get("style") or {}).get("lighting") or {}).get("key") or {}
+    d = key.get("direction")
+    if d is not None and _finite(d) and sum(x * x for x in d) < 1e-12:
+        errors.append(_err("/style/lighting/key/direction", "zero_direction",
+                           "key light direction must be a non-zero vector", "point it at the scene, e.g. [6, 12, 8]"))
+    for node, path in ([(n, f"/static/{i}") for i, n in enumerate(program.get("static", []))]
+                       + [(n, f"/objects/{i}") for i, n in enumerate(program.get("objects", []))]):
+        m = node.get("material")
+        if isinstance(m, dict) and m.get("emissive_intensity") is not None and m.get("emissive") is None:
+            warnings.append(_err(path + "/material", "emissive_intensity_without_emissive",
+                                 "emissive_intensity has no effect without 'emissive'", "set emissive or drop the intensity"))
+
+
 def semantic_errors(program: dict) -> tuple[list[dict], list[dict]]:
     errors: list[dict] = []
     warnings: list[dict] = []
     ids: dict[str, str] = {}
+    _check_style(program, errors, warnings)
     for i, s in enumerate(program.get("static", [])):
         p = f"/static/{i}"
         if s["id"] in ids: errors.append(_err(p + "/id", "duplicate_id", f"id '{s['id']}' already used at {ids[s['id']]}", "rename to a unique id"))
