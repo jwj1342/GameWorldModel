@@ -44,6 +44,13 @@ export class Physics {
     //   kinematicPositionBased 脚本运动，pose(t) 算出来推给物理
     //   dynamic                物理驱动，Rapier 算出来读回 group
     const m = entry.spec?.motion ?? {};
+    if (entry.simulated) {
+      if (m.trigger) throw new Error('dynamic trigger is not supported');
+      const velocity = m.linear_velocity ?? [0, 0, 0];
+      if (!Array.isArray(velocity) || velocity.length !== 3 || !velocity.every(Number.isFinite)) throw new Error('dynamic velocity must be a finite vec3');
+      if (m.mass != null && (!Number.isFinite(m.mass) || m.mass <= 0)) throw new Error('dynamic mass must be finite and positive');
+      if (m.restitution != null && (!Number.isFinite(m.restitution) || m.restitution < 0 || m.restitution > 1)) throw new Error('dynamic restitution must be within [0, 1]');
+    }
     const desc = (entry.simulated ? RAPIER.RigidBodyDesc.dynamic()
                   : entry.kind === 'static' || !entry.dynamic ? RAPIER.RigidBodyDesc.fixed()
                   : RAPIER.RigidBodyDesc.kinematicPositionBased())
@@ -57,12 +64,19 @@ export class Physics {
     for (const c of entry.colliders) {
       const cd = colliderDescFor(c);
       if (entry.simulated) {
-        if (m.mass != null) cd.setMass(m.mass);
         if (m.restitution != null) cd.setRestitution(m.restitution);
         if (m.friction != null) cd.setFriction(m.friction);
       }
       const col = this.world.createCollider(cd, body);
       entry.colliderHandles.push(col.handle); this.colliderToEntry.set(col.handle, entry);
+    }
+    if (entry.simulated && m.mass != null) {
+      // mass is the object's total, not a separate mass for every part.
+      const colliders = entry.colliderHandles.map(handle => this.world.getCollider(handle));
+      const volume = colliders.reduce((sum, col) => sum + col.volume(), 0);
+      if (!Number.isFinite(volume) || volume <= 0) throw new Error('dynamic colliders need positive finite volume');
+      for (const col of colliders) col.setMass(m.mass * col.volume() / volume);
+      body.recomputeMassPropertiesFromColliders();
     }
     this.bodyToEntry.set(body.handle, entry);
   }

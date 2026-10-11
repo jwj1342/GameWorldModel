@@ -24,7 +24,10 @@ export function describe(THREE) {
       id: 'coin', class: 'coin', kind: 'object', object3D: coin,
       pose: (t) => {
         const a = (180 * Math.PI / 180) * t;        // 每秒 180 度
-        return { pos: [-3, 1.0, 2], quat: [0, Math.sin(a / 2), 0, Math.cos(a / 2)] };
+        // pose 替换根的绝对朝向，因此显式包含初始 x 轴转向。
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a)
+          .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+        return { pos: [-3, 1.0, 2], quat: q.toArray() };
       },
     },
   ];

@@ -187,7 +187,8 @@ def test_candidate_failure_retained_with_stage_and_nonzero_exit(tmp_path, monkey
     if stage == "gt_metrics": monkeypatch.setattr(agreement, "evaluate", fail)
     if stage in ("candidate_compile", "candidate_record"):
         def execution(command, **kwargs):
-            selected = "c" in next((p for p in command if "/cp" in p.replace("\\", "/") or "/cg" in p.replace("\\", "/")), "")
+            selected = any(part[:2] in ("cp", "cg") and part[2:].isdigit()
+                           for p in command for part in p.replace("\\", "/").split("/"))
             if selected and ((stage == "candidate_compile") == ("-m" in command)):
                 fail()
         monkeypatch.setattr(agreement.subprocess, "run", execution)

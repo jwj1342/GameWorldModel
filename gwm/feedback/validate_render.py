@@ -137,6 +137,24 @@ def validate_render_result(program: dict, render_index: dict | None, render_dir:
         metrics["browser"] = _browser_events({}, root, diagnostics, settings)
         return _report(settings, diagnostics, metrics)
 
+    # A declaration does not grant an arbitrary tolerance: only the runtime's
+    # supported fixed step and a Program with simulated objects may quantize.
+    sampling = render_index.get("time_sampling")
+    sampling_step = None
+    if sampling is not None:
+        valid = isinstance(sampling, dict) and sampling.get("mode") == "exact"
+        if isinstance(sampling, dict) and sampling.get("mode") == "nearest_physics_frame":
+            dt = sampling.get("dt")
+            valid = (_number(dt) and math.isclose(dt, 1 / 60, rel_tol=0, abs_tol=1e-12)
+                     and any((obj.get("motion") or {}).get("type") == "dynamic"
+                             for obj in program.get("objects", [])))
+            if valid:
+                sampling_step = 1 / 60
+        if not valid:
+            diagnostics.append(_diag("render", "error", "invalid_time_sampling", "/time_sampling",
+                                     "unsupported sampling policy or physics step",
+                                     "declare exact sampling or the dynamic runtime's nearest 1/60 s frame"))
+
     frames = render_index.get("frames")
     if not isinstance(frames, list):
         diagnostics.append(_diag("render", "error", "invalid_frames", "/frames",
@@ -181,11 +199,28 @@ def validate_render_result(program: dict, render_index: dict | None, render_dir:
                                      "frame timestamp is not finite", "record the requested replay time"))
         else:
             indexed_times.append(float(time_value))
+            requested = frame.get("requested_t")
+            actual = frame.get("actual_t")
+            if "actual_t" in frame or sampling_step is not None:
+                if not _number(actual) or abs(float(actual) - float(time_value)) > 1e-9:
+                    diagnostics.append(_diag("render", "error", "actual_time_mismatch", f"{base}/actual_t",
+                                             "actual_t differs from indexed state time", "record the actual seek/state time"))
+            if sampling_step is not None:
+                if not _number(requested) or requested < 0:
+                    diagnostics.append(_diag("render", "error", "invalid_requested_time", f"{base}/requested_t",
+                                             "quantized sampling needs a finite non-negative request", "retain the original requested time"))
+                else:
+                    target = requested / sampling_step
+                    if target > 2**53 - 1 or abs(float(time_value) - math.floor(target + 0.5) * sampling_step) > 1e-9:
+                        diagnostics.append(_diag("render", "error", "quantized_time_mismatch", f"{base}/t",
+                                                 "actual time is not the nearest supported physics frame",
+                                                 "record the runtime's actual fixed-step seek result"))
             if expected_times is not None and frame_index < len(expected_times):
                 expected = expected_times[frame_index]
-                if not _number(expected) or abs(float(time_value) - float(expected)) > settings["time_tolerance_s"]:
+                compared = requested if sampling_step is not None else time_value
+                if not _number(expected) or not _number(compared) or abs(float(compared) - float(expected)) > settings["time_tolerance_s"]:
                     diagnostics.append(_diag("render", "error", "timestamp_mismatch", f"{base}/t",
-                                             f"frame timestamp {time_value} differs from requested {expected}", "render and index the same requested time"))
+                                             f"frame request/time {compared} differs from requested {expected}", "render and index the same requested time"))
         frame_metric = {"index": frame_index, "t": time_value, "passes": {}}
         metrics["frames"].append(frame_metric)
         arrays: dict[str, np.ndarray] = {}

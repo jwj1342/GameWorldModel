@@ -85,6 +85,26 @@ def _half_extents(geom: dict) -> tuple[float, float, float] | None:
     return None
 
 
+def rotation_matrix(quat: Any) -> tuple[tuple[float, float, float], ...] | None:
+    """Rotation matrix of a quaternion [x, y, z, w]; None when it is unusable.
+
+    Column ``k`` is where the local axis ``k`` ends up in world space, so
+    ``matrix[1][k]`` is that axis' vertical component.  Shared with the binder
+    so that both places read orientation the same way.
+    """
+    if not _finite(quat) or len(quat) != 4:
+        return None
+    qn = math.sqrt(sum(float(v) * float(v) for v in quat))
+    if qn <= 1e-12:
+        return None
+    x, y, z, w = (float(v) / qn for v in quat)
+    return (
+        (1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)),
+        (2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)),
+        (2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)),
+    )
+
+
 def _aabb(node: dict, pose: dict) -> tuple[list[float], list[float]] | None:
     half = _half_extents(node.get("geom") or {})
     pos = pose.get("pos")
@@ -93,18 +113,9 @@ def _aabb(node: dict, pose: dict) -> tuple[list[float], list[float]] | None:
 
     # Convert local half extents to a conservative world-space AABB.  The
     # absolute rotation matrix is exact for an oriented box's AABB.
-    quat = pose.get("quat", [0.0, 0.0, 0.0, 1.0])
-    if not _finite(quat):
+    rotation = rotation_matrix(pose.get("quat", [0.0, 0.0, 0.0, 1.0]))
+    if rotation is None:
         return None
-    qn = math.sqrt(sum(float(v) * float(v) for v in quat))
-    if qn <= 1e-12:
-        return None
-    x, y, z, w = (float(v) / qn for v in quat)
-    rotation = (
-        (1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)),
-        (2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)),
-        (2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)),
-    )
     world_half = [sum(abs(rotation[row][col]) * half[col] for col in range(3)) for row in range(3)]
     lo = [float(pos[i]) - world_half[i] for i in range(3)]
     hi = [float(pos[i]) + world_half[i] for i in range(3)]

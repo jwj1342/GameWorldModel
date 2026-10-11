@@ -106,6 +106,50 @@ def _validate_manifest(data, root):
     return rows
 
 
+def build_pending_association(video_path, program_path, record_path, association_file,
+                              *, association_id, duration_s, provenance_kind, review_note):
+    """Hash explicit source files into an unapproved manifest; never infer truth.
+
+    All locators must reside below the destination directory for portability.
+    This checks shape, file identity and duration, not decoded PTS or semantics.
+    The caller writes a fresh file and a human must approve it separately.
+    """
+    root = Path(association_file).resolve().parent
+    files = [Path(p).resolve() for p in (video_path, program_path, record_path)]
+    locators = []
+    for p in files:
+        if not p.is_relative_to(root):
+            raise ValueError("Source files must be within the manifest directory")
+        if not p.is_file():
+            raise ValueError("Each source must be an existing file")
+        locators.append(p.relative_to(root).as_posix())
+    duration = _number(duration_s, 'time_mapping.duration_s', positive=True)
+    raw_program = files[1].read_bytes()
+    program = _load_unambiguous_json(raw_program)
+    meta = program.get('meta') if isinstance(program, dict) else None
+    if not isinstance(meta, dict):
+        raise ValueError("Reference Program requires explicit meta.duration")
+    program_duration = _number(meta.get('duration'), 'meta.duration', positive=True)
+    if duration > program_duration:
+        raise ValueError("Association coverage exceeds reference Program duration")
+    fingerprints = [file_sha256(p) for p in files]
+    if fingerprints[1] != hashlib.sha256(raw_program).hexdigest():
+        raise ValueError("Reference changed while creating association")
+    row = {'association_id': association_id,
+           'video': {'path': locators[0], 'sha256': fingerprints[0]},
+           'ground_truth': {'path': locators[1], 'sha256': fingerprints[1]},
+           'time_mapping': {'video_start_s': 0, 'program_start_s': 0,
+                            'duration_s': duration, 'rate': 1},
+           'provenance': {'kind': provenance_kind, 'record_path': locators[2],
+                          'record_sha256': fingerprints[2]},
+           'review': {'status': 'pending', 'note': review_note}}
+    data = {'schema_version': 1, 'associations': [row]}
+    _validate_manifest(data, root)
+    if any(file_sha256(p) != digest for p, digest in zip(files, fingerprints)):
+        raise ValueError("Source changed while creating association")
+    return data
+
+
 def resolve_ground_truth(video_path, association_file, requested_window):
     """Return a JSON-serializable verified resolution or rejection diagnostics.
 

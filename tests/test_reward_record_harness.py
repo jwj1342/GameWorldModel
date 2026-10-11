@@ -55,9 +55,19 @@ def test_actual_recorder_sampling_plan_with_mock_browser(tmp_path, duration, end
         if not expected: expected.append(0.)
         if abs(expected[-1] - duration) > 1e-9: expected.append(duration)
     assert [s["t"] for s in states] == expected
+    assert [s["requested_t"] for s in states] == expected
+    assert all(s["actual_t"] == s["t"] for s in states)
     assert json.loads((out / "record.json").read_text(encoding="utf-8"))["include_endpoint"] == endpoint
 
 
 def test_actual_recorder_rejects_runtime_time_mismatch(tmp_path):
     cp, _ = recorder(tmp_path, 1, True, shift=.1)
     assert cp.returncode != 0 and "runtime time" in cp.stderr
+
+
+def test_default_recorder_preserves_quantized_actual_time(tmp_path):
+    cp, out = recorder(tmp_path, 1, False, shift=1 / 120)
+    assert cp.returncode == 0, cp.stderr
+    rows = [json.loads(line) for line in (out / 'gt_states.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert rows[0]['requested_t'] == 0
+    assert rows[0]['actual_t'] == rows[0]['t'] == 1 / 120

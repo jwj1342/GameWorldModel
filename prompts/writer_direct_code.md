@@ -28,6 +28,7 @@ export function describe(THREE) {
 
 1. 只能用传进来的那个 `THREE`，不要 import 任何东西，也不要用 `window` 或 `document`。
 2. `pose(t)` 必须是时间的纯函数，同样的 t 要给出同样的结果，不要用随机数、不要读外部状态。不动的东西不用写 `pose`。
+   `object3D` 必须是独立根节点。根和所有子节点均须启用自动矩阵更新，不要关闭 `matrixAutoUpdate` 或 `matrixWorldAutoUpdate`，宿主暂不支持手动矩阵控制。根的 position/quaternion 表示初始世界位姿；`pose(t)` 返回绝对世界位姿并替换它们，不与根变换重复相加。根 scale 和子节点变换保留为局部几何。若需要保留初始朝向，须将它包含在返回的 quat 中。static 条目不能带 pose。
 3. 单位是米，y 轴朝上，地面在 y=0 附近。尺寸按视频里看起来的实际大小估，不要用像素坐标。
 4. 场景要能站人：至少有一块足够大的地面或平台。
 5. 每个东西给一个合理的颜色，用 `new THREE.MeshStandardMaterial({ color: 0xaabbcc })` 这种。

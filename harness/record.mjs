@@ -30,10 +30,13 @@ for (let i = 0; i < n; i++) {
     throw new Error('Actual runtime time does not match requested recording time');
   }
   savePng(b64, path.join(outDir, 'frames', `f_${String(i).padStart(5, '0')}.png`));
-  gt.write(JSON.stringify({ i, t, camera: cam, objects: state.objects }) + '\n');
+  gt.write(JSON.stringify({ i, t: state.t, requested_t: t, actual_t: state.t, camera: cam, objects: state.objects }) + '\n');
 }
 gt.end();
-fs.writeFileSync(path.join(outDir, 'record.json'), JSON.stringify({ fps, duration, width, height, frames: n, include_endpoint: includeEndpoint, elapsed_ms: Date.now() - t0 }, null, 2));
+fs.writeFileSync(path.join(outDir, 'record.json'), JSON.stringify({ fps, duration, width, height, frames: n,
+  include_endpoint: includeEndpoint,
+  time_policy: 't/actual_t = simulated state time; requested_t = sampling request (optional endpoint may not equal encoded index / fps)',
+  elapsed_ms: Date.now() - t0 }, null, 2));
 console.log(`recorded ${n} frames to ${outDir}/frames (${Date.now() - t0} ms). Assemble with: ffmpeg -framerate ${fps} -i ${outDir}/frames/f_%05d.png -c:v libx264 -pix_fmt yuv420p ${outDir}/clip.mp4`);
 } finally {
   if (!gt.writableEnded) gt.end();
