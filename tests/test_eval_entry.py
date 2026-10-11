@@ -4,6 +4,7 @@
 选错了真值、把失败当成跳过、把两个实验并进一组。所以逐条钉死。
 """
 import json
+import math
 import sys
 import types
 from pathlib import Path
@@ -20,7 +21,7 @@ def write(path: Path, payload) -> Path:
     return path
 
 
-def fake_recorder(frames: int = 3, written: int | None = None):
+def fake_recorder(frames: int | None = None, written: int | None = None):
     """替掉 compile + record 两个子进程，记下被调用了几次。"""
     calls = []
 
@@ -29,10 +30,12 @@ def fake_recorder(frames: int = 3, written: int | None = None):
         if "record.mjs" in cmd:
             out = Path(cmd[cmd.index("--out") + 1])
             (out).mkdir(parents=True, exist_ok=True)
-            n = frames if written is None else written
+            count = frames if frames is not None else math.floor(
+                float(cmd[cmd.index("--duration") + 1]) * int(cmd[cmd.index("--fps") + 1]) + 0.5)
+            n = count if written is None else written
             lines = [json.dumps({"i": i, "t": i / 10.0, "objects": []}) for i in range(n)]
             (out / "gt_states.jsonl").write_text("\n".join(lines) + "\n")
-            (out / "record.json").write_text(json.dumps({"frames": frames}))
+            (out / "record.json").write_text(json.dumps({"frames": count}))
         return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     return run, calls
@@ -118,7 +121,7 @@ def test_entry_reports_failure_instead_of_exiting_zero(tmp_path, monkeypatch, ca
     code = ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
                     "--out", str(tmp_path / "table.json")])
     assert code == 1
-    report = json.loads((tmp_path / "table.json").read_text())
+    report = json.loads((tmp_path / "table.json").read_text(encoding="utf-8"))
     assert report["failed"] and "没有重叠时间段" in report["failed"][0]["error"]
     assert report["rows"] == []
 
@@ -139,7 +142,7 @@ def test_the_same_run_given_twice_is_counted_once(tmp_path, monkeypatch):
     code = ev.main(["--run", str(tmp_path / "r1"), "--run", str(tmp_path / "r1"),
                     "--work", str(tmp_path / "w"), "--out", str(tmp_path / "table.json")])
     assert code == 0 and len(seen) == 1
-    report = json.loads((tmp_path / "table.json").read_text())
+    report = json.loads((tmp_path / "table.json").read_text(encoding="utf-8"))
     assert report["duplicate_inputs"] == 1 and len(report["rows"]) == 1
 
 
@@ -153,5 +156,63 @@ def test_name_only_truth_links_are_flagged_in_the_report(tmp_path, monkeypatch):
     (tmp_path / "r1").mkdir()
     ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
              "--out", str(tmp_path / "table.json")])
-    report = json.loads((tmp_path / "table.json").read_text())
+    report = json.loads((tmp_path / "table.json").read_text(encoding="utf-8"))
     assert report["truth_link_unverified"] == ["合成场景"]
+
+
+@pytest.mark.parametrize("source", ["harness/record.mjs", "harness/common.mjs", "scripts/node_harness.sh"])
+def test_recording_source_changes_invalidate_cache(tmp_path, monkeypatch, source):
+    monkeypatch.setattr(ev, "REPO", tmp_path)
+    p = tmp_path / source
+    p.parent.mkdir(parents=True)
+    p.write_text("original time policy", encoding="utf-8")
+    before = ev.record_key(b"{}", 1.0, 10)
+    p.write_text("actual simulation time policy", encoding="utf-8")
+    assert ev.record_key(b"{}", 1.0, 10) != before
+
+
+def test_recorder_change_causes_rerecord(tmp_path, monkeypatch):
+    monkeypatch.setattr(ev, "REPO", tmp_path)
+    recorder = tmp_path / "harness" / "record.mjs"
+    recorder.parent.mkdir()
+    recorder.write_text("old", encoding="utf-8")
+    run, calls = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    ev.states_of(program, tmp_path / "w", 1.0, "harness")
+    first = len(calls)
+    ev.states_of(program, tmp_path / "w", 1.0, "harness")
+    assert len(calls) == first
+    recorder.write_text("new", encoding="utf-8")
+    ev.states_of(program, tmp_path / "w", 1.0, "harness")
+    assert len(calls) == first * 2
+
+
+@pytest.mark.parametrize("frames", [3, 9, 11])
+def test_consistent_but_wrong_frame_count_is_refused(tmp_path, monkeypatch, frames):
+    run, _ = fake_recorder(frames=frames)
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    with pytest.raises(RuntimeError, match="完整"):
+        ev.states_of(program, tmp_path / "w", 1.0, "harness")
+
+
+def test_expected_count_uses_javascript_rounding(tmp_path, monkeypatch):
+    run, _ = fake_recorder(frames=3)
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    assert len(ev.states_of(program, tmp_path / "w", 0.25, "harness", fps=10)) == 3
+
+
+def test_legacy_cache_key_requires_rerecord(tmp_path, monkeypatch):
+    run, calls = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    ev.states_of(program, tmp_path / "w", 1.0, "harness")
+    stamp = tmp_path / "w" / "rec" / "eval_record_key.json"
+    key = json.loads(stamp.read_text(encoding="utf-8"))
+    del key["recorder_sha256"]
+    write(stamp, key)
+    first = len(calls)
+    ev.states_of(program, tmp_path / "w", 1.0, "harness")
+    assert len(calls) == first * 2
