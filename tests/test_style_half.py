@@ -8,10 +8,12 @@
 """
 import json
 import re
+import copy
 
 import pytest
 
 from gwm.compiler.validate import validate
+from gwm.compiler.compile import compile_program
 from gwm.config import REPO
 
 
@@ -105,3 +107,73 @@ def test_the_palette_in_the_schema_and_in_the_kernel_do_not_drift():
     body = source[start:source.index("\n};", start)]
     implemented = set(re.findall(r"^\s{2}(\w+):\s*\{", body, flags=re.M))
     assert declared == implemented, f"schema 多了 {declared - implemented}，内核多了 {implemented - declared}"
+
+
+def assert_nonfinite_path(program, path):
+    report = validate(program)
+    assert not report["ok"]
+    assert any(e["code"] == "non_finite" and e["path"] == path
+               and e["stage"] == "semantic" and e["severity"] == "error"
+               for e in report["errors"])
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("light", ["ambient", "key"])
+def test_nonfinite_light_intensity_has_exact_path(value, light):
+    p = scene(style={"lighting": {light: {"intensity": value}}})
+    assert_nonfinite_path(p, f"/style/lighting/{light}/intensity")
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_nonfinite_light_direction_has_component_path(value, index):
+    direction = [1, 2, 3]
+    direction[index] = value
+    assert_nonfinite_path(scene(style={"lighting": {"key": {"direction": direction}}}),
+                          f"/style/lighting/key/direction/{index}")
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("field", ["roughness", "metalness", "emissive_intensity", "opacity"])
+@pytest.mark.parametrize("collection", ["objects", "static"])
+@pytest.mark.parametrize("location", ["material", "geom/material"])
+def test_nonfinite_material_at_all_supported_locations(value, field, collection, location):
+    p = scene()
+    node = p[collection][0]
+    target = node["geom"] if location.startswith("geom/") else node
+    target["material"] = {"base_color": "#aabbcc", "emissive": "#ffffff", field: value}
+    assert_nonfinite_path(p, f"/{collection}/0/{location}/{field}")
+
+
+def test_json_numeric_overflow_is_rejected_before_any_compile_work(tmp_path, monkeypatch):
+    import importlib
+    compiler = importlib.import_module("gwm.compiler.compile")
+    p = scene(style=json.loads('{"lighting":{"key":{"intensity":1e400}}}'))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid style must not reach asset resolution or bundling")
+
+    monkeypatch.setattr(compiler, "resolve_assets", forbidden)
+    monkeypatch.setattr(compiler, "bundle", forbidden)
+    out = tmp_path / "game"
+    result = compile_program(p, out)
+    assert not result["ok"] and not out.exists()
+    assert_nonfinite_path(p, "/style/lighting/key/intensity")
+
+
+def test_valid_style_validation_does_not_mutate_program():
+    p = scene(style={"lighting": {"ambient": {"intensity": 0},
+                                 "key": {"intensity": 2, "direction": [1, 2, 3]}}})
+    p["objects"][0]["geom"]["material"] = {
+        "base_color": "#aabbcc", "roughness": 0, "metalness": 1,
+        "opacity": 1, "emissive_intensity": 0}
+    before = copy.deepcopy(p)
+    assert validate(p)["ok"]
+    assert p == before
+
+
+@pytest.mark.parametrize("program", [None, [], {"style": []},
+    {"style": {"lighting": {"key": []}}}, {"objects": [None]},
+    {"objects": [{"material": {"roughness": float("inf")}}]}])
+def test_style_finite_check_is_safe_on_schema_invalid_inputs(program):
+    assert not validate(program)["ok"]
