@@ -1,0 +1,114 @@
+{
+ "rows": [
+  {
+   "family": "以管线程序为基准",
+   "label": "原样",
+   "reward_no_gt": 0.2267,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以管线程序为基准",
+   "label": "整体平移 0.15 米",
+   "reward_no_gt": 0.2245,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以管线程序为基准",
+   "label": "整体平移 0.4 米",
+   "reward_no_gt": 0.2198,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以管线程序为基准",
+   "label": "整体平移 0.8 米",
+   "reward_no_gt": 0.2116,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以管线程序为基准",
+   "label": "整体平移 1.6 米",
+   "reward_no_gt": 0.1949,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以管线程序为基准",
+   "label": "所有运动改成静止",
+   "reward_no_gt": 0.2139,
+   "gt_traj_median_m": null,
+   "gt_motion_acc": null
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "原样",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 0.0,
+   "gt_motion_acc": 1.0
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "整体平移 0.15 米",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 0.15,
+   "gt_motion_acc": 1.0
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "整体平移 0.4 米",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 0.3999,
+   "gt_motion_acc": 1.0
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "整体平移 0.8 米",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 0.7998,
+   "gt_motion_acc": 1.0
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "整体平移 1.6 米",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 1.5997,
+   "gt_motion_acc": 1.0
+  },
+  {
+   "family": "以真值程序为基准",
+   "label": "所有运动改成静止",
+   "reward_no_gt": 0.0,
+   "gt_traj_median_m": 0.5522,
+   "gt_motion_acc": 0.0
+  }
+ ],
+ "spearman_rho": null,
+ "p_value": null,
+ "n_comparable": 0,
+ "monotonicity": {
+  "以管线程序为基准": {
+   "rewards": [
+    0.2267,
+    0.2245,
+    0.2198,
+    0.2116,
+    0.1949
+   ],
+   "单调下降": true
+  },
+  "以真值程序为基准": {
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "单调下降": false
+  }
+ },
+ "conclusion": "两个指标在同一批候选上算不出来，因为感知重建和真值差约八米，没有共同的物体对应关系。#17 的问题卡在 #7 上。"
+}

@@ -1,0 +1,417 @@
+{
+ "rows": [
+  {
+   "id": "period_faster",
+   "kind": "运动参数",
+   "instruction": "让升降平台上下移动得快一倍",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/0/motion/period",
+     "value": 2.0
+    }
+   ],
+   "changed": [
+    "/objects/0/motion/period"
+   ],
+   "note": "将升降平台 (lift) 的周期性平移周期从 4.0 秒减半为 2.0 秒，使其移动速度加快一倍。"
+  },
+  {
+   "id": "spin_slower",
+   "kind": "运动参数",
+   "instruction": "把金币的自转速度改成每秒 90 度",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/3/motion/rate_dps",
+     "value": 90
+    }
+   ],
+   "changed": [
+    "/objects/3/motion/rate_dps"
+   ],
+   "note": "已将金币 (id=coin) 的自转速度从 180 dps 修改为 90 dps。"
+  },
+  {
+   "id": "amp_bigger",
+   "kind": "运动参数",
+   "instruction": "让升降平台的上下幅度改成 2 米",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/0/motion/amp",
+     "value": 2.0
+    }
+   ],
+   "changed": [
+    "/objects/0/motion/amp"
+   ],
+   "note": "已将升降平台 (lift) 的上下运动幅度 (amp) 从 1.2 修改为 2.0。"
+  },
+  {
+   "id": "door_angle",
+   "kind": "运动参数",
+   "instruction": "把门最大只开到 60 度",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/1/motion/range_deg/1",
+     "value": 60
+    }
+   ],
+   "changed": [
+    "/objects/1/motion/range_deg/1"
+   ],
+   "note": "已将门的旋转范围上限从 100 度修改为 60 度。"
+  },
+  {
+   "id": "phase_shift",
+   "kind": "运动参数",
+   "instruction": "让升降平台从最低点开始运动",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/0/motion/phase",
+     "value": -1.571
+    }
+   ],
+   "changed": [
+    "/objects/0/motion/phase"
+   ],
+   "note": "将升降平台的相位调整为 -pi/2，使其在 t=0 时位于最低点（中心位置减去振幅）。"
+  },
+  {
+   "id": "spin_axis",
+   "kind": "运动参数",
+   "instruction": "让金币绕 x 轴自转，不要绕 y 轴",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/3/motion/axis",
+     "value": [
+      1,
+      0,
+      0
+     ]
+    }
+   ],
+   "changed": [
+    "/objects/3/motion/axis/0",
+    "/objects/3/motion/axis/1"
+   ],
+   "note": "已将金币的自转轴从 y 轴 [0,1,0] 修改为 x 轴 [1,0,0]。"
+  },
+  {
+   "id": "coin_bigger",
+   "kind": "几何",
+   "instruction": "把金币的半径改成 0.5 米",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/3/geom",
+     "value": {
+      "kind": "primitive",
+      "shape": "sphere",
+      "radius": 0.5
+     }
+    }
+   ],
+   "changed": [
+    "/objects/3/geom/extent",
+    "/objects/3/geom/kind",
+    "/objects/3/geom/query",
+    "/objects/3/geom/radius",
+    "/objects/3/geom/shape"
+   ],
+   "note": "将金币从 asset 改为 primitive sphere，半径设为 0.5 米。"
+  },
+  {
+   "id": "lift_wider",
+   "kind": "几何",
+   "instruction": "把升降平台做成 4 米宽",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/0/geom/extent/0",
+     "value": 4.0
+    },
+    {
+     "op": "replace",
+     "path": "/objects/0/geom/extent/2",
+     "value": 4.0
+    }
+   ],
+   "changed": [
+    "/objects/0/geom/extent/0",
+    "/objects/0/geom/extent/2"
+   ],
+   "note": "将升降平台（lift）的几何尺寸从 2.5x0.3x2.5 修改为 4.0x0.3x4.0，使其宽度和深度均为 4 米。"
+  },
+  {
+   "id": "ground_bigger",
+   "kind": "静态结构",
+   "instruction": "把地面改成 40 米见方",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/static/0/geom/extent",
+     "value": [
+      40,
+      0.5,
+      40
+     ]
+    }
+   ],
+   "changed": [
+    "/static/0/geom/extent/0",
+    "/static/0/geom/extent/2"
+   ],
+   "note": "已将地面（ground）的尺寸从 24x16 修改为 40x40，高度保持 0.5 不变。"
+  },
+  {
+   "id": "lava_move",
+   "kind": "静态结构",
+   "instruction": "把熔岩坑往 x 正方向挪 1 米",
+   "ok": false,
+   "why": "有副作用，额外改了 ['/static/5/pose/quat']",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/static/5/pose",
+     "value": {
+      "pos": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "quat": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    }
+   ],
+   "changed": [
+    "/static/5/pose/pos/0",
+    "/static/5/pose/pos/1",
+    "/static/5/pose/pos/2",
+    "/static/5/pose/quat"
+   ],
+   "note": "熔岩坑 (lava_pit) 初始位姿未显式给出，默认为原点。将其沿 x 正方向移动 1 米，即 pos 设为 [1.0, 0.0, 0.0]。"
+  },
+  {
+   "id": "coin_color",
+   "kind": "几何",
+   "instruction": "把金币改成红色",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/3/material",
+     "value": "red"
+    }
+   ],
+   "changed": [
+    "/objects/3/material"
+   ],
+   "note": "已将金币（id=coin）的材质从 gold 改为 red。"
+  },
+  {
+   "id": "remove_cart",
+   "kind": "数量",
+   "instruction": "把矿车从场景里删掉",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "remove",
+     "path": "/objects/2"
+    }
+   ],
+   "changed": [
+    "/objects"
+   ],
+   "note": "已删除矿车（id=cart，位于/objects/2）。"
+  },
+  {
+   "id": "add_event",
+   "kind": "事件",
+   "instruction": "让金币在玩家碰到的时候消失",
+   "ok": false,
+   "why": "该改的没改。期望命中 ['/objects/3/events']，实际改了 []",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/3/events",
+     "value": [
+      {
+       "type": "despawn_on_contact",
+       "with": "player"
+      }
+     ]
+    }
+   ],
+   "changed": [],
+   "note": "已为金币 (objects/3) 添加 despawn_on_contact 事件，使其在玩家接触时消失。"
+  },
+  {
+   "id": "door_static",
+   "kind": "运动类型",
+   "instruction": "让门不要动，一直保持关着",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/1/motion",
+     "value": {
+      "type": "static"
+     }
+    }
+   ],
+   "changed": [
+    "/objects/1/motion/axis",
+    "/objects/1/motion/pivot",
+    "/objects/1/motion/range_deg",
+    "/objects/1/motion/schedule",
+    "/objects/1/motion/type"
+   ],
+   "note": "将门的运动类型从 revolute 改为 static，使其保持关闭状态不再运动。"
+  },
+  {
+   "id": "cart_slower",
+   "kind": "运动参数",
+   "instruction": "让矿车走完整条路线的时间变成原来的两倍",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/2/motion/keyframes/0/t",
+     "value": 0
+    },
+    {
+     "op": "replace",
+     "path": "/objects/2/motion/keyframes/1/t",
+     "value": 8
+    },
+    {
+     "op": "replace",
+     "path": "/objects/2/motion/keyframes/2/t",
+     "value": 16
+    }
+   ],
+   "changed": [
+    "/objects/2/motion/keyframes/1/t",
+    "/objects/2/motion/keyframes/2/t"
+   ],
+   "note": "矿车 (cart) 的轨迹关键帧时间已翻倍，从 0-4-8 秒变为 0-8-16 秒，使总时长变为原来的两倍。"
+  },
+  {
+   "id": "lift_higher",
+   "kind": "位姿",
+   "instruction": "把升降平台的中心抬高到 3 米",
+   "ok": true,
+   "why": "改对了，且没有副作用",
+   "ops": [
+    {
+     "op": "replace",
+     "path": "/objects/0/pose/pos/1",
+     "value": 3.0
+    }
+   ],
+   "changed": [
+    "/objects/0/pose/pos/1"
+   ],
+   "note": "将升降平台 (lift) 的初始位姿中心 y 坐标修改为 3.0 米。"
+  },
+  {
+   "id": "no_such_object",
+   "kind": "应当拒绝",
+   "instruction": "把场景里那只猫往左边移两米",
+   "ok": true,
+   "why": "正确拒绝",
+   "ops": [],
+   "changed": [],
+   "note": "程序中没有找到任何 id 或 class 为 'cat' 的物体，无法执行移动操作。"
+  },
+  {
+   "id": "not_expressible_sound",
+   "kind": "应当拒绝",
+   "instruction": "让门开合的时候发出吱呀的声音",
+   "ok": false,
+   "why": "应当拒绝却编造了 1 个操作：['/objects/1/events']",
+   "ops": [
+    {
+     "op": "add",
+     "path": "/objects/1/events",
+     "value": [
+      {
+       "type": "trigger_on_enter",
+       "volume": {
+        "pos": [
+         2.15,
+         1.2,
+         -3.0
+        ],
+        "extent": [
+         1.4,
+         2.4,
+         0.12
+        ]
+       },
+       "target": "player",
+       "action": "play_sound_creak"
+      }
+     ]
+    }
+   ],
+   "changed": [],
+   "note": "为门（objects/1）添加了事件，当玩家进入门的体积时触发吱呀声。"
+  },
+  {
+   "id": "not_expressible_difficulty",
+   "kind": "应当拒绝",
+   "instruction": "把这个关卡的难度调高一些",
+   "ok": true,
+   "why": "正确拒绝",
+   "ops": [],
+   "changed": [],
+   "note": "要求“调高难度”是模糊的自然语言指令，无法直接映射到具体的 JSON Patch 操作。需要明确具体的修改目标（例如：加快电梯速度、缩短门打开时间、增加熔岩坑大小、改变矿车轨迹等）才能生成有效的修改。"
+  },
+  {
+   "id": "not_expressible_weather",
+   "kind": "应当拒绝",
+   "instruction": "给场景加上下雨的天气效果",
+   "ok": true,
+   "why": "正确拒绝",
+   "ops": [],
+   "changed": [],
+   "note": "当前场景程序 DSL 和 schema 中未定义天气效果（如 rain）的配置字段或对象类型，无法通过 JSON Patch 添加。"
+  }
+ ],
+ "model": "qwen3.5-27b-fp8",
+ "passed": 17,
+ "total": 20
+}
