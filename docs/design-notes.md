@@ -906,3 +906,29 @@ they do not certify browser rendering or real-video reconstruction.
 整体旋转仍可能启动失败，这是已知边界。
 
 报告里记 `gauge_alignment.coarse`，出问题时能分清是粗对齐没起来还是精对齐偏了。
+
+### 奖励实验来源清单生成与人工审核
+
+`python -m scripts.create_ground_truth_association` 根据显式指定的三个文件计算
+视频、独立参考 Program、生成/参考记录的 SHA-256，复用来源契约生成清单。
+所有输入必须位于清单所在目录之下，使用可移植相对路径；输出必须是新文件，不覆盖旧清单。
+
+```bash
+python -m scripts.create_ground_truth_association \
+  --video out/source_trial/video.mp4 --program out/source_trial/reference.json \
+  --record out/source_trial/generation.json --out out/source_trial/associations.json \
+  --association-id source_trial --duration 6 --kind synthetic_generation \
+  --review-note "待人工核对生成来源和时间对应"
+```
+
+这里只计算文件身份和检查所声明时长，不推断文件名对应，不证明视频由 Program 生成，
+不解码 PTS，也不能识别输入是否实际上是当前候选 Program。操作者必须提供独立参考。
+生成的 `review.status` 永远是 `pending`，奖励入口会拒绝。人工检查来源记录、视频关联、
+时间覆盖与独立性后，在审核副本填写理由并明确改为 `confirmed`，才可传给
+`check_reward_agreement.py --associations`。实际文件变化仍由现有哈希门禁拒绝。
+非零时间偏移和速率变换尚未支持；不得以生成清单为由宣称完整评测协议已验证。
+
+录制器保留上游 `t/actual_t` 真实仿真时间与 `requested_t` 采样请求，同时保留默认关闭的
+`--include-endpoint`。奖励实验要求完整且实际时间与请求一致的闭区间；固定步长场景中
+不对齐物理帧的请求将被拒绝，而不是改写真实时间。默认录制仍保留量化时间。
+可选额外终点若不在常规帧率网格上，不能直接当作普通编码帧时间；需独立核对解码 PTS。

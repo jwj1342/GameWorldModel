@@ -6,8 +6,11 @@
 #SBATCH --time=00:45:00
 #SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
 # issue #17：无真值的奖励信号和有真值的指标，排序一不一致
-set -u
+set -eu
 RUN=${1:?需要一次完整运行的目录}
+VIDEO=${2:?需要原视频路径}
+ASSOCIATIONS=${3:?需要已审核的来源关联清单}
+DURATION=${4:?需要明确的目标时长}
 REPO=/scratch/jwj/research/GameWorldModel
 source $REPO/scripts/setup_env.sh
 export GWM_NODE_ROOT=$SLURM_TMPDIR/node; mkdir -p $GWM_NODE_ROOT && tar -xf $GWM_DEPS/node-playwright-three.tar -C $GWM_NODE_ROOT
@@ -15,5 +18,6 @@ export GWM_NODE_MODULES=$GWM_NODE_ROOT/node_modules PLAYWRIGHT_BROWSERS_PATH=$GW
 cd $REPO
 export PYTHONPATH=$REPO${PYTHONPATH:+:$PYTHONPATH}
 echo "=== $(date) on $(hostname) ==="
-python scripts/check_reward_agreement.py --run "$RUN" --work $SLURM_TMPDIR/ra
+python scripts/check_reward_agreement.py --run "$RUN" --work "$SLURM_TMPDIR/ra" \
+  --video "$VIDEO" --associations "$ASSOCIATIONS" --duration "$DURATION"
 echo "=== DONE $(date) ==="
