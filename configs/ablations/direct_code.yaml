@@ -1,0 +1,7 @@
+# 直接出代码的消融（issue #11）：模型不产出 program.json，直接写 three.js。
+# 这条路径不走 run_clip，由 scripts/run_direct_code.py 单独驱动，
+# 所以这里只放跑它时要覆盖的模型参数，保证和 DSL 那条路径条件一致。
+ablations: {direct_code: true}
+vlm:
+  temperature: 0.0      # 和 DSL 路径比较时两边都用确定性采样
+  max_tokens: 4000      # 写一整段场景代码比写 JSON 长

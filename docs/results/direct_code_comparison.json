@@ -1,0 +1,21 @@
+{
+ "issue": "#11 直接出代码 vs DSL，同一段视频、同一个模型、同样的运行时",
+ "model": "qwen3.5-27b-fp8（集群自托管）",
+ "clip": "handwritten_playground",
+ "direct_code": {
+  "一次通过": true,
+  "尝试次数": 1,
+  "生成字符数": 5362,
+  "耗时秒": 122.8,
+  "语法正确": true,
+  "渲染成功": true,
+  "描述的物体数": 10,
+  "试玩": {"reached_goal": true, "playable": true, "t_goal": 0.0167, "collectibles_total": 4},
+  "问题": "尺度错了十倍。模型写的地面 2.5 米见方，而证据摘要里的场景是 24 米量级。出生点和目标点挤在一起，所以玩家一帧就到达目标。"
+ },
+ "dsl": {
+  "试玩": {"reached_goal": true, "playable": true, "t_goal": 7.82, "collectibles_total": 3},
+  "vlm_评审": {"related_to_video": false, "defect": "生成的关卡几何极度简化，缺少源视频里的具体障碍和布局细节"}
+ },
+ "结论": "光看编译成功率和可玩性，直接出代码和 DSL 一样好，两边都报 playable true。差别在 t_goal：0.0167 秒对 7.82 秒，前者是一帧通关的退化场景。所以这个消融不能只报那两项，必须有能测出尺度和布局正确性的指标，也就是 #4 的真值指标。另外 playable 这个布尔值本身零区分度，和 #12 记的是同一个问题。"
+}

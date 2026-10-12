@@ -11,6 +11,7 @@
 # 场景程序的校验、编译和反馈循环
 jsonschema>=4.20
 jsonpatch>=1.33
+jsonpointer>=3.0
 pyyaml>=6.0
 numpy>=1.26
 scipy>=1.13.1  # CPU regression suite validated with 1.13.1 and 1.17.0; no old-version cap
