@@ -17,10 +17,10 @@ examples/<clip>/program.json 找真值程序。找不到就跳过并说明——
 同时匹配的直接拒绝，不猜。
 
 录制结果会缓存复用，但缓存按输入内容认，不按文件在不在认：换了程序、时长、
-帧率或者内核版本都会重录，录到一半断掉的也不会被当成完整结果。
+帧率、内核或者录制器版本都会重录，录到一半断掉的也不会被当成完整结果。
 """
 from __future__ import annotations
-import argparse, hashlib, json, subprocess, sys
+import argparse, hashlib, json, math, subprocess, sys
 from pathlib import Path
 
 from gwm.config import REPO
@@ -44,6 +44,17 @@ def kernel_identity() -> str:
     return h.hexdigest()
 
 
+def recorder_identity() -> str:
+    """录制器及共享启动逻辑决定状态时间语义，也必须参与缓存身份。"""
+    h = hashlib.sha256()
+    paths = sorted((REPO / "harness").glob("*.mjs"))
+    paths += [REPO / "harness" / "package.json", REPO / "scripts" / "node_harness.sh"]
+    for p in paths:
+        h.update(p.relative_to(REPO).as_posix().encode("utf-8"))
+        h.update(p.read_bytes() if p.is_file() else b"<missing>")
+    return h.hexdigest()
+
+
 def find_ground_truth(clip: str) -> tuple[Path | None, str, list[str]]:
     """返回 (真值程序路径, 匹配依据, 所有候选)。
 
@@ -62,7 +73,7 @@ def find_ground_truth(clip: str) -> tuple[Path | None, str, list[str]]:
     for d in GT_DIRS:
         for p in sorted((REPO / d).glob("*/program.json")):
             try:
-                if json.loads(p.read_text()).get("meta", {}).get("clip") == clip:
+                if json.loads(p.read_text(encoding="utf-8")).get("meta", {}).get("clip") == clip:
                     declared.append(p)
             except (OSError, ValueError):
                 continue
@@ -76,7 +87,7 @@ def find_ground_truth(clip: str) -> tuple[Path | None, str, list[str]]:
 def record_key(program_bytes: bytes, duration: float, fps: int) -> dict:
     return {"program_sha256": _sha256_bytes(program_bytes), "duration_s": float(duration),
             "fps": int(fps), "width": RECORD_W, "height": RECORD_H,
-            "kernel_sha256": kernel_identity()}
+            "kernel_sha256": kernel_identity(), "recorder_sha256": recorder_identity()}
 
 
 def _cached(rec: Path, key: dict) -> bool:
@@ -85,15 +96,20 @@ def _cached(rec: Path, key: dict) -> bool:
     if not (states.is_file() and stamp.is_file() and meta.is_file()):
         return False
     try:
-        if json.loads(stamp.read_text()) != key:
+        if json.loads(stamp.read_text(encoding="utf-8")) != key:
             return False
-        frames = json.loads(meta.read_text()).get("frames")
-    except (OSError, ValueError):
+        frames = json.loads(meta.read_text(encoding="utf-8")).get("frames")
+        # 与 record.mjs 的 Math.round(duration * fps) 一致，不能用 Python 的银行家舍入。
+        duration, fps = float(key["duration_s"]), float(key["fps"])
+        if not math.isfinite(duration * fps) or duration <= 0 or fps <= 0:
+            return False
+        expected = math.floor(duration * fps + 0.5)
+        if type(frames) is not int or frames <= 0 or frames != expected:
+            return False
+        with states.open(encoding="utf-8") as fh:
+            written = sum(1 for line in fh if line.strip())
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return False
-    if not isinstance(frames, int) or frames <= 0:
-        return False
-    with states.open() as fh:
-        written = sum(1 for line in fh if line.strip())
     return written == frames        # 录到一半断掉的不算完整
 
 
@@ -111,7 +127,7 @@ def states_of(program_path: Path, out: Path, duration: float, harness: str, fps:
                         "--width", str(RECORD_W), "--height", str(RECORD_H)],
                        check=True, cwd=REPO, capture_output=True)
         rec.mkdir(parents=True, exist_ok=True)
-        (rec / "eval_record_key.json").write_text(json.dumps(key, sort_keys=True) + "\n")
+        (rec / "eval_record_key.json").write_text(json.dumps(key, sort_keys=True) + "\n", encoding="utf-8")
         if not _cached(rec, key):
             # 录制进程退 0 也不代表录完了，帧数对不上就当失败，别把半截结果留着复用
             raise RuntimeError(f"录制没有产出完整的状态序列：{rec}")
@@ -124,7 +140,7 @@ def work_dir(work: Path, tag: str, identity: str) -> Path:
 
 
 def eval_one(run: Path, work: Path, harness: str) -> dict:
-    manifest = json.loads((run / "run.json").read_text())
+    manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
     clip = manifest.get("clip", run.parent.name)
     configs = (manifest.get("args") or {}).get("config") or []
     cfg_identity = manifest.get("config_identity")
@@ -183,7 +199,7 @@ def main(argv: list[str]) -> int:
 
     given = [Path(r) for r in a.run]
     if a.runs_from:
-        given += [Path(l.strip()) for l in Path(a.runs_from).read_text().splitlines() if l.strip()]
+        given += [Path(l.strip()) for l in Path(a.runs_from).read_text(encoding="utf-8").splitlines() if l.strip()]
     if not given: ap.error("至少要给一个 --run 或 --runs-from")
 
     runs, seen = [], set()
@@ -241,7 +257,7 @@ def main(argv: list[str]) -> int:
                                "truth_link_unverified": name_only,
                                "markdown_full": as_markdown(table_full),
                                "markdown_holdout": as_markdown(table_hold)},
-                              ensure_ascii=False, indent=1) + "\n")
+                              ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"\n写到 {out}")
     # 一条都没评出来还退 0 的话，作业脚本会把一次全盘失败当成成功。
     if failed or not rows:

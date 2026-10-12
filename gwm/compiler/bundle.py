@@ -27,7 +27,7 @@ def _node_modules() -> Path:
 _IMPORT_RE = re.compile(r"""from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]""")
 
 def _imports(path: Path) -> list[str]:
-    return [a or b for a, b in _IMPORT_RE.findall(path.read_text())]
+    return [a or b for a, b in _IMPORT_RE.findall(path.read_text(encoding="utf-8"))]
 
 def _addon_imports(root: Path) -> list[str]:
     """Paths under three/examples/jsm imported by any kernel module, e.g. controls/OrbitControls.js."""
@@ -79,9 +79,9 @@ def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = Non
     shutil.copytree(KERNEL, kdst, ignore=shutil.ignore_patterns("index.html", "package.json"))
     shutil.copy2(KERNEL / "index.html", out / "index.html")
     _copy_vendor(out)
-    (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False))
-    (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1))
+    (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1), encoding="utf-8")
     report = {"bundled_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kernel_files": sorted(p.name for p in KERNEL.glob("*.js")),
               "assets": asset_manifest or {}, "validation": validation or {}, "objects": len(program.get("objects", [])), "static": len(program.get("static", []))}
-    (out / "compile_report.json").write_text(json.dumps(report, indent=2))
+    (out / "compile_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return out
