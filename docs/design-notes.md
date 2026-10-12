@@ -885,6 +885,13 @@ The previous 20-case experiment rates cannot be reused for this 21-case set.
 加一个运行时不认的字段比没有这个字段更糟。RP §6 缺口 14 要跟着改一半，它在
 `docs/research-proposal` 分支上。
 
+数值字段的有限性在校验的第一步统一查，不分样式还是行为。NaN 跟任何上下界比较都是假，
+schema 的 `minimum`/`maximum` 拦不住它；`1e400` 这种合法 JSON 字面量解析出来是 inf，
+没写上界的字段也拦不住。两种都会原样写进 `program.json`，浏览器 `JSON.parse` 读到裸的
+NaN/Infinity 直接 SyntaxError，而编译这一步会报成功——产物是坏的，日志是干净的。
+所以 `validate.py` 递归走整棵程序树，不逐个列字段：列字段的写法得跟着 schema 一起改，
+漏一个就是一个无声的洞。`bundle.py` 写 program.json 时再用 `allow_nan=False` 兜一道。
+
 # Dynamic runtime contract
 
 `motion.mass` is the total mass of an object instance. For compound colliders it

@@ -47,56 +47,30 @@ def _check_style(program: dict, errors: list[dict], warnings: list[dict]) -> Non
                                  "emissive_intensity has no effect without 'emissive'", "set emissive or drop the intensity"))
 
 
-def _style_numeric_errors(program: Any) -> list[dict]:
-    """Reject nonfinite style values even when schema validation also fails.
+def _nonfinite_errors(node: Any, path: str = "") -> list[dict]:
+    """Reject nonfinite numbers anywhere in the program, before schema validation.
 
-    JSON Schema numeric bounds do not reliably reject Python NaN. Keep this
-    check independent of the schema-success-only semantic pass so diagnostics
-    retain the exact numeric field path inside material alternatives.
+    Schema bounds do not catch them: NaN compares false against every bound, and
+    an unbounded field accepts the inf that a literal like 1e400 parses to. Either
+    one reaches program.json as a bare NaN/Infinity, which the runtime's JSON.parse
+    refuses. Walking the whole program keeps this from drifting as fields are added,
+    and keeps the exact numeric field path in the diagnostic.
     """
-    errors = []
-    if not isinstance(program, dict):
-        return errors
-
-    def check(value, path):
-        if type(value) not in (int, float):
-            return  # Types and missing fields remain the schema's responsibility.
+    errors: list[dict] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            errors.extend(_nonfinite_errors(value, f"{path}/{key}"))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            errors.extend(_nonfinite_errors(value, f"{path}/{index}"))
+    elif type(node) in (int, float):  # bool is not a number here; types stay the schema's job.
         try:
-            finite = math.isfinite(value)
+            finite = math.isfinite(node)
         except OverflowError:
-            finite = False
+            finite = False  # An int too large for float decodes to Infinity in JSON.parse too.
         if not finite:
-            errors.append(_err(path, "non_finite", "style value must be a finite number",
+            errors.append(_err(path, "non_finite", "numeric value must be finite",
                                "replace it with a finite value; NaN and Infinity are not supported"))
-
-    style = program.get("style")
-    lighting = style.get("lighting") if isinstance(style, dict) else None
-    if isinstance(lighting, dict):
-        for name in ("ambient", "key"):
-            light = lighting.get(name)
-            if not isinstance(light, dict):
-                continue
-            path = f"/style/lighting/{name}"
-            check(light.get("intensity"), path + "/intensity")
-            if name == "key" and isinstance(light.get("direction"), list):
-                for i, value in enumerate(light["direction"]):
-                    check(value, f"{path}/direction/{i}")
-
-    for collection in ("static", "objects"):
-        nodes = program.get(collection)
-        if not isinstance(nodes, list):
-            continue
-        for i, node in enumerate(nodes):
-            if not isinstance(node, dict):
-                continue
-            geom = node.get("geom")
-            materials = [(node.get("material"), f"/{collection}/{i}/material")]
-            if isinstance(geom, dict):
-                materials.append((geom.get("material"), f"/{collection}/{i}/geom/material"))
-            for material, path in materials:
-                if isinstance(material, dict):
-                    for field in ("roughness", "metalness", "emissive_intensity", "opacity"):
-                        check(material.get(field), path + "/" + field)
     return errors
 
 
@@ -223,7 +197,7 @@ def validate_candidate(program: Any, evidence: dict | None = None) -> dict:
     del evidence  # Explicitly unused by the model-independent candidate preflight.
     findings: list[dict] = []
 
-    findings.extend(_annotate(_style_numeric_errors(program), "semantic", "error"))
+    findings.extend(_annotate(_nonfinite_errors(program), "semantic", "error"))
 
     schema_errs = schema_errors(program)
     findings.extend(_annotate(schema_errs, "schema", "error"))

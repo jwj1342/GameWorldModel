@@ -79,8 +79,8 @@ def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = Non
     shutil.copytree(KERNEL, kdst, ignore=shutil.ignore_patterns("index.html", "package.json"))
     shutil.copy2(KERNEL / "index.html", out / "index.html")
     _copy_vendor(out)
-    (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1), encoding="utf-8")
+    (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1, allow_nan=False), encoding="utf-8")
     report = {"bundled_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kernel_files": sorted(p.name for p in KERNEL.glob("*.js")),
               "assets": asset_manifest or {}, "validation": validation or {}, "objects": len(program.get("objects", [])), "static": len(program.get("static", []))}
     (out / "compile_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
