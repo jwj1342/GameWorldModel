@@ -45,7 +45,9 @@ def recorder(tmp_path, duration, endpoint, shift=0):
     return cp, out
 
 
-@pytest.mark.parametrize("duration,endpoint", [(1, False), (1, True), (1.03, True), (.03, True)])
+@pytest.mark.parametrize("duration,endpoint", [
+    (1, False), (1, True), (1.03, True), (.03, True), (.25, True), (5e-10, True),
+])
 def test_actual_recorder_sampling_plan_with_mock_browser(tmp_path, duration, endpoint):
     cp, out = recorder(tmp_path, duration, endpoint)
     assert cp.returncode == 0, cp.stderr
@@ -58,6 +60,11 @@ def test_actual_recorder_sampling_plan_with_mock_browser(tmp_path, duration, end
     assert [s["requested_t"] for s in states] == expected
     assert all(s["actual_t"] == s["t"] for s in states)
     assert json.loads((out / "record.json").read_text(encoding="utf-8"))["include_endpoint"] == endpoint
+    # 使用真正 record.mjs 产物交叉验证 Python 缓存规则，不只让两个 mock 相互证明。
+    from scripts import eval as ev
+    key = ev.record_key(b"synthetic program", duration, 10, include_endpoint=endpoint)
+    (out / "eval_record_key.json").write_text(json.dumps(key), encoding="utf-8")
+    assert ev._cached(out, key)
 
 
 def test_actual_recorder_rejects_runtime_time_mismatch(tmp_path):
