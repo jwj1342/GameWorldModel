@@ -121,9 +121,9 @@ def test_entry_reports_failure_instead_of_exiting_zero(tmp_path, monkeypatch, ca
     """全部评不出来还退 0 的话，作业脚本会把一次全盘失败当成成功。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     monkeypatch.setattr(ev, "eval_one",
-                        lambda run, work, harness: {"run": str(run), "clip": "x", "config": "c@0",
-                                                    "truth_link": "directory_name",
-                                                    "metrics": {"error": "没有重叠时间段"}})
+                        lambda run, work, harness, gt_roots=None: {"run": str(run), "clip": "x", "config": "c@0",
+                                                                   "truth_link": "directory_name",
+                                                                   "metrics": {"error": "没有重叠时间段"}})
     code = ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
                     "--out", str(tmp_path / "table.json")])
     assert code == 1
@@ -136,7 +136,7 @@ def test_the_same_run_given_twice_is_counted_once(tmp_path, monkeypatch):
     """同一个目录给两遍，表里不该占两行、也不该把样本量算成两个。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     seen = []
-    def one(run, work, harness):
+    def one(run, work, harness, gt_roots=None):
         seen.append(str(run))
         return {"run": str(run), "clip": "x", "config": "c@0", "truth_link": "directory_name",
                 "metrics": {"full": {"trajectory": {"median_m": 1.0, "per_object": {"o": 1.0}},
@@ -156,9 +156,9 @@ def test_name_only_truth_links_are_flagged_in_the_report(tmp_path, monkeypatch):
     """按名字定位到的真值要在报告里标出来，不能让读者以为来源核过了。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     monkeypatch.setattr(ev, "eval_one",
-                        lambda run, work, harness: {"run": str(run), "clip": "合成场景", "config": "c@0",
-                                                    "truth_link": "program_meta_clip",
-                                                    "metrics": {"full": {}, "holdout": {}}})
+                        lambda run, work, harness, gt_roots=None: {"run": str(run), "clip": "合成场景", "config": "c@0",
+                                                                   "truth_link": "program_meta_clip",
+                                                                   "metrics": {"full": {}, "holdout": {}}})
     (tmp_path / "r1").mkdir()
     ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
              "--out", str(tmp_path / "table.json")])
