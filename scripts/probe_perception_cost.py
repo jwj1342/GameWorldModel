@@ -31,6 +31,9 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--config", action="append", default=[], help="额外配置，例如 configs/perception/cpu.yaml")
+    ap.add_argument("--phrases-from-gt", action="store_true",
+                    help="检测短语取自真值程序的类名。这是上界参照，不是生产路径——"
+                         "生产路径用 VLM 命名器。两者的差值就是「命名这一步有多难」")
     a = ap.parse_args()
 
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *a.config]
@@ -42,10 +45,17 @@ def main() -> int:
     rows = []
     for i, clip_dir in enumerate(clips, 1):
         row = {"clip": clip_dir.name, "ok": False}
+        phrases = None
+        if a.phrases_from_gt:
+            program = json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))
+            phrases = sorted({node.get("class", "") for node in
+                              program.get("objects", []) + program.get("static", [])} - {""})[:10]
+            row["phrases"] = phrases
+        row["phrases_source"] = "ground_truth_classes" if phrases else "default_phrases"
         t0 = time.time()
         try:
             evidence = run_perception(str(clip_dir / "clip.mp4"), clip_dir.name,
-                                      out / clip_dir.name, cfg)
+                                      out / clip_dir.name, cfg, phrases=phrases)
             row.update(ok=True, objects=len(evidence["objects"]),
                        geometry_backend=evidence["meta"]["geometry_backend"],
                        segmentation_backend=evidence["meta"]["segmentation_backend"],
@@ -62,6 +72,8 @@ def main() -> int:
 
     done = [r for r in rows if r["ok"]]
     summary = {"rendered": a.rendered, "clips": len(rows), "ok": len(done),
+               "phrases_source": "ground_truth_classes" if a.phrases_from_gt else "default_phrases",
+               "mean_objects_found": round(sum(r.get("objects", 0) for r in done) / len(done), 2) if done else None,
                "per_clip_perception_s": round(sum(r["perception_s"] for r in done) / len(done), 1) if done else None,
                "rows": rows}
     (out / "perception_cost.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
