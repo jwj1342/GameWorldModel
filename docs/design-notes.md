@@ -1,5 +1,18 @@
 # 设计笔记
 
+## 配置快照与身份摘要的统一脱敏
+
+`redact()` 按字段组成词而非任意子串识别凭据，保留 `keyframes`、
+`keyframe_max_side`、`detection_keyframes`、`max_tokens` 等实验设置。
+常见 camelCase/acronym 凭据字段先规范化，再使用同一规则；真正的 key/token/
+secret/password/authorization/credential 字段及其 `_file` 路径均隐藏，
+不读取凭据文件。普通权重、数据和输出路径不因此隐藏。
+`configuration_identity()` 对同一脱敏快照按原有规范化 JSON 算 SHA-256；
+普通 snake_case 配置的旧身份摘要保持兼容。新增保护的 camelCase 配置可能
+改变身份摘要，此时恢复运行仍按原门禁拒绝，不重写历史或自动放行。
+这修复未来配置记录，不能恢复旧报告中已经被 `<redacted>` 替换的采样值；
+也不是任意字符串中凭据的通用扫描器，不应将含认证信息的 URL 等写进公开配置。
+
 这份文档记录每一层为什么是现在这个样子：当时有哪些候选、比较了什么、最后选了谁。调研的原始报告在 `../survey/`，这里是结论。
 
 实际用了哪些、跑出来什么样，看 [status.md](status.md)。系统怎么搭的，看 [architecture.md](architecture.md)。

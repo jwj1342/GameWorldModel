@@ -57,6 +57,21 @@ class StopAtQuality(Exception):
     pass
 
 
+def test_cli_manifest_keeps_frame_settings_and_hides_credentials(inputs, monkeypatch):
+    directory, args, cfg = inputs
+    cfg["frames"] = {"keyframes": 12, "keyframe_max_side": 768}
+    cfg["perception"] = {"detection_keyframes": 3}
+    cfg["vlm"].update(api_key="synthetic-secret", api_key_file="synthetic-key-path", max_tokens=100)
+    _, manifest = invoke(monkeypatch, directory, args, cfg)
+    assert manifest["config"]["frames"] == cfg["frames"]
+    assert manifest["config"]["perception"]["detection_keyframes"] == 3
+    assert manifest["config"]["vlm"]["max_tokens"] == 100
+    assert manifest["config"]["vlm"]["api_key"] == "<redacted>"
+    assert manifest["config"]["vlm"]["api_key_file"] == "<redacted>"
+    persisted = (directory / "run.json").read_text(encoding="utf-8")
+    assert "synthetic-secret" not in persisted and "synthetic-key-path" not in persisted
+
+
 def invoke(monkeypatch, directory, args, cfg, cli_seed=None, resume=False):
     monkeypatch.setattr(run_clip, "load_config", lambda *a: copy.deepcopy(cfg))
     seen = {}
