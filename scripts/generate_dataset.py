@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +24,18 @@ if str(REPO) not in sys.path:
 from gwm.compiler.validate import validate_candidate                    # noqa: E402
 from gwm.dataset.behavior import TEST_FAMILIES, TRAIN_FAMILIES          # noqa: E402
 from gwm.dataset.generator import SceneSpec, describe, generate_scene   # noqa: E402
+
+
+def _git_commit() -> str:
+    try:
+        out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        head = out.stdout.strip() if out.returncode == 0 else ""
+        dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+        return f"{head}{'-dirty' if dirty else ''}" if head else "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def build_specs(split: str, count: int, seed: int, duration: float, fps: int,
@@ -79,8 +92,11 @@ def main() -> int:
     pairs += [{"kind": "behavior_variant", "base": r["clip"][:-len("_behavior")], "variant": r["clip"]}
               for r in rows if r["clip"].endswith("_behavior")]
 
+    # 三个种子加这个 commit 就足以把整批数据原样重造出来，所以产物放在会被清理的
+    # $SCRATCH 上也不会真的丢。少了 commit 就不行——生成器一改，同样的种子是另一批场景。
     (out / "manifest.json").write_text(json.dumps({
         "split": a.split, "seed": a.seed, "duration_s": a.duration, "fps": a.fps,
+        "git_commit": _git_commit(), "generator": "gwm.dataset.generator",
         "requested": len(specs), "written": len(rows), "failed": len(failures),
         "families": list(TRAIN_FAMILIES if a.split == "train" else TEST_FAMILIES),
         "clips": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
