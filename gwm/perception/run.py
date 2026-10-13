@@ -77,6 +77,7 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
             log.record("perception", f"segmentation_{name}_failed", repr(e), action_taken="next backend", exc=e); fallbacks.append(f"segmentation:{name}")
     if tracks is None: raise RuntimeError("all segmentation backends failed")
     # save masks (frame-resolution, downscaled to width 480 to keep the file small)
+    save_visibility_references(tracks, out_dir)
     masks_index = {}
     with_arrays = {}
     for o in tracks.objects:
@@ -86,7 +87,8 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     np.savez_compressed(out_dir / "masks.npz", **with_arrays)
     (out_dir / "masks_index.json").write_text(json.dumps({"objects": {o.id: {"phrase": o.phrase, "score": o.score, "frames": sorted(masks_index.get(o.id, [])),
                                                                                   "identity_hypotheses": o.identity_hypotheses,
-                                                                                  "source_detection_ids": o.source_detection_ids} for o in tracks.objects},
+                                                                                  "source_detection_ids": o.source_detection_ids,
+                                                                                  "visibility_measurements": o.visibility_measurements} for o in tracks.objects},
                                                           "frame_size": tracks.frame_size, "backend": tracks.backend,
                                                           "association_diagnostics": tracks.association_diagnostics}))
     t1 = time.time()
@@ -98,15 +100,42 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     (out_dir / "evidence.json").write_text(json.dumps(ev, indent=1))
     return ev
 
+def save_visibility_references(tracks, out_dir: Path) -> None:
+    """Retain original-resolution reference PNGs, not temporary backend paths."""
+    import shutil
+    for obj in tracks.objects:
+        for fi, record in obj.visibility_measurements.items():
+            source = record.pop("reference_path", None)
+            if source is None:
+                reference = record.get("reference", "unknown")
+                cached = (out_dir / reference).resolve()
+                if (not cached.is_relative_to(out_dir.resolve()) or not cached.is_file()
+                        or file_sha256(cached) != record.get("reference_sha256")):
+                    record.update(fraction="unknown", reason="cached_reference_changed_or_missing")
+                continue
+            if source == "unknown":
+                continue
+            if not Path(source).is_file() or file_sha256(source) != record.get("reference_sha256"):
+                record.update(fraction="unknown", reason="reference_changed_or_missing")
+                continue
+            relative = Path("visibility_refs") / f"entry_{record['registry_index']}_frame_{int(fi)}.png"
+            target = out_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            record["reference"] = relative.as_posix()
+            if file_sha256(target) != record["reference_sha256"]:
+                record.update(fraction="unknown", reason="reference_changed_during_copy")
+
+
 def save_geometry(geom, path: Path) -> None:
     np.savez_compressed(path, frame_indices=np.asarray(geom.frame_indices), intrinsics=np.stack(geom.intrinsics), cam_to_world=np.stack(geom.cam_to_world), depth=np.stack(geom.depth).astype(np.float16),
-                        depth_conf=np.stack(geom.depth_conf).astype(np.float16) if geom.depth_conf is not None else np.zeros(1), has_conf=np.asarray(geom.depth_conf is not None), scale=np.asarray(geom.scale), backend=np.asarray(geom.backend), notes=np.asarray(geom.notes))
+                        depth_conf=np.stack(geom.depth_conf).astype(np.float16) if geom.depth_conf is not None else np.zeros(1), has_conf=np.asarray(geom.depth_conf is not None), scale=np.asarray(geom.scale), backend=np.asarray(geom.backend), notes=np.asarray(geom.notes), source_program_sha256=np.asarray(geom.source_program_sha256))
 
 def load_geometry(path: Path):
     from .base import Geometry
     z = np.load(path)
     return Geometry(frame_indices=[int(i) for i in z["frame_indices"]], intrinsics=[k for k in z["intrinsics"]], cam_to_world=[m for m in z["cam_to_world"]], depth=[d.astype(np.float32) for d in z["depth"]],
-                    depth_conf=[c.astype(np.float32) for c in z["depth_conf"]] if bool(z["has_conf"]) else None, scale=str(z["scale"]), backend=str(z["backend"]), notes=str(z["notes"]))
+                    depth_conf=[c.astype(np.float32) for c in z["depth_conf"]] if bool(z["has_conf"]) else None, scale=str(z["scale"]), backend=str(z["backend"]), notes=str(z["notes"]), source_program_sha256=str(z["source_program_sha256"]) if "source_program_sha256" in z.files else "")
 
 def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     """Recompute evidence.json from cached geometry.npz + masks.npz (CPU only)."""
@@ -117,10 +146,12 @@ def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     geom = load_geometry(out_dir / "geometry.npz")
     mi = json.loads((out_dir / "masks_index.json").read_text()); masks = load_masks(out_dir)
     objs = [TrackedObject(id=oid, phrase=m["phrase"], score=m["score"], masks=masks.get(oid, {}),
-                          identity_hypotheses=m.get("identity_hypotheses", []), source_detection_ids=m.get("source_detection_ids", []))
+                          identity_hypotheses=m.get("identity_hypotheses", []), source_detection_ids=m.get("source_detection_ids", []),
+                          visibility_measurements={int(k): v for k, v in m.get("visibility_measurements", {}).items()})
             for oid, m in mi["objects"].items()]
     tracks = Tracks(objects=objs, frame_size=tuple(mi["frame_size"]), backend=mi["backend"],
                     association_diagnostics=mi.get("association_diagnostics", []))
+    save_visibility_references(tracks, out_dir)
     old = json.loads((out_dir / "evidence.json").read_text()) if (out_dir / "evidence.json").exists() else None
     rebuilt = build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir,
                              keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")
