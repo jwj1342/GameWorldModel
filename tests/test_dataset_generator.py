@@ -118,6 +118,27 @@ def test_every_camera_track_has_a_real_baseline(track):
         assert [k["t"] for k in kf] == sorted(k["t"] for k in kf)
 
 
+def test_scripted_motion_stays_over_the_ground():
+    """脚本运动不走物理，写出界的关键帧没人拦——物体会飘出地面或穿墙。
+
+    这种画面物理上不成立，而我们恰恰主张产物带着真实的可运动性和物理特性，
+    训练数据里不能有反例。
+    """
+    families = TRAIN_FAMILIES + TEST_FAMILIES
+    checked = 0
+    for i in range(120):
+        program = generate(spec(i, family=families[i % len(families)]))
+        ground = next(n for n in program["static"] if n["class"] == "ground")
+        half_w, half_d = ground["geom"]["extent"][0] / 2, ground["geom"]["extent"][2] / 2
+        for obj in program["objects"]:
+            motion = obj.get("motion") or {}
+            for kf in motion.get("keyframes") or []:
+                checked += 1
+                assert abs(kf["pos"][0]) <= half_w + 1e-6, (obj["id"], kf["pos"], half_w)
+                assert abs(kf["pos"][2]) <= half_d + 1e-6, (obj["id"], kf["pos"], half_d)
+    assert checked > 50, checked          # 真的检到了轨迹，而不是一条都没抽到
+
+
 def test_program_carries_no_generator_provenance():
     """真值程序是模型要预测的答案，里面不能有家族名、相机档、profile 这些小抄。
 

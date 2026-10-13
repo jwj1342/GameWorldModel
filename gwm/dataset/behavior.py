@@ -116,8 +116,13 @@ def sample_layout(rng: random.Random, family: str) -> tuple[list[dict], dict]:
 
 
 def sample_motion(rng: random.Random, kind: str, base: list[float], duration: float,
-                  half_height: float) -> dict:
-    """按类型产出内核认得的参数。每一类都给够驱动字段，不留「写了类型但不会动」的样本。"""
+                  half_height: float, bounds: tuple[float, float] = (1e9, 1e9)) -> dict:
+    """按类型产出内核认得的参数。每一类都给够驱动字段，不留「写了类型但不会动」的样本。
+
+    `bounds` 是场地的半宽半深。脚本运动不走物理，写出界的关键帧不会被任何东西挡住——
+    物体会直接飘出地面，或者从墙里穿过去。这种画面物理上不成立，学了就是学错，所以夹住。
+    """
+    limit_x, limit_z = bounds
     if kind == "static":
         return {"type": "static"}
     if kind == "trajectory":
@@ -126,8 +131,8 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
         x, z = base[0], base[2]
         for i in range(count):
             t = round(duration * i / (count - 1), 3)
-            x += rng.uniform(-3.0, 3.0)
-            z += rng.uniform(-3.0, 3.0)
+            x = min(max(x + rng.uniform(-3.0, 3.0), -limit_x), limit_x)
+            z = min(max(z + rng.uniform(-3.0, 3.0), -limit_z), limit_z)
             keyframes.append({"t": t, "pos": [round(x, 3), round(base[1], 3), round(z, 3)]})
         return {"type": "trajectory", "keyframes": keyframes,
                 "interp": "catmull_rom" if rng.random() < 0.5 else "linear"}
@@ -145,7 +150,8 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
         return motion
     if kind == "prismatic":
         axis = rng.choice([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
-        travel = round(rng.uniform(1.0, 4.0), 2)
+        room = {0: limit_x - abs(base[0]), 2: limit_z - abs(base[2])}.get(axis.index(1.0), 1e9)
+        travel = round(min(rng.uniform(1.0, 4.0), max(room, 0.3)), 2)
         motion = {"type": "prismatic", "axis": axis, "from": 0.0}
         if rng.random() < 0.6:
             motion["schedule"] = [{"t": round(rng.uniform(0.3, duration * 0.35), 2), "to": travel,
@@ -196,5 +202,7 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
             lift = half_height + round(rng.uniform(0.5, 2.5), 2)      # 一部分悬空物体，和贴地的分开
         pos = [x, round(lift, 3), z]
         objects.append({"id": f"obj_{i + 1}", "class": _class_name(rng), "geom": geom,
-                        "pose": {"pos": pos}, "motion": sample_motion(rng, kind, pos, duration, half_height)})
+                        "pose": {"pos": pos},
+                        "motion": sample_motion(rng, kind, pos, duration, half_height,
+                                                bounds=(half_w, half_d))})
     return objects
