@@ -179,3 +179,59 @@ def test_all_three_material_forms_appear():
         for key, value in row["material_forms"].items():
             forms[key] += value
     assert all(count > 0 for count in forms.values()), forms
+
+
+def _diag(node):
+    geom = node["geom"]
+    extent = geom.get("extent")
+    if not extent:
+        r = geom.get("radius", 0.5)
+        extent = [2 * r, geom.get("height", 2 * r), 2 * r]
+    return math.sqrt(sum(v * v for v in extent))
+
+
+def test_in_place_rotation_only_lands_on_shapes_where_it_is_visible():
+    """球、圆柱、圆锥绕竖轴自转，画面一帧都不变——这种样本任何方法都只能瞎猜。
+
+    RP 5.8 要求测试集按可测性配。观测不到的组合留在里面，只会把表 1 的
+    运动类型准确率整列变成噪声。
+    """
+    families = TRAIN_FAMILIES + TEST_FAMILIES
+    checked = 0
+    for i in range(150):
+        for node in generate(spec(i, family=families[i % len(families)]))["objects"]:
+            if (node.get("motion") or {}).get("type") not in ("spin", "periodic_rotate"):
+                continue
+            checked += 1
+            extent = node["geom"].get("extent")
+            assert node["geom"]["shape"] == "box" and extent, (node["id"], node["geom"])
+            assert max(extent[0], extent[2]) / min(extent[0], extent[2]) >= 1.6, (node["id"], extent)
+    assert checked > 30, checked
+
+
+def test_translation_moves_further_than_the_object_is_big():
+    """位移比物体自己还小的时候，质心那点变化和静止没区别。
+
+    用物体自身尺寸作尺度是刻意的：不去对着评测器的阈值调，那是拿数据迁就指标。
+    """
+    families = TRAIN_FAMILIES + TEST_FAMILIES
+    checked = 0
+    for i in range(150):
+        program = generate(spec(i, family=families[i % len(families)]))
+        duration = program["meta"]["duration"]
+        for node in program["objects"]:
+            motion = node.get("motion") or {}
+            kind, bar = motion.get("type"), 0.5 * _diag(node)
+            if kind == "trajectory":
+                pts = [k["pos"] for k in motion["keyframes"]]
+                span = max(math.dist(a, b) for a in pts for b in pts)
+            elif kind == "prismatic":
+                span = (motion["schedule"][0]["to"] if motion.get("schedule")
+                        else motion.get("rate", 0) * duration)
+            elif kind == "periodic_translate":
+                span = 2 * motion["amp"]                     # 峰到峰
+            else:
+                continue
+            checked += 1
+            assert abs(span) >= bar, (node["id"], kind, span, bar)
+    assert checked > 60, checked

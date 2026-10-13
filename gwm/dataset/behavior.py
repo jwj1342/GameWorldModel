@@ -33,10 +33,25 @@ BINDING_SHARE = 0.22
 _SHAPES = ["box", "sphere", "cylinder", "cone"]
 
 
-def _geom(rng: random.Random, shape: str) -> tuple[dict, float, float]:
-    """返回 (geom, 半高, 水平半径)。半高用来把物体摆到地面以上，水平半径用来排开间距。"""
+# 绕自身竖轴转、而且位置不变的两类（spin、periodic_rotate）只有在形状**不是**绕该轴
+# 对称时才看得见。球、圆柱、圆锥绕 y 轴转，画面上一帧都不会变——这种样本按构造就观测不到，
+# 任何方法在它上面都只能瞎猜，会把表 1 整列变成噪声。RP 5.8 写明「测试集必须按可测性配」。
+_ROTATION_IN_PLACE = {"spin", "periodic_rotate"}
+
+
+def _geom(rng: random.Random, shape: str, distinct_xz: bool = False) -> tuple[dict, float, float]:
+    """返回 (geom, 半高, 水平半径)。半高用来把物体摆到地面以上，水平半径用来排开间距。
+
+    `distinct_xz` 要求俯视轮廓明显不是正方形，这样绕竖轴的转动才有可观测的姿态变化。
+    """
     if shape == "box":
-        extent = [round(rng.uniform(0.4, 2.2), 3), round(rng.uniform(0.4, 2.0), 3), round(rng.uniform(0.4, 2.2), 3)]
+        x = round(rng.uniform(0.4, 2.2), 3)
+        z = round(rng.uniform(0.4, 2.2), 3)
+        if distinct_xz:                       # 长宽比拉开，俯视轮廓转起来才看得出朝向
+            z = round(min(max(x * rng.uniform(2.0, 3.5), 0.3), 3.0), 3)
+            if max(x, z) / min(x, z) < 1.6:
+                z = round(x * 2.0, 3)
+        extent = [x, round(rng.uniform(0.4, 2.0), 3), z]
         return {"kind": "primitive", "shape": "box", "extent": extent}, extent[1] / 2, max(extent[0], extent[2]) / 2
     if shape == "sphere":
         radius = round(rng.uniform(0.25, 1.1), 3)
@@ -106,23 +121,32 @@ def sample_layout(rng: random.Random, family: str) -> tuple[list[dict], dict]:
 
 
 def sample_motion(rng: random.Random, kind: str, base: list[float], duration: float,
-                  half_height: float, bounds: tuple[float, float] = (1e9, 1e9)) -> dict:
+                  half_height: float, bounds: tuple[float, float] = (1e9, 1e9),
+                  diag: float = 1.0) -> dict:
     """按类型产出内核认得的参数。每一类都给够驱动字段，不留「写了类型但不会动」的样本。
 
     `bounds` 是场地的半宽半深。脚本运动不走物理，写出界的关键帧不会被任何东西挡住——
     物体会直接飘出地面，或者从墙里穿过去。这种画面物理上不成立，学了就是学错，所以夹住。
+
+    `diag` 是物体自身的对角线。平移类的位移必须大过它一截：位移比物体自己还小的时候，
+    质心的那点变化在任何方法眼里都和静止没区别，这种样本只会把表 1 变成噪声。
+    用物体自身尺寸作尺度是刻意的——不去对着评测器的阈值调，那样等于拿数据迁就指标。
     """
     limit_x, limit_z = bounds
+    stride = max(0.6 * diag, 0.5)          # 一步至少走过自己大半个身位
     if kind == "static":
         return {"type": "static"}
     if kind == "trajectory":
         count = rng.randint(3, 5)
         keyframes = []
         x, z = base[0], base[2]
+        heading = rng.uniform(0, 2 * math.pi)
         for i in range(count):
             t = round(duration * i / (count - 1), 3)
-            x = min(max(x + rng.uniform(-3.0, 3.0), -limit_x), limit_x)
-            z = min(max(z + rng.uniform(-3.0, 3.0), -limit_z), limit_z)
+            heading += rng.uniform(-0.9, 0.9)           # 带转折但不来回抖，净位移才留得住
+            step = stride * rng.uniform(1.0, 2.0)
+            x = min(max(x + step * math.cos(heading), -limit_x), limit_x)
+            z = min(max(z + step * math.sin(heading), -limit_z), limit_z)
             keyframes.append({"t": t, "pos": [round(x, 3), round(base[1], 3), round(z, 3)]})
         return {"type": "trajectory", "keyframes": keyframes,
                 "interp": "catmull_rom" if rng.random() < 0.5 else "linear"}
@@ -141,7 +165,7 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
     if kind == "prismatic":
         axis = rng.choice([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
         room = {0: limit_x - abs(base[0]), 2: limit_z - abs(base[2])}.get(axis.index(1.0), 1e9)
-        travel = round(min(rng.uniform(1.0, 4.0), max(room, 0.3)), 2)
+        travel = round(min(rng.uniform(stride, stride + 3.0), max(room, stride)), 2)
         motion = {"type": "prismatic", "axis": axis, "from": 0.0}
         if rng.random() < 0.6:
             motion["schedule"] = [{"t": round(rng.uniform(0.3, duration * 0.35), 2), "to": travel,
@@ -150,12 +174,13 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
             motion["rate"] = round(travel / max(duration, 1e-3), 3)
         return motion
     if kind == "periodic_translate":
-        axis = rng.choice([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-        # 竖直振荡的振幅不能把物体压进地面：基准高度已经留够了，这里再卡一次
-        amp = round(rng.uniform(0.5, 2.2), 2)
-        if axis[1] == 1.0:
-            amp = round(min(amp, max(base[1] - half_height, 0.2)), 2)
-        return {"type": "periodic_translate", "axis": axis, "amp": max(amp, 0.2),
+        amp = round(rng.uniform(stride * 0.7, stride * 0.7 + 1.6), 2)
+        # 先定振幅再挑轴：竖直那一档只有在离地高度放得下这个振幅时才选，
+        # 否则就被地面夹小成一个看不出来的抖动。宁可换个水平轴。
+        axes = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        if base[1] - half_height >= amp:
+            axes.append([0.0, 1.0, 0.0])
+        return {"type": "periodic_translate", "axis": rng.choice(axes), "amp": amp,
                 "period": round(rng.uniform(1.5, 5.0), 2), "phase": round(rng.uniform(0, 6.28), 3)}
     if kind == "periodic_rotate":
         return {"type": "periodic_rotate", "axis": [0.0, 1.0, 0.0],
@@ -175,14 +200,19 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
     half_w, half_d = layout["width"] / 2 - 1.5, layout["depth"] / 2 - 1.5
     objects, taken = [], []
     for i in range(count):
-        shape = rng.choice(_SHAPES)
-        geom, half_height, radius = _geom(rng, shape)
+        # 先抽运动，再按运动挑形状。顺序反过来就会造出球体自转这种按构造观测不到的样本。
+        kind = rng.choices(list(weights), weights=list(weights.values()))[0]
+        if kind in _ROTATION_IN_PLACE:
+            geom, half_height, radius = _geom(rng, "box", distinct_xz=True)
+        else:
+            geom, half_height, radius = _geom(rng, rng.choice(_SHAPES))
+        extent = geom.get("extent") or [2 * radius, 2 * half_height, 2 * radius]
+        diag = math.sqrt(sum(v * v for v in extent))
         for _ in range(24):                      # 简单排开：水平距离大于两者半径之和
             x, z = round(rng.uniform(-half_w, half_w), 2), round(rng.uniform(-half_d, half_d), 2)
             if all(math.hypot(x - px, z - pz) > radius + pr + 0.4 for px, pz, pr in taken):
                 break
         taken.append((x, z, radius))
-        kind = rng.choices(list(weights), weights=list(weights.values()))[0]
         lift = half_height + 0.02
         if kind == "dynamic":
             lift = half_height + round(rng.uniform(1.0, 4.0), 2)      # 落体要有下落的余量
@@ -194,5 +224,5 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
         objects.append({"id": f"obj_{i + 1}", "class": _class_name(rng), "geom": geom,
                         "pose": {"pos": pos},
                         "motion": sample_motion(rng, kind, pos, duration, half_height,
-                                                bounds=(half_w, half_d))})
+                                                bounds=(half_w, half_d), diag=diag)})
     return objects
