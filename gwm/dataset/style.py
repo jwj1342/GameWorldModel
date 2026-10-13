@@ -22,12 +22,24 @@ _GROUND_TINT = ["#223344", "#2b2b22", "#1c2b1c", "#332a22", "#262633"]
 _KEY = ["#fff2cc", "#ffffff", "#ffe0b0", "#e8f0ff", "#ffd9c0"]
 
 
-def _hex(rng: random.Random) -> str:
-    return "#%02x%02x%02x" % tuple(rng.randrange(24, 232) for _ in range(3))
+# 结构件（地面、墙、平台、轨道）用低饱和色，物体才放开。三通道独立均匀取色会造出
+# 洋红地板、荧光绿墙这种画面，和真实视频的差距是白白拉大的——合成到真实这道坎本来就够宽。
+STRUCTURAL_PALETTE = ["stone", "concrete", "wood", "grass", "metal", "default", "white", "black"]
 
 
-def sample_material(rng: random.Random, *, emissive_allowed: bool = True) -> str | dict:
-    """三种合法写法之一。结构化那条是给「颜色从视频里量出来」留的路。"""
+def _hex(rng: random.Random, muted: bool = False) -> str:
+    if not muted:
+        return "#%02x%02x%02x" % tuple(rng.randrange(24, 232) for _ in range(3))
+    base = rng.randrange(70, 185)                       # 先定明度，再给每个通道小幅偏移
+    return "#%02x%02x%02x" % tuple(min(235, max(30, base + rng.randrange(-20, 21))) for _ in range(3))
+
+
+def sample_material(rng: random.Random, *, emissive_allowed: bool = True,
+                    muted: bool = False) -> str | dict:
+    """三种合法写法之一。结构化那条是给「颜色从视频里量出来」留的路。
+
+    `muted` 给结构件用：偏向有自然名字的调色板词，取十六进制时也压住饱和度。
+    """
     roll, acc = rng.random(), 0.0
     form = MATERIAL_FORMS[-1][0]
     for name, weight in MATERIAL_FORMS:
@@ -36,10 +48,10 @@ def sample_material(rng: random.Random, *, emissive_allowed: bool = True) -> str
             form = name
             break
     if form == "palette":
-        return rng.choice(PALETTE)
+        return rng.choice(STRUCTURAL_PALETTE if muted else PALETTE)
     if form == "hex":
-        return _hex(rng)
-    surface: dict = {"base_color": _hex(rng), "roughness": round(rng.uniform(0.15, 0.95), 3)}
+        return _hex(rng, muted)
+    surface: dict = {"base_color": _hex(rng, muted), "roughness": round(rng.uniform(0.15, 0.95), 3)}
     if rng.random() < 0.45:
         surface["metalness"] = round(rng.uniform(0.0, 0.9), 3)
     if emissive_allowed and rng.random() < 0.18:

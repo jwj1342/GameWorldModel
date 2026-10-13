@@ -126,7 +126,10 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
     camera = sample_camera(camera_rng, layout, spec.duration, track)
 
     # 样式最后刷上去：行为那一半已经定死，这里只写 material 和 style 子树。
-    for node in statics + objects:
+    # 结构件压住饱和度也不给自发光：会发光的地板和洋红的墙只会白白拉大合成到真实的差距。
+    for node in statics:
+        node["material"] = sample_material(material_rng, muted=True, emissive_allowed=False)
+    for node in objects:
         node["material"] = sample_material(material_rng)
     meta = {"clip": spec.clip, "fps": spec.fps, "duration": spec.duration, "units": "m", "up": "y"}
     if spec.notes:

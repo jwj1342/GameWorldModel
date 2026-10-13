@@ -165,6 +165,22 @@ def test_manifest_row_reports_the_self_answering_rate():
     assert sum(sum(r["material_forms"].values()) for r in rows) > 0
 
 
+def test_structural_materials_stay_muted_and_never_glow():
+    """地面和墙不该是洋红色，也不该自己发光。合成到真实那道坎本来就够宽了。"""
+    for i in range(40):
+        program = generate(spec(i, family=(TRAIN_FAMILIES + TEST_FAMILIES)[i % 5]))
+        for node in program["static"]:
+            material = node["material"]
+            if isinstance(material, dict):
+                assert "emissive" not in material, (node["id"], material)
+                channels = [int(material["base_color"][k:k + 2], 16) for k in (1, 3, 5)]
+            elif material.startswith("#"):
+                channels = [int(material[k:k + 2], 16) for k in (1, 3, 5)]
+            else:
+                continue                      # 调色板词，由 STRUCTURAL_PALETTE 保证
+            assert max(channels) - min(channels) <= 60, (node["id"], material)
+
+
 def test_all_three_material_forms_appear():
     forms = {"palette": 0, "hex": 0, "surface": 0}
     for i in range(40):
