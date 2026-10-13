@@ -145,8 +145,16 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
             t = round(duration * i / (count - 1), 3)
             heading += rng.uniform(-0.9, 0.9)           # 带转折但不来回抖，净位移才留得住
             step = stride * rng.uniform(1.0, 2.0)
-            x = min(max(x + step * math.cos(heading), -limit_x), limit_x)
-            z = min(max(z + step * math.sin(heading), -limit_z), limit_z)
+            # 碰到边界要反弹，不能夹住。夹住的话靠边起步的物体会原地不动，
+            # 写着 trajectory 其实和静止一样——又是一个观测不到的样本。
+            for _ in range(4):
+                nx, nz = x + step * math.cos(heading), z + step * math.sin(heading)
+                if abs(nx) <= limit_x and abs(nz) <= limit_z:
+                    break
+                heading += math.pi / 2 + rng.uniform(-0.4, 0.4)
+            else:
+                nx, nz = min(max(nx, -limit_x), limit_x), min(max(nz, -limit_z), limit_z)
+            x, z = nx, nz
             keyframes.append({"t": t, "pos": [round(x, 3), round(base[1], 3), round(z, 3)]})
         return {"type": "trajectory", "keyframes": keyframes,
                 "interp": "catmull_rom" if rng.random() < 0.5 else "linear"}
@@ -197,7 +205,11 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
 def sample_objects(rng: random.Random, layout: dict, profile: str, duration: float,
                    count: int) -> list[dict]:
     weights = MOTION_WEIGHTS[profile]
-    half_w, half_d = layout["width"] / 2 - 1.5, layout["depth"] / 2 - 1.5
+    # 留边按比例给，不是固定 1.5 米。走廊只有 4 米宽的时候，固定边距会把可活动范围
+    # 压到半米，物体写着在动其实挪不开——又一类观测不到的样本。
+    margin_w = min(1.5, layout["width"] * 0.15)
+    margin_d = min(1.5, layout["depth"] * 0.15)
+    half_w, half_d = layout["width"] / 2 - margin_w, layout["depth"] / 2 - margin_d
     objects, taken = [], []
     for i in range(count):
         # 先抽运动，再按运动挑形状。顺序反过来就会造出球体自转这种按构造观测不到的样本。
