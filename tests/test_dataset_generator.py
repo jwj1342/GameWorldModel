@@ -7,22 +7,12 @@ import pytest
 from gwm.compiler.validate import validate_candidate
 from gwm.dataset.behavior import MOTION_TYPES, TEST_FAMILIES, TRAIN_FAMILIES
 from gwm.dataset.generator import (CAMERA_TRACKS, SceneSpec, describe, family_group,
-                                   generate, generate_scene)
-from gwm.dataset.style import style_fields
+                                   generate, generate_scene, style_half, behavior_half)
 
 
 def spec(i=0, family="room", profile="test", **kw):
     return SceneSpec(clip=f"c{i}", family=family, behavior_seed=100 + i, style_seed=900 + i,
                      camera_seed=7000 + i, profile=profile, **kw)
-
-
-def behavior_fields(program):
-    """样式之外的全部：结构、几何、运动、相机。配对测试用它比对。"""
-    return {
-        "static": [{k: v for k, v in n.items() if k != "material"} for n in program["static"]],
-        "objects": [{k: v for k, v in n.items() if k != "material"} for n in program["objects"]],
-        "camera": program["camera"],
-    }
 
 
 def test_same_spec_gives_byte_identical_program():
@@ -51,8 +41,8 @@ def test_style_variant_changes_style_only():
     base = spec(11)
     variant = base.with_style(style_seed=424242, clip="c11_style")
     a, b = generate(base), generate(variant)
-    assert behavior_fields(a) == behavior_fields(b)          # 行为一模一样
-    assert style_fields(a) != style_fields(b)                # 样式确实变了
+    assert behavior_half(a) == behavior_half(b)          # 行为一模一样
+    assert style_half(a) != style_half(b)                # 样式确实变了
 
 
 def test_behavior_variant_changes_behavior_only():
@@ -60,7 +50,7 @@ def test_behavior_variant_changes_behavior_only():
     variant = base.with_behavior(behavior_seed=515151, clip="c12_behavior")
     a, b = generate(base), generate(variant)
     assert a["style"] == b["style"]                           # style 子树逐字节相同
-    assert behavior_fields(a) != behavior_fields(b)
+    assert behavior_half(a) != behavior_half(b)
 
 
 def test_material_count_follows_node_count_so_style_swap_stays_aligned():

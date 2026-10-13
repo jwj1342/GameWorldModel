@@ -77,12 +77,3 @@ def sample_style(rng: random.Random) -> dict:
                     "direction": direction, "shadow": rng.random() < 0.6},
         },
     }
-
-
-def style_fields(program: dict) -> dict:
-    """把一份程序的样式那一半摘出来，用于「同行为不同样式」这组配对的差异核对。"""
-    return {
-        "style": program.get("style"),
-        "materials": {node["id"]: node.get("material")
-                      for group in ("static", "objects") for node in program.get(group, [])},
-    }

@@ -33,16 +33,6 @@ BINDING_SHARE = 0.22
 _SHAPES = ["box", "sphere", "cylinder", "cone"]
 
 
-def _weighted(rng: random.Random, weights: dict[str, float]) -> str:
-    total = sum(weights.values())
-    roll, acc = rng.random() * total, 0.0
-    for name, weight in weights.items():
-        acc += weight
-        if roll < acc:
-            return name
-    return next(iter(weights))
-
-
 def _geom(rng: random.Random, shape: str) -> tuple[dict, float, float]:
     """返回 (geom, 半高, 水平半径)。半高用来把物体摆到地面以上，水平半径用来排开间距。"""
     if shape == "box":
@@ -192,7 +182,7 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
             if all(math.hypot(x - px, z - pz) > radius + pr + 0.4 for px, pz, pr in taken):
                 break
         taken.append((x, z, radius))
-        kind = _weighted(rng, weights)
+        kind = rng.choices(list(weights), weights=list(weights.values()))[0]
         lift = half_height + 0.02
         if kind == "dynamic":
             lift = half_height + round(rng.uniform(1.0, 4.0), 2)      # 落体要有下落的余量

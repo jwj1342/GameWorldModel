@@ -171,6 +171,26 @@ def describe(program: dict, spec: SceneSpec, facts: dict) -> dict:
     }
 
 
+def style_half(program: dict) -> dict:
+    """样式那一半：`style` 子树加每个节点的 `material`。"""
+    return {"style": program.get("style"),
+            "materials": {node["id"]: node.get("material")
+                          for group in ("static", "objects") for node in program.get(group, [])}}
+
+
+def behavior_half(program: dict) -> dict:
+    """行为那一半：结构、几何、运动、相机——也就是除样式之外的全部。
+
+    两半的定义只写在这里一处。配对测试要用它，#52 的解耦度指标也要用它；
+    各写一份的话，以后加一个样式字段，另一边会悄悄把它算进行为里。
+    """
+    return {
+        "static": [{k: v for k, v in node.items() if k != "material"} for node in program.get("static", [])],
+        "objects": [{k: v for k, v in node.items() if k != "material"} for node in program.get("objects", [])],
+        "camera": program.get("camera"),
+    }
+
+
 def family_group(family: str) -> str:
     if family in TRAIN_FAMILIES:
         return "train"
