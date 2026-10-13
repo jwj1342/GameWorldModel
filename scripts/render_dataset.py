@@ -33,6 +33,36 @@ def _work_root() -> Path:
     return root
 
 
+def _integrity_error(rec: Path, program_path: Path) -> str:
+    """录完之后、拷回共享盘之前的一道检查。只查能从产物本身查出来的事实。
+
+    录制器自己已经校验采样计划，这里查的是另外三件它不管的事：真值行数和它自报的帧数
+    对不对得上、真值里的物体是不是程序里那一批、每一帧是不是都带了物体状态。
+    """
+    try:
+        meta = json.loads((rec / "record.json").read_text(encoding="utf-8"))
+        rows = [json.loads(line) for line in
+                (rec / "gt_states.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, ValueError) as error:
+        return f"产物读不出来：{error}"[:200]
+
+    if len(rows) != meta.get("frames"):
+        return f"真值 {len(rows)} 行，record.json 说 {meta.get('frames')} 帧"
+    if not rows:
+        return "真值是空的"
+
+    program = json.loads(program_path.read_text(encoding="utf-8"))
+    expected = {node["id"] for node in program.get("static", []) + program.get("objects", [])}
+    for index, row in enumerate(rows):
+        objects = row.get("objects")
+        if not objects:
+            return f"第 {index} 帧没有物体状态"
+        seen = {o.get("id") for o in objects}
+        if seen != expected:
+            return f"第 {index} 帧的物体集合对不上：多 {sorted(seen - expected)} 少 {sorted(expected - seen)}"
+    return ""
+
+
 def render_one(program_path: Path, out_dir: Path, work: Path, width: int, height: int,
                fps: int, duration: float, keep_frames: bool) -> dict:
     """返回这一条的耗时拆解。失败不抛，记进 row 里让上层继续。"""
@@ -57,6 +87,13 @@ def render_one(program_path: Path, out_dir: Path, work: Path, width: int, height
     row["record_s"] = round(time.time() - t1, 3)
     if recorded.returncode != 0:
         row["error"] = f"record: {recorded.stderr[-400:]}"
+        return row
+
+    # 写出之前先验一遍。2000 条规模上，坏样本要在这一刻拦住——等到训练时才发现，
+    # 已经分不清是数据坏了还是模型学不会。
+    bad = _integrity_error(rec, program_path)
+    if bad:
+        row["error"] = f"integrity: {bad}"
         return row
 
     out_dir.mkdir(parents=True, exist_ok=True)
