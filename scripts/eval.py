@@ -55,13 +55,36 @@ def recorder_identity() -> str:
     return h.hexdigest()
 
 
-def find_ground_truth(clip: str) -> tuple[Path | None, str, list[str]]:
+def _display_path(path: Path) -> str:
+    """仓库内的写相对路径，仓库外（比如 $SCRATCH 上的数据集）写绝对路径。"""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
+def gt_roots(extra: list[str] | None = None) -> list[Path]:
+    """真值根目录。仓库里那两个是默认，额外的由调用方显式给。
+
+    合成数据集产在 $SCRATCH 上，不在仓库里，所以必须能从外面指进来。
+    但不从 run.json 里读——那里记的 `gt_program` 是这次运行自己用过的东西，
+    拿它当真值等于自己给自己判卷。
+    """
+    out = [REPO / d for d in GT_DIRS]
+    for d in extra or []:
+        path = Path(d)
+        out.append(path if path.is_absolute() else REPO / path)
+    return out
+
+
+def find_ground_truth(clip: str, extra_roots: list[str] | None = None) -> tuple[Path | None, str, list[str]]:
     """返回 (真值程序路径, 匹配依据, 所有候选)。
 
     有多份候选同时匹配就不返回——两份不同的真值选错一份，算出来的误差是假的，
     而且从表上完全看不出来。宁可标成不可评测。
     """
-    exact = [REPO / d / clip / "program.json" for d in GT_DIRS]
+    roots = gt_roots(extra_roots)
+    exact = [root / clip / "program.json" for root in roots]
     exact = [p for p in exact if p.exists()]
     if len(exact) == 1:
         return exact[0], "directory_name", [str(exact[0])]
@@ -155,7 +178,7 @@ def work_dir(work: Path, tag: str, identity: str) -> Path:
     return work / f"{tag}_{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
 
 
-def eval_one(run: Path, work: Path, harness: str) -> dict:
+def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None) -> dict:
     manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
     clip = manifest.get("clip", run.parent.name)
     configs = (manifest.get("args") or {}).get("config") or []
@@ -164,7 +187,7 @@ def eval_one(run: Path, work: Path, harness: str) -> dict:
            "config": config_label(configs, cfg_identity), "config_files": list(configs),
            "config_identity": cfg_identity, "video_sha256": manifest.get("video_sha256")}
 
-    gt_path, link, candidates = find_ground_truth(clip)
+    gt_path, link, candidates = find_ground_truth(clip, gt_roots_extra)
     row["truth_link"] = link
     if gt_path is None:
         row["skipped"] = ("找到多份都匹配的真值程序，不猜：" + ", ".join(candidates)) if candidates \
@@ -172,7 +195,7 @@ def eval_one(run: Path, work: Path, harness: str) -> dict:
         return row
 
     gt_bytes = gt_path.read_bytes()
-    row["ground_truth"] = {"path": str(gt_path.relative_to(REPO)), "sha256": _sha256_bytes(gt_bytes),
+    row["ground_truth"] = {"path": _display_path(gt_path), "sha256": _sha256_bytes(gt_bytes),
                            "link": link,
                            "verified": False,
                            "note": "按名字定位的，没有证据表明这段视频确实由这份程序渲染而来"}
@@ -210,6 +233,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--work", required=True, help="中间产物放哪，用 $SLURM_TMPDIR")
     ap.add_argument("--harness", default=str(REPO / "scripts" / "node_harness.sh"))
     ap.add_argument("--group-by", default="config", choices=["config", "clip"])
+    ap.add_argument("--gt-root", action="append", default=[],
+                    help="额外的真值根目录，可给多次。合成数据集产在 $SCRATCH 上，不在仓库里，"
+                         "所以要从外面指进来；不从 run.json 读，那是这次运行自己用过的东西")
     ap.add_argument("--out", default="docs/results/eval_table.json")
     a = ap.parse_args(argv)
 
@@ -228,7 +254,7 @@ def main(argv: list[str]) -> int:
     rows, skipped, failed = [], [], []
     for r in runs:
         try:
-            row = eval_one(r, work, a.harness)
+            row = eval_one(r, work, a.harness, a.gt_root)
         except Exception as e:
             failed.append({"run": str(r), "error": repr(e)[:300]}); continue
         if "skipped" in row:
