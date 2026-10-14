@@ -2,14 +2,17 @@
 
 ## 配置快照与身份摘要的统一脱敏
 
-`redact()` 按字段组成词而非任意子串识别凭据，保留 `keyframes`、
-`keyframe_max_side`、`detection_keyframes`、`max_tokens` 等实验设置。
-常见 camelCase/acronym 凭据字段先规范化，再使用同一规则；真正的 key/token/
-secret/password/authorization/credential 字段及其 `_file` 路径均隐藏，
-不读取凭据文件。普通权重、数据和输出路径不因此隐藏。
+`redact()` 保守地匹配字段名中的 key/token/secret/password/authorization/credential
+子串，只对四个精确名称 `keyframes`、`keyframe_max_side`、`detection_keyframes`、
+`max_tokens` 放行。`apikey`、`api_keys`、`authtoken`、`keystore` 和 camelCase
+凭据拼写均隐藏，不再需要名称规范化。新增实验字段若被误遮，需审核后加入白名单，
+不能为了保留设置放宽凭据规则。白名单容器内部仍递归脱敏。
+凭据 `_file` 路径继续隐藏：它可能暴露个人目录/认证部署信息，且旧配置身份算法
+已排除这些路径；统一规则可保留凭据文件轮换的恢复行为。不读取凭据文件。
 `configuration_identity()` 对同一脱敏快照按原有规范化 JSON 算 SHA-256；
-普通 snake_case 配置的旧身份摘要保持兼容。新增保护的 camelCase 配置可能
-改变身份摘要，此时恢复运行仍按原门禁拒绝，不重写历史或自动放行。
+现有常规配置的旧身份摘要保持兼容；旧规则未遮掉的非标准字段（如 `apikey`），
+以及现在被保守遮掉的非白名单设置，可能改变摘要，此时恢复仍按原门禁拒绝，
+不重写历史或自动放行。密钥只放在被忽略的凭据文件中，不内联进 YAML。
 这修复未来配置记录，不能恢复旧报告中已经被 `<redacted>` 替换的采样值；
 也不是任意字符串中凭据的通用扫描器，不应将含认证信息的 URL 等写进公开配置。
 

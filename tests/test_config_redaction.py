@@ -11,14 +11,16 @@ from gwm.run_clip import configuration_identity
 
 
 @pytest.mark.parametrize("field", ["keyframes", "keyframe_max_side", "detection_keyframes",
-    "max_tokens", "tokenizer_name", "monkey", "keyboard", "geometry_frames", "seed"])
+    "max_tokens", "geometry_frames", "seed"])
 def test_ordinary_settings_are_preserved(field):
     assert redact({field: 12}) == {field: 12}
 
 
 @pytest.mark.parametrize("field", ["api_key", "hf_token", "access_token", "secret",
     "client_secret", "password", "authorization", "credential", "api_key_file",
-    "HF_TOKEN", "apiKey", "APIKey", "accessToken", "clientSecret", "apiKeyFile"])
+    "HF_TOKEN", "apiKey", "APIKey", "accessToken", "clientSecret", "apiKeyFile",
+    "apikey", "api_keys", "authtoken", "keystore", "APIKEY", "apiKeys",
+    "tokenizer_name", "monkey", "keyboard", "keyFrames", "keyframes_api_key"])
 def test_credentials_are_redacted_including_file_paths(field):
     assert redact({field: "synthetic-placeholder"}) == {field: "<redacted>"}
 
@@ -52,3 +54,18 @@ def test_existing_snake_case_identity_is_preserved():
     digest = hashlib.sha256(json.dumps(old_public(cfg), sort_keys=True, default=str,
                                       separators=(",", ":")).encode("utf-8")).hexdigest()
     assert configuration_identity(cfg) == digest
+
+
+@pytest.mark.parametrize("field", ["apikey", "api_keys", "authtoken", "keystore"])
+def test_reviewed_credential_spellings_never_enter_snapshot_or_identity(field):
+    cfg = {"nested": [{field: "synthetic-before", "keyframes": 12}]}
+    safe = redact(cfg)
+    assert "synthetic-before" not in json.dumps(safe)
+    before = configuration_identity(cfg)
+    cfg["nested"][0][field] = "synthetic-after"
+    assert configuration_identity(cfg) == before
+
+
+def test_allowlisted_container_still_redacts_nested_credentials():
+    cfg = {"keyframes": [{"apikey": "synthetic"}]}
+    assert redact(cfg) == {"keyframes": [{"apikey": "<redacted>"}]}

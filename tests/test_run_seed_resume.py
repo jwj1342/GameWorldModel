@@ -62,6 +62,8 @@ def test_cli_manifest_keeps_frame_settings_and_hides_credentials(inputs, monkeyp
     cfg["frames"] = {"keyframes": 12, "keyframe_max_side": 768}
     cfg["perception"] = {"detection_keyframes": 3}
     cfg["vlm"].update(api_key="synthetic-secret", api_key_file="synthetic-key-path", max_tokens=100)
+    for field in ("apikey", "api_keys", "authtoken", "keystore"):
+        cfg["vlm"][field] = "synthetic-review-" + field
     _, manifest = invoke(monkeypatch, directory, args, cfg)
     assert manifest["config"]["frames"] == cfg["frames"]
     assert manifest["config"]["perception"]["detection_keyframes"] == 3
@@ -70,6 +72,9 @@ def test_cli_manifest_keeps_frame_settings_and_hides_credentials(inputs, monkeyp
     assert manifest["config"]["vlm"]["api_key_file"] == "<redacted>"
     persisted = (directory / "run.json").read_text(encoding="utf-8")
     assert "synthetic-secret" not in persisted and "synthetic-key-path" not in persisted
+    for field in ("apikey", "api_keys", "authtoken", "keystore"):
+        assert manifest["config"]["vlm"][field] == "<redacted>"
+        assert "synthetic-review-" + field not in persisted
 
 
 def invoke(monkeypatch, directory, args, cfg, cli_seed=None, resume=False):

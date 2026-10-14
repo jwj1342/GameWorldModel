@@ -42,21 +42,16 @@ def load_config(files: list[str | Path] | None = None, overrides: dict | None = 
     return cfg
 
 
-SECRET_KEYS = re.compile(r"(?:^|_)(?:key|token|secret|password|authorization|credential)(?:$|_)", re.I)
-
-
-def _secret_field(name: str) -> bool:
-    # Normalize common camelCase/acronym spellings without matching keyframes,
-    # tokenizer or max_tokens. YAML configuration keys are normally snake_case.
-    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
-    return bool(SECRET_KEYS.search(name))
+SECRET_KEYS = re.compile(r"key|token|secret|password|authorization|credential", re.I)
+# Exact names only: unknown spellings fail closed instead of exposing credentials.
+NOT_SECRET = frozenset({"keyframes", "keyframe_max_side", "detection_keyframes", "max_tokens"})
 
 def redact(value: Any) -> Any:
     """把配置里像密钥的字段换成占位符。run.json 会被 collect_results.sh 复制进入库的 docs/results/，
     所以写进去之前必须过一遍，别让人不小心把 key 写进 config 覆盖文件就提交上去。
     凭据文件路径也隐藏，与配置身份摘要共用规则；不会读取凭据文件。"""
     if isinstance(value, dict):
-        return {k: ("<redacted>" if isinstance(k, str) and _secret_field(k) else redact(v)) for k, v in value.items()}
+        return {k: ("<redacted>" if isinstance(k, str) and SECRET_KEYS.search(k) and k not in NOT_SECRET
+                    else redact(v)) for k, v in value.items()}
     if isinstance(value, list): return [redact(v) for v in value]
     return value
