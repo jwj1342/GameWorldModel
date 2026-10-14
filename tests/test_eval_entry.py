@@ -32,10 +32,16 @@ def fake_recorder(frames: int | None = None, written: int | None = None):
             (out).mkdir(parents=True, exist_ok=True)
             count = frames if frames is not None else math.floor(
                 float(cmd[cmd.index("--duration") + 1]) * int(cmd[cmd.index("--fps") + 1]) + 0.5)
+            endpoint = "--include-endpoint" in cmd and cmd[cmd.index("--include-endpoint") + 1] == "true"
+            if frames is None and endpoint:
+                count = max(1, count)
+                if abs((count - 1) / int(cmd[cmd.index("--fps") + 1]) -
+                       float(cmd[cmd.index("--duration") + 1])) > 1e-9:
+                    count += 1
             n = count if written is None else written
             lines = [json.dumps({"i": i, "t": i / 10.0, "objects": []}) for i in range(n)]
             (out / "gt_states.jsonl").write_text("\n".join(lines) + "\n")
-            (out / "record.json").write_text(json.dumps({"frames": count}))
+            (out / "record.json").write_text(json.dumps({"frames": count, "include_endpoint": endpoint}))
         return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     return run, calls
@@ -216,3 +222,81 @@ def test_legacy_cache_key_requires_rerecord(tmp_path, monkeypatch):
     first = len(calls)
     ev.states_of(program, tmp_path / "w", 1.0, "harness")
     assert len(calls) == first * 2
+
+
+@pytest.mark.parametrize("duration,endpoint,expected", [
+    (1.0, False, 10), (1.0, True, 11),
+    (0.25, False, 3), (0.25, True, 4),
+    (0.01, True, 2), (5e-10, True, 1),
+])
+def test_endpoint_recording_is_complete_and_reusable(tmp_path, monkeypatch, duration, endpoint, expected):
+    run, calls = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    assert len(ev.states_of(program, tmp_path / "w", duration, "harness",
+                            include_endpoint=endpoint)) == expected
+    first = len(calls)
+    ev.states_of(program, tmp_path / "w", duration, "harness", include_endpoint=endpoint)
+    assert len(calls) == first
+    recording = next(cmd for cmd in calls if "record.mjs" in cmd)
+    assert ("--include-endpoint" in recording) is endpoint
+
+
+def test_endpoint_modes_have_distinct_keys_and_trigger_rerecord(tmp_path, monkeypatch):
+    assert ev.record_key(b"{}", 1, 10) != ev.record_key(b"{}", 1, 10, include_endpoint=True)
+    run, calls = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    for endpoint, expected in [(False, 10), (True, 11), (False, 10)]:
+        assert len(ev.states_of(program, tmp_path / "w", 1, "harness",
+                                include_endpoint=endpoint)) == expected
+    assert len(calls) == 6
+
+
+@pytest.mark.parametrize("metadata", [
+    {"frames": 11, "include_endpoint": False},
+    {"frames": 11, "include_endpoint": "true"},
+    {"frames": 11},
+    {"frames": 10, "include_endpoint": True},
+    [],
+])
+def test_endpoint_cache_rejects_wrong_mode_or_metadata(tmp_path, monkeypatch, metadata):
+    run, _ = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    ev.states_of(program, tmp_path / "w", 1, "harness", include_endpoint=True)
+    rec = tmp_path / "w" / "rec"
+    write(rec / "record.json", metadata)
+    assert not ev._cached(rec, ev.record_key(program.read_bytes(), 1, 10, include_endpoint=True))
+
+
+def test_endpoint_cache_rejects_partial_states(tmp_path, monkeypatch):
+    run, _ = fake_recorder(written=10)
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    with pytest.raises(RuntimeError, match="完整"):
+        ev.states_of(program, tmp_path / "w", 1, "harness", include_endpoint=True)
+
+
+def test_missing_endpoint_in_legacy_stamp_requires_rerecord(tmp_path, monkeypatch):
+    run, calls = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    ev.states_of(program, tmp_path / "w", 1, "harness")
+    stamp = tmp_path / "w" / "rec" / "eval_record_key.json"
+    key = json.loads(stamp.read_text(encoding="utf-8"))
+    del key["include_endpoint"]
+    write(stamp, key)
+    first = len(calls)
+    ev.states_of(program, tmp_path / "w", 1, "harness")
+    assert len(calls) == first * 2
+
+
+def test_legacy_record_metadata_without_endpoint_remains_default_mode(tmp_path, monkeypatch):
+    run, _ = fake_recorder()
+    monkeypatch.setattr(ev.subprocess, "run", run)
+    program = write(tmp_path / "program.json", {"objects": []})
+    ev.states_of(program, tmp_path / "w", 1, "harness")
+    rec = tmp_path / "w" / "rec"
+    write(rec / "record.json", {"frames": 10})
+    assert ev._cached(rec, ev.record_key(program.read_bytes(), 1, 10))

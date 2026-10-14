@@ -84,9 +84,12 @@ def find_ground_truth(clip: str) -> tuple[Path | None, str, list[str]]:
     return None, "not_found", []
 
 
-def record_key(program_bytes: bytes, duration: float, fps: int) -> dict:
+def record_key(program_bytes: bytes, duration: float, fps: int, *, include_endpoint: bool = False) -> dict:
+    if type(include_endpoint) is not bool:
+        raise TypeError("include_endpoint must be a boolean")
     return {"program_sha256": _sha256_bytes(program_bytes), "duration_s": float(duration),
             "fps": int(fps), "width": RECORD_W, "height": RECORD_H,
+            "include_endpoint": include_endpoint,
             "kernel_sha256": kernel_identity(), "recorder_sha256": recorder_identity()}
 
 
@@ -98,33 +101,46 @@ def _cached(rec: Path, key: dict) -> bool:
     try:
         if json.loads(stamp.read_text(encoding="utf-8")) != key:
             return False
-        frames = json.loads(meta.read_text(encoding="utf-8")).get("frames")
+        metadata = json.loads(meta.read_text(encoding="utf-8"))
+        frames = metadata.get("frames")
+        # 旧录制未记此字段时按默认 false；字符串 "false" 不能当布尔值。
+        endpoint = metadata.get("include_endpoint", False)
+        requested_endpoint = key.get("include_endpoint", False)
+        if type(endpoint) is not bool or type(requested_endpoint) is not bool or endpoint != requested_endpoint:
+            return False
         # 与 record.mjs 的 Math.round(duration * fps) 一致，不能用 Python 的银行家舍入。
         duration, fps = float(key["duration_s"]), float(key["fps"])
         if not math.isfinite(duration * fps) or duration <= 0 or fps <= 0:
             return False
         expected = math.floor(duration * fps + 0.5)
+        if endpoint:
+            # 逐项复现 record.mjs：空序列先采 0，再按相同容差补终点。
+            expected = max(1, expected)
+            if abs((expected - 1) / fps - duration) > 1e-9:
+                expected += 1
         if type(frames) is not int or frames <= 0 or frames != expected:
             return False
         with states.open(encoding="utf-8") as fh:
             written = sum(1 for line in fh if line.strip())
-    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, AttributeError):
         return False
     return written == frames        # 录到一半断掉的不算完整
 
 
-def states_of(program_path: Path, out: Path, duration: float, harness: str, fps: int = 10) -> list[dict]:
+def states_of(program_path: Path, out: Path, duration: float, harness: str, fps: int = 10,
+              *, include_endpoint: bool = False) -> list[dict]:
     """轨迹不在 Python 里重算，走内核录一遍。运动语义只有内核那一份实现。"""
     out.mkdir(parents=True, exist_ok=True)
     game, rec = out / "game", out / "rec"
-    key = record_key(program_path.read_bytes(), duration, fps)
+    key = record_key(program_path.read_bytes(), duration, fps, include_endpoint=include_endpoint)
     if not _cached(rec, key):
         (rec / "eval_record_key.json").unlink(missing_ok=True)
         subprocess.run([sys.executable, "-m", "gwm.compiler.compile", str(program_path), str(game)],
                        check=True, cwd=REPO, capture_output=True)
         subprocess.run([harness, "record.mjs", "--game", str(game), "--out", str(rec),
                         "--fps", str(fps), "--duration", str(duration),
-                        "--width", str(RECORD_W), "--height", str(RECORD_H)],
+                        "--width", str(RECORD_W), "--height", str(RECORD_H)] +
+                       (["--include-endpoint", "true"] if include_endpoint else []),
                        check=True, cwd=REPO, capture_output=True)
         rec.mkdir(parents=True, exist_ok=True)
         (rec / "eval_record_key.json").write_text(json.dumps(key, sort_keys=True) + "\n", encoding="utf-8")

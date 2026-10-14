@@ -872,6 +872,39 @@ Offline reference/negative tests check structure, target identity, all three edi
 and side effects, not measured model performance or real browser contact behavior.
 The previous 20-case experiment rates cannot be reused for this 21-case set.
 
+样式那一半的字段进了 DSL：颜色与光照。
+
+核心主张第四条说同一份程序里样式和行为分成两半写，两分是字段层面的——`geom` 与
+`material` 属于样式，`motion` 与 `events` 属于行为。但样式那一半此前只有一个 19 个词
+的平色调色板，光照干脆写死在 `kernel/scene.js` 里。
+
+`material` 现在有三种写法：调色板词、`#rrggbb`、或者一个写全表面参数的对象
+（`base_color` 必填，`roughness`、`metalness`、`emissive`、`emissive_intensity`、
+`opacity` 可选）。对象那条是给「颜色从视频里量出来」留的——调色板那 19 个词是为合成
+场景写的，真实物体很少对得上。调色板同时从「任意 32 字符字符串」收紧成闭集：原来写错
+一个词，内核查表查不到就落回灰色，不报错，样式那一半的分就这么悄悄丢了。
+
+光照成了 `style.lighting`：`ambient` 的天空色、地面色、强度，`key` 的颜色、强度、方向、
+开不开阴影。缺省值与原来写死的那一组逐项相同，所以不写 lighting 的老程序渲染结果不变，
+`tests/test_style_kernel.mjs` 盯着这一条。写死的真正代价不是难看——是 5.8 的生成器随机化
+了光照之后真值程序里没有地方记它，每条合成样本的样式那一半按构造就是有损的。造数据集
+排在这之后，所以这组字段要先落地，否则数据集造出来就是对不上第四条主张的。
+
+调色板有两份——schema 的 `$defs.materialName` 和 `kernel/scene.js` 的 `MATERIALS`。
+`tests/test_style_half.py` 比对两边的键，漂开就失败，否则 schema 放行的词内核渲染成灰色，
+正是上面那个洞。
+
+贴图和网格几何不在这一轮。贴图要先定素材从哪来、怎么随程序走，网格是另一件事；
+加一个运行时不认的字段比没有这个字段更糟。RP §6 缺口 14 要跟着改一半，它在
+`docs/research-proposal` 分支上。
+
+数值字段的有限性在校验的第一步统一查，不分样式还是行为。NaN 跟任何上下界比较都是假，
+schema 的 `minimum`/`maximum` 拦不住它；`1e400` 这种合法 JSON 字面量解析出来是 inf，
+没写上界的字段也拦不住。两种都会原样写进 `program.json`，浏览器 `JSON.parse` 读到裸的
+NaN/Infinity 直接 SyntaxError，而编译这一步会报成功——产物是坏的，日志是干净的。
+所以 `validate.py` 递归走整棵程序树，不逐个列字段：列字段的写法得跟着 schema 一起改，
+漏一个就是一个无声的洞。`bundle.py` 写 program.json 时再用 `allow_nan=False` 兜一道。
+
 # Dynamic runtime contract
 
 `motion.mass` is the total mass of an object instance. For compound colliders it
@@ -951,3 +984,13 @@ python -m scripts.create_ground_truth_association \
 `--include-endpoint`。奖励实验要求完整且实际时间与请求一致的闭区间；固定步长场景中
 不对齐物理帧的请求将被拒绝，而不是改写真实时间。默认录制仍保留量化时间。
 可选额外终点若不在常规帧率网格上，不能直接当作普通编码帧时间；需独立核对解码 PTS。
+
+### 评测录制缓存与终点采样
+
+`scripts.eval.states_of(..., include_endpoint=True)` 可显式请求补终点，默认仍为
+`False`，批量评测默认采样策略不变。该开关同时进入 `record_key()` 并传给录制器。
+缓存校验读取 `record.json.include_endpoint`，要求它与请求一致；按录制器的
+`Math.round`、空序列先采零点及 `1e-9` 终点容差计算帧数，再核对状态行数。
+字段只接受布尔值，不把字符串解释为开关。旧 metadata 缺字段按默认关闭处理，
+旧缓存身份缺此开关会失配并重录，不改写旧轨迹来冒充新模式。
+这只修复缓存身份和完整性，不证明视频 PTS、物理轨迹或真值来源正确。

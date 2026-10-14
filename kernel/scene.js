@@ -2,7 +2,10 @@
 import * as THREE from 'three';
 import { makePose, isSimulated } from './motions.js';
 
-const MATERIALS = {
+// 调色板是 DSL 契约的一部分：schema 的 $defs.materialName 列的就是这些词，
+// tests/test_style_kernel.mjs 盯着两边不许漂。名字写错了会悄悄变成灰色，
+// 所以 schema 那边是闭集，不是任意字符串。
+export const MATERIALS = {
   default: { color: 0x9a9a9a, roughness: 0.8 },
   grass: { color: 0x5f9e4a, roughness: 0.95 },
   stone: { color: 0x8c8c8c, roughness: 0.9 },
@@ -24,10 +27,29 @@ const MATERIALS = {
   cardboard: { color: 0xc49a6c, roughness: 0.9 },
 };
 
+const hex = (v, fallback) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? parseInt(v.slice(1), 16) : fallback);
+
+// 样式那一半：调色板词、十六进制颜色，或者一个写全表面参数的对象。
+// 对象那条是给「颜色从视频里量出来」留的——调色板的 19 个词对不上真实场景。
+function surfaceParams(m) {
+  const spec = { color: hex(m.base_color, 0x9a9a9a), roughness: m.roughness ?? 0.7 };
+  if (m.metalness != null) spec.metalness = m.metalness;
+  if (m.emissive != null) { spec.emissive = hex(m.emissive, 0x000000); spec.emissiveIntensity = m.emissive_intensity ?? 1; }
+  if (m.opacity != null && m.opacity < 1) { spec.transparent = true; spec.opacity = m.opacity; }
+  return spec;
+}
+
 export function makeMaterial(name) {
+  if (name && typeof name === 'object') return new THREE.MeshStandardMaterial(surfaceParams(name));
   const spec = MATERIALS[name] ?? (typeof name === 'string' && /^#[0-9a-f]{6}$/i.test(name) ? { color: parseInt(name.slice(1), 16), roughness: 0.7 } : MATERIALS.default);
   return new THREE.MeshStandardMaterial(spec);
 }
+
+// 默认值就是这一行原来写死的那组数，所以不写 lighting 的老程序渲染结果不变。
+export const DEFAULT_LIGHTING = {
+  ambient: { sky_color: '#ffffff', ground_color: '#556655', intensity: 1.1 },
+  key: { color: '#ffffff', intensity: 1.6, direction: [6, 12, 8], shadow: true },
+};
 
 // ---- primitive fallback for asset / generated ----
 function fallbackForClass(cls, extent) {
@@ -106,8 +128,17 @@ export function buildScene(program, kernelCfg = null) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(program.style?.background ?? '#87a7c7');
   scene.fog = null;
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x556655, 1.1); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(6, 12, 8); sun.castShadow = true;
+  // 光照原来写死在这里，于是 5.8 的生成器随机化了光照也没处记，每条合成样本的
+  // 样式那一半按构造就是有损的。现在它是程序的一部分，缺省值与原来逐项相同。
+  const amb = { ...DEFAULT_LIGHTING.ambient, ...(program.style?.lighting?.ambient ?? {}) };
+  const key = { ...DEFAULT_LIGHTING.key, ...(program.style?.lighting?.key ?? {}) };
+  const hemi = new THREE.HemisphereLight(hex(amb.sky_color, 0xffffff), hex(amb.ground_color, 0x556655), amb.intensity);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(hex(key.color, 0xffffff), key.intensity);
+  // direction 是「光从哪个方向照过来」，按它摆灯位，长度不影响方向光的效果，只影响阴影视锥
+  const d = key.direction, len = Math.hypot(d[0], d[1], d[2]) || 1, far = 16;
+  sun.position.set(d[0] / len * far, d[1] / len * far, d[2] / len * far);
+  sun.castShadow = key.shadow;
   sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = sun.shadow.camera.bottom = -25; sun.shadow.camera.right = sun.shadow.camera.top = 25;
   scene.add(sun);
 
