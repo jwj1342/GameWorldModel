@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
+from .color import observe_color
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -248,6 +249,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
                         "observations": observations,
+                        "appearance": observe_color(frames, o.masks, tracks.frame_size, o.id,
+                            cfg["perception"].get("color_min_pixels", 4)),
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
                         "hypotheses": copy.deepcopy(o.identity_hypotheses) + ([motion_result["hypothesis"]] if motion_result["hypothesis"] else []),

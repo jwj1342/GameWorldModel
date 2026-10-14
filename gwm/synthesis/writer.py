@@ -9,6 +9,7 @@ from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
 from .direct import evidence_to_program, recentre_periodic
 from .vlm import VLMClient
+from ..perception.color import measured_color
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -37,6 +38,8 @@ def evidence_summary(ev: dict, max_obb: int = 12) -> str:
     if g: lines.append(f"ground plane: y=0, centre_hint={_r(g['center_hint'])}, extent_hint={_r(g['extent_hint'])}, conf={_conf_text(g.get('conf'))}")
     lines.append(f"objects ({len(ev['objects'])}):")
     for o in ev["objects"]:
+        color = measured_color(o.get("appearance"))
+        lines.append(f"  observed_sRGB id={o['id']}: {color or 'unknown'} (display-color proxy, not albedo; no measured confidence)")
         mg = o["motion_guess"]; ob = o["obb"]; step = max(1, len(ob) // max_obb)
         traj = "; ".join(f"t={b['t']:.2f} c={_r(b['center'])}" for b in ob[::step])
         mgs = ", ".join(f"{k}={_r(v) if isinstance(v, list) else (round(v, 3) if isinstance(v, float) else v)}" for k, v in mg.items() if k not in ("notes",) and v is not None)
