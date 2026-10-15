@@ -1,7 +1,7 @@
 """把三路采样装配成一份真值程序。
 
-三路各有自己的随机源：**行为**（场景结构、几何、运动）、**样式**（背景、光照、材质）、
-**观测**（相机轨迹）。三个种子独立给，所以可以固定两路只变一路——
+三路各有自己的随机源：**行为**（场地上摆什么、怎么动）、**样式**（背景、光照、材质）、
+**观测**（场地尺度与相机轨迹）。三个种子独立给，所以可以固定两路只变一路——
 「同行为不同样式」这组配对就是核心主张第四条在数据这一侧的证据，
 也是 #13 可编辑性实验的标准答案：一次只改样式，应该且只应该改到 style 子树和 material。
 
@@ -51,6 +51,11 @@ class SceneSpec:
                          duration=self.duration, fps=self.fps, objects=self.objects,
                          camera_track=self.camera_track, notes=self.notes,
                          tags=tuple(self.tags) + ("behavior_variant",))
+
+
+def _material_rng(style_seed: int, node_id: str) -> random.Random:
+    """某个节点的材质流。字符串种子走的是 sha512，跨平台跨进程都给同一串数。"""
+    return random.Random(f"{style_seed}:{node_id}")
 
 
 def sample_camera(rng: random.Random, layout: dict, duration: float, track: str) -> dict:
@@ -113,12 +118,11 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
     """
     behavior_rng = random.Random(spec.behavior_seed)
     camera_rng = random.Random(spec.camera_seed)
-    # 样式这一路要拆成两个独立的流：材质的抽取次数等于节点数，而节点数是行为那边定的。
-    # 共用一个流的话，只换行为种子会把光照也带着变，两半就不再分得开了。
+    # 场地尺度归在观测这一路：相机的取景距离是它的函数，同源才能做到只换行为时机位不动。
+    stage_rng = random.Random(spec.camera_seed ^ 0x51ED270B)
     style_rng = random.Random(spec.style_seed)
-    material_rng = random.Random(spec.style_seed ^ 0x9E3779B9)
 
-    statics, layout = sample_layout(behavior_rng, spec.family)
+    statics, layout = sample_layout(behavior_rng, spec.family, stage_rng)
     count = spec.objects or behavior_rng.randint(1, 8)
     objects = sample_objects(behavior_rng, layout, spec.profile, spec.duration, count)
 
@@ -126,11 +130,14 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
     camera = sample_camera(camera_rng, layout, spec.duration, track)
 
     # 样式最后刷上去：行为那一半已经定死，这里只写 material 和 style 子树。
-    # 结构件压住饱和度也不给自发光：会发光的地板和洋红的墙只会白白拉大合成到真实的差距。
+    # 每个节点的材质各起一个由「样式种子 + 节点 id」决定的流，而不是顺着一条流往下抽。
+    # 顺着抽的话抽取次序取决于节点数，而节点数是行为那边定的——只换行为种子，同一个
+    # obj_3 会拿到另一种材质，样式那一半就跟着行为动了。
     for node in statics:
-        node["material"] = sample_material(material_rng, muted=True, emissive_allowed=False)
+        node["material"] = sample_material(_material_rng(spec.style_seed, node["id"]),
+                                           muted=True, emissive_allowed=False)
     for node in objects:
-        node["material"] = sample_material(material_rng)
+        node["material"] = sample_material(_material_rng(spec.style_seed, node["id"]))
     meta = {"clip": spec.clip, "fps": spec.fps, "duration": spec.duration, "units": "m", "up": "y"}
     if spec.notes:
         meta["notes"] = spec.notes

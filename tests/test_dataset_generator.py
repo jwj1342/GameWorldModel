@@ -50,7 +50,31 @@ def test_behavior_variant_changes_behavior_only():
     variant = base.with_behavior(behavior_seed=515151, clip="c12_behavior")
     a, b = generate(base), generate(variant)
     assert a["style"] == b["style"]                           # style 子树逐字节相同
+    assert a["camera"] == b["camera"]                         # 机位一帧不动
+    shared = set(style_half(a)["materials"]) & set(style_half(b)["materials"])
+    assert len(shared) >= 2
+    for node_id in shared:                                    # 同名节点拿同一种材质
+        assert style_half(a)["materials"][node_id] == style_half(b)["materials"][node_id]
     assert behavior_half(a) != behavior_half(b)
+
+
+@pytest.mark.parametrize("behavior_seed", [112, 515151, 7, 90210, 33331])
+def test_behavior_seed_never_leaks_into_style_or_observation(behavior_seed):
+    """只换行为种子：样式和观测必须逐字节不动。
+
+    这两条是核心主张第四条在数据这一侧的全部依据。一旦行为种子能顺带改掉光照或机位，
+    「只改了行为」这组配对就不再是对照，拿它算出来的解耦度是假的。
+    """
+    base = spec(14)
+    a = generate(base)
+    b = generate(base.with_behavior(behavior_seed, f"c14_b{behavior_seed}"))
+    assert a["style"] == b["style"]
+    assert a["camera"] == b["camera"]
+    assert [n["id"] for n in a["static"]] == [n["id"] for n in b["static"]]
+    for x, y in zip(a["static"], b["static"]):                # 场地本身也归观测那一路
+        assert x["material"] == y["material"]
+        if x["class"] == "ground":
+            assert x["geom"] == y["geom"] and x["pose"] == y["pose"]
 
 
 def test_material_count_follows_node_count_so_style_swap_stays_aligned():
@@ -235,3 +259,19 @@ def test_translation_moves_further_than_the_object_is_big():
             checked += 1
             assert abs(span) >= bar, (node["id"], kind, span, bar)
     assert checked > 60, checked
+
+
+def test_ring_track_never_stacks_two_rails_on_one_spot():
+    """轨道条数是抽的，角度必须按抽到的条数均分。
+
+    之前角度写死除以 8，抽到 9 条时最后一条整个压在第一条上。重复位姿是坏几何，
+    真值里出现两个完全重合的物体，评测那边的配对也会跟着选错。
+    """
+    seen = set()
+    for i in range(80):
+        program = generate(spec(600 + i, family="track"))
+        rails = [n for n in program["static"] if n["class"] == "rail"]
+        seen.add(len(rails))
+        spots = {tuple(n["pose"]["pos"]) for n in rails}
+        assert len(spots) == len(rails), f"{len(rails)} 条轨道只占了 {len(spots)} 个位置"
+    assert {9, 10} <= seen, f"没抽到 9 或 10 条的样本，这条测试没覆盖到边界：{sorted(seen)}"

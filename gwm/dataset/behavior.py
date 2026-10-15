@@ -66,15 +66,21 @@ def _class_name(rng: random.Random) -> str:
     return rng.choice(pool)
 
 
-def sample_layout(rng: random.Random, family: str) -> tuple[list[dict], dict]:
-    """地面与固定结构。地面顶面一律在 y=0，物体摆放只需加自己的半高。"""
+def sample_layout(rng: random.Random, family: str, stage_rng: random.Random) -> tuple[list[dict], dict]:
+    """地面与固定结构。地面顶面一律在 y=0，物体摆放只需加自己的半高。
+
+    场地的长宽由 `stage_rng`（观测那一路）抽，不走行为那一路。相机的取景距离是场地
+    尺度的函数，两者同源才能做到「只换行为种子，相机一帧不动」——否则换个行为就连带
+    换了机位，配对出来的两段视频差在哪就说不清了。场地之上摆什么、怎么动，仍然全在
+    行为那一路。
+    """
     statics: list[dict] = []
     if family == "corridor":
-        width, depth = round(rng.uniform(4.0, 7.0), 2), round(rng.uniform(18.0, 30.0), 2)
+        width, depth = round(stage_rng.uniform(4.0, 7.0), 2), round(stage_rng.uniform(18.0, 30.0), 2)
     elif family == "track":
-        width, depth = round(rng.uniform(16.0, 26.0), 2), round(rng.uniform(16.0, 26.0), 2)
+        width, depth = round(stage_rng.uniform(16.0, 26.0), 2), round(stage_rng.uniform(16.0, 26.0), 2)
     else:
-        width, depth = round(rng.uniform(10.0, 22.0), 2), round(rng.uniform(10.0, 22.0), 2)
+        width, depth = round(stage_rng.uniform(10.0, 22.0), 2), round(stage_rng.uniform(10.0, 22.0), 2)
     statics.append({"id": "ground", "class": "ground",
                     "geom": {"kind": "primitive", "shape": "box", "extent": [width, 0.4, depth]},
                     "pose": {"pos": [0.0, -0.2, 0.0]}})
@@ -105,8 +111,11 @@ def sample_layout(rng: random.Random, family: str) -> tuple[list[dict], dict]:
                                              round(rng.uniform(-depth / 3, depth / 3), 2)]}})
     elif family == "track":
         radius = round(min(width, depth) / 2 - 1.5, 2)
-        for i in range(rng.randint(6, 10)):
-            angle = 2 * math.pi * i / 8
+        rails = rng.randint(6, 10)
+        for i in range(rails):
+            # 角度按实际条数均分。写死除以 8 的话，9 条时 rail_9 会整个压在 rail_1 上，
+            # 10 条时压两条——重复位姿既是坏几何，也会把评测的物体配对搞乱。
+            angle = 2 * math.pi * i / rails
             statics.append({"id": f"rail_{i + 1}", "class": "rail",
                             "geom": {"kind": "primitive", "shape": "box", "extent": [1.6, 0.25, 0.5]},
                             "pose": {"pos": [round(radius * math.cos(angle), 2), 0.125, round(radius * math.sin(angle), 2)]}})

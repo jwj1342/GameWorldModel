@@ -56,9 +56,13 @@ def recorder_identity() -> str:
 
 
 def _display_path(path: Path) -> str:
-    """仓库内的写相对路径，仓库外（比如 $SCRATCH 上的数据集）写绝对路径。"""
+    """仓库内的写相对路径，仓库外（比如 $SCRATCH 上的数据集）写绝对路径。
+
+    仓库内那条统一用正斜杠：它会进 run.json 和报告，是要跨机器比对的标识，
+    不该因为在 Windows 上跑一遍就变成反斜杠。仓库外是本机绝对路径，保持原样。
+    """
     try:
-        return str(path.relative_to(REPO))
+        return path.relative_to(REPO).as_posix()
     except ValueError:
         return str(path)
 
