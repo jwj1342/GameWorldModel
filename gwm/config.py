@@ -44,7 +44,8 @@ def load_config(files: list[str | Path] | None = None, overrides: dict | None = 
 
 SECRET_KEYS = re.compile(r"key|token|secret|password|authorization|credential", re.I)
 # Exact names only: unknown spellings fail closed instead of exposing credentials.
-NOT_SECRET = frozenset({"keyframes", "keyframe_max_side", "detection_keyframes", "max_tokens"})
+NOT_SECRET = frozenset({"keyframes", "keyframe_max_side", "detection_keyframes", "max_tokens",
+                        "hazard_keywords"})
 
 def redact(value: Any) -> Any:
     """把配置里像密钥的字段换成占位符。run.json 会被 collect_results.sh 复制进入库的 docs/results/，

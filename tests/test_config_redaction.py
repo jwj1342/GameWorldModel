@@ -5,13 +5,14 @@ import json
 import re
 
 import pytest
+import yaml
 
-from gwm.config import redact
+from gwm.config import REPO, redact
 from gwm.run_clip import configuration_identity
 
 
 @pytest.mark.parametrize("field", ["keyframes", "keyframe_max_side", "detection_keyframes",
-    "max_tokens", "geometry_frames", "seed"])
+    "max_tokens", "geometry_frames", "seed", "hazard_keywords"])
 def test_ordinary_settings_are_preserved(field):
     assert redact({field: 12}) == {field: 12}
 
@@ -69,3 +70,35 @@ def test_reviewed_credential_spellings_never_enter_snapshot_or_identity(field):
 def test_allowlisted_container_still_redacts_nested_credentials():
     cfg = {"keyframes": [{"apikey": "synthetic"}]}
     assert redact(cfg) == {"keyframes": [{"apikey": "<redacted>"}]}
+
+
+def test_hazard_keywords_affect_identity_and_do_not_exempt_credentials():
+    cfg = {"binding": {"affordance": {"hazard_keywords": ["lava", "spike"]}}}
+    before = configuration_identity(cfg)
+    assert redact(cfg) == cfg
+    cfg["binding"]["affordance"]["hazard_keywords"].append("water")
+    assert configuration_identity(cfg) != before
+    assert redact({"hazard_keywords": [{"api_key": "synthetic"}],
+                   "hazard_keywords_api_key": "synthetic"}) == {
+        "hazard_keywords": [{"api_key": "<redacted>"}],
+        "hazard_keywords_api_key": "<redacted>"}
+
+
+@pytest.mark.parametrize("path", sorted((REPO / "configs").rglob("*.yaml")),
+                         ids=lambda path: path.relative_to(REPO).as_posix())
+def test_shipped_configs_preserve_settings_except_explicit_credentials(path):
+    # An independent expectation: do not reuse SECRET_KEYS or NOT_SECRET here.
+    # Read only shipped YAML, never expand variables or open credential files.
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    before = copy.deepcopy(cfg)
+
+    def expected(value):
+        if isinstance(value, dict):
+            return {key: "<redacted>" if key in {"api_key", "api_key_file"}
+                    else expected(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [expected(item) for item in value]
+        return value
+
+    assert redact(cfg) == expected(cfg)
+    assert cfg == before
