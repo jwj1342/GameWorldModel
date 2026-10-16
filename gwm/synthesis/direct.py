@@ -17,7 +17,28 @@ def guess_material(cls: str) -> str:
 
 def material_from_evidence(obj: dict):
     color = measured_color(obj.get("appearance"))
-    return {"base_color": color} if color else guess_material(obj["class_guess"])
+    palette = guess_material(obj["class_guess"])
+    if not color:
+        return palette
+    # Preserve the existing class prior, not a measured reflectance estimate.
+    # Parity with kernel/scene.js is checked by the material regression test.
+    return {**PALETTE_SURFACES[palette], "base_color": color}
+
+
+PALETTE_SURFACES = {
+    "default": {"roughness": 0.8}, "grass": {"roughness": 0.95},
+    "stone": {"roughness": 0.9}, "wood": {"roughness": 0.8},
+    "metal": {"roughness": 0.4, "metalness": 0.6},
+    "concrete": {"roughness": 0.95}, "plastic": {"roughness": 0.5},
+    "rubber": {"roughness": 1.0}, "gold": {"roughness": 0.3, "metalness": 0.8},
+    "red": {"roughness": 0.6}, "blue": {"roughness": 0.6},
+    "green": {"roughness": 0.6}, "yellow": {"roughness": 0.6},
+    "white": {"roughness": 0.7}, "black": {"roughness": 0.7},
+    "lava": {"emissive": "#ff2200", "emissive_intensity": 0.8, "roughness": 1.0},
+    "water": {"roughness": 0.2, "metalness": 0.1, "opacity": 0.8},
+    "glass": {"roughness": 0.1, "opacity": 0.4},
+    "cardboard": {"roughness": 0.9},
+}
 
 def _confidence(value):
     return float(value) if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) else None

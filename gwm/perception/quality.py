@@ -336,6 +336,16 @@ def assess_evidence_quality(evidence: Any, config: dict | None = None) -> dict:
     frame_order = {frame["frame_index"]: index for index, frame in enumerate(frames)}
     duration = _number((normalized.get("meta") or {}).get("duration")) or 0.0
     object_metrics = [_object_metrics(obj, frames, frame_order, duration, thresholds) for obj in normalized.get("objects") or []]
+    for index, obj in enumerate(normalized.get("objects") or []):
+        appearance = obj.get("appearance")
+        has_masks = any(ob.get("mask_ref", UNKNOWN) != UNKNOWN for ob in obj.get("observations", []))
+        if appearance is not None and has_masks and not appearance.get("samples"):
+            reasons = sorted({item.get("reason", "unknown") for item in appearance.get("issues", [])})
+            diagnostics.append(_diagnostic(
+                f"/objects/{index}/appearance", "color_measurement_unavailable",
+                "object has mask observations but no measured display color; reasons: " + ", ".join(reasons),
+                "inspect appearance issues, source images and mask geometry; do not impute material color",
+            ))
     metrics = {
         "objects": object_metrics,
         "camera": _camera_metrics(normalized),

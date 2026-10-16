@@ -37,9 +37,12 @@ def evidence_summary(ev: dict, max_obb: int = 12) -> str:
     g = ev["static"]["planes"][0] if ev["static"]["planes"] else None
     if g: lines.append(f"ground plane: y=0, centre_hint={_r(g['center_hint'])}, extent_hint={_r(g['extent_hint'])}, conf={_conf_text(g.get('conf'))}")
     lines.append(f"objects ({len(ev['objects'])}):")
+    if any(measured_color(o.get("appearance")) for o in ev["objects"]):
+        lines.append("observed_sRGB: display-color proxy, not albedo; no measured confidence. Preserve non-color material priors.")
     for o in ev["objects"]:
         color = measured_color(o.get("appearance"))
-        lines.append(f"  observed_sRGB id={o['id']}: {color or 'unknown'} (display-color proxy, not albedo; no measured confidence)")
+        if color:
+            lines.append(f"  observed_sRGB id={o['id']}: {color}")
         mg = o["motion_guess"]; ob = o["obb"]; step = max(1, len(ob) // max_obb)
         traj = "; ".join(f"t={b['t']:.2f} c={_r(b['center'])}" for b in ob[::step])
         mgs = ", ".join(f"{k}={_r(v) if isinstance(v, list) else (round(v, 3) if isinstance(v, float) else v)}" for k, v in mg.items() if k not in ("notes",) and v is not None)
