@@ -4,6 +4,7 @@ import math
 import numpy as np
 from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
+from ..perception.color import measured_color
 
 from ..taxonomy import is_static_class, slug
 
@@ -13,6 +14,31 @@ def guess_material(cls: str) -> str:
                      ("track", "plastic"), ("rail", "plastic"), ("belt", "rubber"), ("conveyor", "metal"), ("ball", "blue"), ("wall", "stone"), ("floor", "concrete")]:
         if key in c: return mat
     return "default"
+
+def material_from_evidence(obj: dict):
+    color = measured_color(obj.get("appearance"))
+    palette = guess_material(obj["class_guess"])
+    if not color:
+        return palette
+    # Preserve the existing class prior, not a measured reflectance estimate.
+    # Parity with kernel/scene.js is checked by the material regression test.
+    return {**PALETTE_SURFACES[palette], "base_color": color}
+
+
+PALETTE_SURFACES = {
+    "default": {"roughness": 0.8}, "grass": {"roughness": 0.95},
+    "stone": {"roughness": 0.9}, "wood": {"roughness": 0.8},
+    "metal": {"roughness": 0.4, "metalness": 0.6},
+    "concrete": {"roughness": 0.95}, "plastic": {"roughness": 0.5},
+    "rubber": {"roughness": 1.0}, "gold": {"roughness": 0.3, "metalness": 0.8},
+    "red": {"roughness": 0.6}, "blue": {"roughness": 0.6},
+    "green": {"roughness": 0.6}, "yellow": {"roughness": 0.6},
+    "white": {"roughness": 0.7}, "black": {"roughness": 0.7},
+    "lava": {"emissive": "#ff2200", "emissive_intensity": 0.8, "roughness": 1.0},
+    "water": {"roughness": 0.2, "metalness": 0.1, "opacity": 0.8},
+    "glass": {"roughness": 0.1, "opacity": 0.4},
+    "cardboard": {"roughness": 0.9},
+}
 
 def _confidence(value):
     return float(value) if not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) else None
@@ -75,14 +101,14 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             sz = [float(max(v, 0.05)) for v in sz]
             if any(k in cls for k in ("floor", "ground", "lawn", "grass", "carpet", "mat", "road")): sz[1] = min(sz[1], 0.3); cs[1] = -sz[1] / 2 + 0.0  # thin slab flush with the ground plane
             static_node = {"id": slug(o["id"]), "class": cls[:40], "geom": {"kind": "primitive", "shape": "box", "extent": sz}, "pose": {"pos": [float(v) for v in cs], "quat": [float(v) for v in o["obb"][0]["quat"]]},
-                           "material": guess_material(cls), "notes": "static structure from evidence"}
+                           "material": material_from_evidence(o), "notes": "static structure from evidence"}
             if _confidence(o.get("confidence")) is not None: static_node["confidence"] = _confidence(o["confidence"])
             program["static"].append(static_node)
             continue
         first = o["obb"][0]; size = [float(max(s, 0.05)) for s in first["size"]]
         node = {"id": slug(o["id"]), "class": o["class_guess"][:40],
                 "geom": {"kind": "asset", "query": o["class_guess"][:80], "extent": size}, "pose": {"pos": [float(v) for v in first["center"]], "quat": [float(v) for v in first["quat"]]},
-                "material": guess_material(o["class_guess"]), "notes": o["motion_guess"].get("notes", "")[:200]}
+                "material": material_from_evidence(o), "notes": o["motion_guess"].get("notes", "")[:200]}
         if _confidence(o.get("confidence")) is not None: node["confidence"] = _confidence(o["confidence"])
         m = motion_from_guess(o["motion_guess"], o["obb"])
         if m:
