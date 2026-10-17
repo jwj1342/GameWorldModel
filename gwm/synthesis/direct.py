@@ -84,6 +84,11 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
                 "geom": {"kind": "asset", "query": o["class_guess"][:80], "extent": size}, "pose": {"pos": [float(v) for v in first["center"]], "quat": [float(v) for v in first["quat"]]},
                 "material": guess_material(o["class_guess"]), "notes": o["motion_guess"].get("notes", "")[:200]}
         if _confidence(o.get("confidence")) is not None: node["confidence"] = _confidence(o["confidence"])
+        # 感知看出来的关节写进交互那一半。它和 motion 并列但不是一回事：
+        # motion 说的是「视频里它自己怎么动」，interaction 说的是「用户能怎么动它」。
+        art = o.get("articulation")
+        if isinstance(art, dict) and art.get("grab") in ("hinge", "slide"):
+            node["interaction"] = {k: v for k, v in art.items() if k != "evidence"}
         m = motion_from_guess(o["motion_guess"], o["obb"])
         if m:
             base = m.pop("_base", None)

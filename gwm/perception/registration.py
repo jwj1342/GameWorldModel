@@ -102,6 +102,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     residuals: list[float | None] = []
     steps_t: list[float] = []                  # 每一步解出来的平移量
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
+    step_transforms: list[tuple[np.ndarray, np.ndarray]] = []
     R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
     for index, current in enumerate(clouds[1:], start=1):
         cloud = np.asarray(current, float)
@@ -112,6 +113,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             # 每步的修正量是判静止最稳的信号：累积位置会被缓慢滑移带偏，
             # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。
             steps_t.append(float(np.linalg.norm(step["translation"])))
+            step_transforms.append((step["rotation"].copy(), step["translation"].copy()))
             angle = (np.trace(step["rotation"]) - 1.0) / 2.0
             steps_r.append(float(np.degrees(np.arccos(np.clip(angle, -1.0, 1.0)))))
             R_acc = step["rotation"] @ R_acc
@@ -128,6 +130,8 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     return {"positions": [np.asarray(p, float).tolist() for p in positions],
             "residuals": residuals, "anchor": point.tolist(),
             "step_translation": steps_t, "step_rotation_deg": steps_r,
+            "total_rotation": R_acc.tolist(), "total_translation": t_acc.tolist(),
+            "step_transforms": step_transforms,
             "ok": True, "frames": len(positions)}
 
 
@@ -149,3 +153,87 @@ def looks_static(tracked: dict, scale_m: float, *, translation_frac: float = 0.0
     moved = float(np.median(translations))
     turned = float(np.median(rotations)) if rotations else 0.0
     return moved <= limit and turned <= rotation_deg
+
+
+def _axis_of(rotation: np.ndarray) -> tuple[np.ndarray, float]:
+    """旋转矩阵的转轴和转角（弧度）。转角接近零时轴没有意义，返回零向量。"""
+    angle = float(np.arccos(np.clip((np.trace(rotation) - 1.0) / 2.0, -1.0, 1.0)))
+    if angle < 1e-6:
+        return np.zeros(3), angle
+    axis = np.array([rotation[2, 1] - rotation[1, 2],
+                     rotation[0, 2] - rotation[2, 0],
+                     rotation[1, 0] - rotation[0, 1]], float)
+    norm = float(np.linalg.norm(axis))
+    if norm < 1e-9:
+        return np.zeros(3), angle
+    return axis / norm, angle
+
+
+def infer_articulation(tracked: dict, *, min_rotation_deg: float = 8.0,
+                       min_slide_m: float = 0.05, axis_consistency: float = 0.85,
+                       slide_straightness: float = 0.9) -> dict | None:
+    """从配准解出来的逐步变换里推断这是不是一个关节件。
+
+    这是把「关节参数靠手写」换成「从视频里看出来」的那一步。配准每一步给的就是刚体
+    变换，所以关节的两种形态可以直接读出来：
+
+    * **铰链**：每一步都绕大致同一根轴转。轴取各步转轴的主方向，支点由整段的累积
+      变换解出来——绕轴 a 过支点 c 转 R 的刚体变换，平移部分满足 t = (I - R) c。
+    * **滑轨**：每一步几乎不转，平移方向又都差不多。轴取平移的主方向，行程取投影到
+      轴上的最小和最大值。
+
+    判不出来就返回 None。宁可不写，也不要往程序里塞一个猜的关节——用户拖一下就会发现。
+    """
+    transforms = tracked.get("step_transforms") or []
+    if len(transforms) < 4:
+        return None
+    axes, angles, translations = [], [], []
+    for rotation, translation in transforms:
+        axis, angle = _axis_of(np.asarray(rotation, float))
+        if angle > 1e-4 and np.linalg.norm(axis) > 0:
+            # 轴的正负号没有意义，统一到同一个半空间再求平均
+            axes.append(axis if axis[np.argmax(np.abs(axis))] >= 0 else -axis)
+            angles.append(angle)
+        translations.append(np.asarray(translation, float))
+
+    total_rotation = np.asarray(tracked.get("total_rotation") or np.eye(3), float)
+    total_axis, total_angle = _axis_of(total_rotation)
+    if axes and np.degrees(total_angle) >= min_rotation_deg:
+        stacked = np.stack(axes)
+        mean_axis = stacked.mean(0)
+        norm = float(np.linalg.norm(mean_axis))
+        if norm > 1e-9:
+            mean_axis = mean_axis / norm
+            consistency = float(np.abs(stacked @ mean_axis).mean())
+            if consistency >= axis_consistency:
+                t_total = np.asarray(tracked.get("total_translation") or np.zeros(3), float)
+                # (I - R) 沿转轴是奇异的，所以必须截断小奇异值：rcond=None 会让零空间
+                # 那个方向主导出一个天文数字。截断之后得到的是垂直于轴的那个分量，
+                # 支点沿轴可以任意平移——铰链本来就是一条线，不是一个点。
+                pivot, *_ = np.linalg.lstsq(np.eye(3) - total_rotation, t_total, rcond=1e-6)
+                # 沿轴挪到离物体最近的位置，写进程序之后人看得懂
+                anchor = np.asarray(tracked.get("anchor") or np.zeros(3), float)
+                pivot = pivot + mean_axis * float((anchor - pivot) @ mean_axis)
+                return {"grab": "hinge", "axis": [float(v) for v in mean_axis],
+                        "pivot": [float(v) for v in pivot],
+                        "limit": [0.0, round(float(total_angle), 4)],
+                        "evidence": {"axis_consistency": round(consistency, 3),
+                                     "total_rotation_deg": round(float(np.degrees(total_angle)), 2)}}
+
+    if translations:
+        stacked = np.stack(translations)
+        total = stacked.sum(0)
+        travel = float(np.linalg.norm(total))
+        if travel >= min_slide_m and np.degrees(total_angle) < min_rotation_deg:
+            direction = total / travel
+            # 每一步都沿着同一个方向，才算滑轨；来回乱走的不是
+            projected = stacked @ direction
+            straightness = float(np.abs(projected).sum() / max(np.linalg.norm(stacked, axis=1).sum(), 1e-9))
+            if straightness >= slide_straightness:
+                cumulative = np.cumsum(projected)
+                return {"grab": "slide", "axis": [float(v) for v in direction],
+                        "limit": [round(float(min(0.0, cumulative.min())), 4),
+                                  round(float(max(0.0, cumulative.max())), 4)],
+                        "evidence": {"straightness": round(straightness, 3),
+                                     "travel_m": round(travel, 4)}}
+    return None

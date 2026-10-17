@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
-from .registration import looks_static, track_rigid
+from .registration import infer_articulation, looks_static, track_rigid
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -241,7 +241,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         # 可见面一变它就跟着动；配准只解帧与帧之间的变换，不依赖单帧算出一个稳定的量。
         # 实测相对第一帧的位移误差 0.253 -> 0.188 m（见 scripts/probe_motion_signal.py）。
         # 留一个开关是因为静止物体的漂移目前还比包围盒中心大，出问题时要能退回去。
-        motion_positions, motion_source = c_a, "obb_centre"
+        motion_positions, motion_source, articulation = c_a, "obb_centre", None
         if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
             tracked = track_rigid(clouds)
             if tracked["ok"] and len(tracked["positions"]) == len(c_a):
@@ -258,6 +258,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     # 中心，保住绝对位置，用它的形状。
                     motion_positions = registered - registered[0] + c_a[0]
                     motion_source = "cross_frame_registration"
+                    # 关节件的两种形态可以直接从逐步刚体变换里读出来，不用再手写
+                    articulation = infer_articulation(tracked)
         motion_result = estimate_motion(ts_a, motion_positions, q_a, cfg, size=median_size, coordinate_space="world",
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
@@ -272,6 +274,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
                         "observations": observations,
+                        **({"articulation": articulation} if articulation else {}),
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
                         "hypotheses": copy.deepcopy(o.identity_hypotheses) + ([motion_result["hypothesis"]] if motion_result["hypothesis"] else []),

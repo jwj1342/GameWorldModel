@@ -106,3 +106,58 @@ def test_真的在动的物体不会被判成静止():
 def test_没有步数时不乱判():
     from gwm.perception.registration import looks_static
     assert looks_static({"step_translation": []}, scale_m=1.0) is False
+
+
+def hinge_clouds(total_deg=50.0, steps=12, pivot=(-0.4, 0.0, 0.0), seed=21):
+    """绕 y 轴、过 pivot 转动的门板，每帧只看得见一部分。"""
+    base = box_cloud(n=1200, size=(0.7, 1.4, 0.08), seed=seed)
+    c = np.array(pivot, float)
+    clouds = []
+    for k in range(steps):
+        R = rot_y(total_deg * k / (steps - 1))
+        moved = (base - c) @ R.T + c
+        cut = np.quantile(moved[:, 2], 0.15 + 0.02 * k)
+        clouds.append(moved[moved[:, 2] > cut])
+    return clouds
+
+
+def slide_clouds(total=0.35, steps=12, axis=(0.0, 0.0, 1.0), seed=23):
+    base = box_cloud(n=1200, size=(0.6, 0.25, 0.5), seed=seed)
+    a = np.array(axis, float)
+    return [base + a * (total * k / (steps - 1)) for k in range(steps)]
+
+
+def test_从配准里看出这是个铰链():
+    from gwm.perception.registration import infer_articulation
+    spec = infer_articulation(track_rigid(hinge_clouds()))
+    assert spec is not None and spec["grab"] == "hinge", spec
+    axis = np.array(spec["axis"])
+    assert abs(abs(axis[1]) - 1.0) < 0.15, f"转轴该是 y，实际 {axis}"
+    assert np.degrees(spec["limit"][1]) > 25, f"开合角度该接近 50 度，实际 {np.degrees(spec['limit'][1]):.1f}"
+    assert abs(np.array(spec["pivot"])[0] + 0.4) < 0.25, f"支点该在 x=-0.4 附近，实际 {spec['pivot']}"
+
+
+def test_从配准里看出这是个滑轨():
+    from gwm.perception.registration import infer_articulation
+    spec = infer_articulation(track_rigid(slide_clouds()))
+    assert spec is not None and spec["grab"] == "slide", spec
+    axis = np.array(spec["axis"])
+    assert abs(abs(axis[2]) - 1.0) < 0.15, f"滑轨方向该是 z，实际 {axis}"
+    assert spec["limit"][1] > 0.2, f"行程该接近 0.35 m，实际 {spec['limit']}"
+
+
+def test_静止的物体不该被说成关节件():
+    """宁可不写，也不要往程序里塞一个猜的关节——用户拖一下就会发现。"""
+    from gwm.perception.registration import infer_articulation
+    base = box_cloud(n=1200, seed=29)
+    clouds = [base[base[:, 2] > np.quantile(base[:, 2], 0.2 + 0.03 * k)] for k in range(12)]
+    assert infer_articulation(track_rigid(clouds)) is None
+
+
+def test_自由平移不会被说成滑轨以外的东西():
+    from gwm.perception.registration import infer_articulation
+    base = box_cloud(n=1200, seed=31)
+    rng = np.random.default_rng(5)
+    clouds = [base + rng.normal(0, 0.12, 3) for _ in range(12)]     # 乱走
+    spec = infer_articulation(track_rigid(clouds))
+    assert spec is None or spec["grab"] != "hinge", spec
