@@ -248,6 +248,23 @@ def _semantic_findings(evidence: dict) -> list[dict]:
 
     for i, obj in enumerate(objects):
         base = f"/objects/{i}"
+        appearance = obj.get("appearance")
+        if appearance is not None:
+            samples = appearance["samples"]
+            if (appearance["base_color"] != UNKNOWN) != bool(samples):
+                findings.append(_diag(f"{base}/appearance", "color_support_mismatch",
+                    "measured color requires samples; unknown color must not claim samples",
+                    "retain only traceable color measurements", "evidence_semantic", "error"))
+            seen_color_frames = set()
+            for j, sample in enumerate(samples):
+                frame = frame_by_id.get(sample["frame_index"])
+                if (frame is None or sample["frame_index"] in seen_color_frames or
+                    abs(frame["t"] - sample["t"]) > 1e-6 or
+                    (frame["source"]["ref"] != UNKNOWN and frame["source"]["ref"] != sample["image_ref"])):
+                    findings.append(_diag(f"{base}/appearance/samples/{j}", "color_frame_mismatch",
+                        "color sample does not match a unique registered frame/time/source",
+                        "use the matching frame and mask", "evidence_semantic", "error"))
+                seen_color_frames.add(sample["frame_index"])
         if obj["class_guess"] == UNKNOWN:
             findings.append(_diag(
                 f"{base}/class_guess", "unknown_value", "object class is unknown",

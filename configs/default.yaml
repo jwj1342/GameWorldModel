@@ -12,6 +12,8 @@ perception:
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
   segmentation_fallbacks: [none]   # 检测器崩了也要出包，退化成只有静态结构的场景
   max_objects: 8
+  color_min_pixels: 4             # 最少实测像素；缺图/缺mask时不猜颜色
+  color_aspect_tolerance: 0.02     # 相对长宽比容差，允许几何模型patch尺寸取整
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
   detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
