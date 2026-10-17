@@ -99,6 +99,9 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     model = np.asarray(clouds[0], float)
     point = model.mean(0) if anchor is None else np.asarray(anchor, float)
     positions = [point.copy()]
+    # 朝向也要一起给出来。旋转类的运动（spin、revolute、周期转动）全靠朝向拟合，
+    # 而包围盒的朝向是可见点在 xz 平面上的主轴，物体一转可见面就变，主轴跟着跳。
+    orientations = [np.eye(3)]
     residuals: list[float | None] = []
     steps_t: list[float] = []                  # 每一步解出来的平移量
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
@@ -127,7 +130,10 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                     model = model[rng.choice(len(model), model_points, replace=False)]
         residuals.append(step["rmse"] if step["ok"] else None)
         positions.append(R_acc.T @ (point - t_acc))
+        # R_acc 把第 k 帧映回第 0 帧，所以物体在第 k 帧相对第 0 帧的朝向是它的转置
+        orientations.append(R_acc.T.copy())
     return {"positions": [np.asarray(p, float).tolist() for p in positions],
+            "orientations": [np.asarray(r, float).tolist() for r in orientations],
             "residuals": residuals, "anchor": point.tolist(),
             "step_translation": steps_t, "step_rotation_deg": steps_r,
             "total_rotation": R_acc.tolist(), "total_translation": t_acc.tolist(),

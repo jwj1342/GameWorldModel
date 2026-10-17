@@ -241,26 +241,41 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         # 可见面一变它就跟着动；配准只解帧与帧之间的变换，不依赖单帧算出一个稳定的量。
         # 实测相对第一帧的位移误差 0.253 -> 0.188 m（见 scripts/probe_motion_signal.py）。
         # 留一个开关是因为静止物体的漂移目前还比包围盒中心大，出问题时要能退回去。
-        motion_positions, motion_source, articulation = c_a, "obb_centre", None
+        motion_positions, motion_quaternions = c_a, q_a
+        motion_source, articulation = "obb_centre", None
         if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
             tracked = track_rigid(clouds)
             if tracked["ok"] and len(tracked["positions"]) == len(c_a):
                 diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))
+                def _registered_quats(base_quat):
+                    """把配准解出的朝向接到第一帧的包围盒朝向上。
+
+                    返回的是绝对朝向序列，和 q_a 同一个约定，所以可以直接替换。
+                    """
+                    base = R.from_quat(base_quat)
+                    return np.asarray([(R.from_matrix(np.asarray(m, float)) * base).as_quat()
+                                       for m in tracked["orientations"]], float)
+
                 if looks_static(tracked, diag):
                     # 每步修正都接近单位阵，说明物体没动。这种情况下配准的累积轨迹会被
                     # 缓慢滑移带偏（实测静止漂移 0.286 m，比包围盒中心的 0.182 m 还大），
                     # 所以把位置钉在第一帧，让静止这个假设干干净净地成立。
                     motion_positions = np.repeat(c_a[:1], len(c_a), axis=0)
+                    # 位置钉住了，朝向也要钉住。只钉位置的话，包围盒朝向的抖动会和
+                    # 「静止」这个假设打架，静止候选反而拿不到高分。
+                    motion_quaternions = np.repeat(q_a[:1], len(q_a), axis=0)
                     motion_source = "registration_static"
                 else:
                     registered = np.asarray(tracked["positions"], float)
                     # 配准给的是相对锚点的轨迹，锚点落在可见表面上。平移到第一帧的包围盒
                     # 中心，保住绝对位置，用它的形状。
                     motion_positions = registered - registered[0] + c_a[0]
+                    if len(tracked.get("orientations") or []) == len(q_a):
+                        motion_quaternions = _registered_quats(q_a[0])
                     motion_source = "cross_frame_registration"
                     # 关节件的两种形态可以直接从逐步刚体变换里读出来，不用再手写
                     articulation = infer_articulation(tracked)
-        motion_result = estimate_motion(ts_a, motion_positions, q_a, cfg, size=median_size, coordinate_space="world",
+        motion_result = estimate_motion(ts_a, motion_positions, motion_quaternions, cfg, size=median_size, coordinate_space="world",
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
