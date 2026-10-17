@@ -11,11 +11,14 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=6G
 #SBATCH --time=03:00:00
-#SBATCH --output=%x_%A_%a.out
+#SBATCH --output=/scratch/%u/gwm/logs/%x_%A_%a.out
 set -eu
 ROOT=${1:?用法: sbatch --array=0-N scripts/dataset_render_array.sh <generate_dataset 的输出目录>}
-source "$(dirname "$0")/setup_env.sh"
-cd "$(dirname "$0")/.."
+# Slurm 会把作业脚本拷到 spool 目录再执行，所以 $0 指向的是 /var/spool/...，
+# 用 dirname 推不回仓库。提交目录才是仓库，拿不到就退回脚本自己记下的路径。
+REPO=${SLURM_SUBMIT_DIR:-/scratch/jwj/research/GameWorldModel}
+source "$REPO/scripts/setup_env.sh"
+cd "$REPO"
 export PYTHONUTF8=1
 python -m scripts.render_dataset \
   --root "$ROOT" --out "${ROOT}_rendered" \
