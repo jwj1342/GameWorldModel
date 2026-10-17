@@ -87,3 +87,16 @@ def test_多个物体的覆盖率取并集而不是相加():
     b = np.zeros((10, 10), dtype=bool); b[3:8, :] = True        # 和 a 有重叠
     report = fidelity({"objects": [], "static": []}, None, None, {"a": {0: a}, "b": {0: b}})
     assert report["evidence_pixel_coverage"] == pytest.approx(0.8)
+
+
+def test_覆盖率按帧平均而不是只看一帧():
+    """多关键帧检测出来的物体，掩码从它被检到的那一帧才开始有。只统计第一帧的话，
+    物体数从 9 涨到 62 这个指标都不会动——实测踩过这个坑。"""
+    import numpy as np
+    early = np.zeros((10, 10), dtype=bool); early[0:2, :] = True      # 第 0 帧占 20%
+    late = np.zeros((10, 10), dtype=bool); late[0:8, :] = True        # 第 5 帧占 80%
+    report = fidelity({"objects": [], "static": []}, None, None,
+                      {"a": {0: early}, "b": {5: late}})
+    assert report["evidence_pixel_coverage"] == pytest.approx(0.5)    # (0.2 + 0.8) / 2
+    assert report["evidence_pixel_coverage_best"] == pytest.approx(0.8)
+    assert report["covered_frames"] == 2

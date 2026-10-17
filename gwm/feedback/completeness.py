@@ -79,17 +79,23 @@ def fidelity(program: dict, evidence: dict | None = None,
     # 一个塞满东西的房间只检出九个物体、九个全都重建了出来，也会得到满分，
     # 而那恰恰是「重建出来不像」最主要的来源。
     if masks:
-        covered = union = None
-        for per_frame in masks.values():
-            for frame_index, mask in per_frame.items():
-                if union is None:
-                    import numpy as np
-                    union = np.zeros_like(np.asarray(mask), dtype=bool)
-                    covered = frame_index
-                if frame_index == covered:
-                    union |= np.asarray(mask).astype(bool)
-        if union is not None and union.size:
-            out["evidence_pixel_coverage"] = round(float(union.mean()), 3)
+        # 要按帧分别算再平均，不能只看某一帧。多关键帧检测出来的物体，掩码是从它被
+        # 检到的那一帧才开始有的；只统计第一帧的话，物体数从 9 涨到 62 这个指标都不动，
+        # 而那恰恰是这项指标存在的意义。
+        import numpy as np
+        per_frame: dict = {}
+        for mask_set in masks.values():
+            for frame_index, mask in mask_set.items():
+                array = np.asarray(mask).astype(bool)
+                if frame_index not in per_frame:
+                    per_frame[frame_index] = np.zeros_like(array)
+                if per_frame[frame_index].shape == array.shape:
+                    per_frame[frame_index] |= array
+        fractions = sorted(float(u.mean()) for u in per_frame.values() if u.size)
+        if fractions:
+            out["evidence_pixel_coverage"] = round(sum(fractions) / len(fractions), 3)
+            out["evidence_pixel_coverage_best"] = round(fractions[-1], 3)
+            out["covered_frames"] = len(fractions)
     return out
 
 
@@ -99,10 +105,15 @@ def interactivity(program: dict) -> dict:
     total = len(objects)
     if not total:
         return {"objects": 0}
-    grabbable = sum(1 for o in objects if (o.get("interaction") or {}).get("grab") is not False)
+    grabbable = sum(1 for o in objects
+                    if (o.get("interaction") or {}).get("grab") not in (False, "none"))
     motions = [(o.get("motion") or {}).get("type", "static") for o in objects]
     scripted = sum(1 for t in motions if t not in ("static", "dynamic"))
-    articulated = sum(1 for t in motions if t in ("revolute", "prismatic"))
+    # 关节有两个来源：视频里观测到的铰接运动，以及程序声明的可操纵关节
+    joint_modes = {"slide", "hinge"}
+    articulated = sum(1 for o, t in zip(objects, motions)
+                      if t in ("revolute", "prismatic")
+                      or (o.get("interaction") or {}).get("grab") in joint_modes)
     simulated = sum(1 for t in motions if t == "dynamic")
     return {
         "objects": total,

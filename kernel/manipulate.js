@@ -12,13 +12,41 @@
 import * as THREE from 'three';
 
 const MAX_SPEED = 12;          // m/s，防止鼠标猛甩时把物体弹飞
+const MAX_SPIN = 12;           // rad/s，同理
 const PICK_LAYERS = ['object'];
+
+/** 这个物体怎么被抓。三种约束，默认自由拖动。
+ *
+ *   free   —— 没有约束，杯子、枕头、箱子
+ *   slide  —— 沿一根轴平移，有行程限位，抽屉
+ *   hinge  —— 绕一根轴转动，有角度限位，柜门
+ *
+ * 约束写在程序的 `interaction` 字段里，和 `motion` 并列但不是一回事：
+ * `motion` 说的是「视频里它自己怎么动」，`interaction` 说的是「用户能怎么动它」。
+ */
+export function interactionOf(entry) {
+  const spec = entry?.spec?.interaction;
+  if (spec?.grab === false || spec?.grab === 'none') return null;
+  const mode = spec?.grab === 'hinge' || spec?.grab === 'slide' ? spec.grab : 'free';
+  if (mode === 'free') return { mode: 'free' };
+  const axis = new THREE.Vector3(...(spec.axis ?? [0, 1, 0]));
+  if (axis.lengthSq() < 1e-9) return { mode: 'free' };
+  axis.normalize();
+  const limit = Array.isArray(spec.limit) && spec.limit.length === 2
+    ? [Number(spec.limit[0]), Number(spec.limit[1])] : null;
+  return { mode, axis, limit, pivot: spec.pivot ? new THREE.Vector3(...spec.pivot) : null };
+}
 
 /** 这个物体能不能被抓。静态结构（地面、墙）默认不能，程序里可以显式关掉某个物体。 */
 export function canGrab(entry) {
   if (!entry || !entry.body) return false;
-  if (entry.spec?.interaction?.grab === false) return false;
+  if (!interactionOf(entry)) return false;
   return PICK_LAYERS.includes(entry.kind);
+}
+
+function clamp(value, limit) {
+  if (!limit) return value;
+  return Math.min(Math.max(value, Math.min(limit[0], limit[1])), Math.max(limit[0], limit[1]));
 }
 
 export class Manipulator {
@@ -50,7 +78,11 @@ export class Manipulator {
     // 抓住期间当作物理驱动：脚本运动让位，位姿由仿真读回来
     entry.dynamic = true; entry.simulated = true; entry.grabbed = true;
     const offset = entry.group.position.clone().sub(point);
-    this.grabbed = { entry, offset, distance: this.camera.position.distanceTo(point), restore };
+    const constraint = interactionOf(entry);
+    // 抽屉和柜门要记住静止状态：行程和角度都是相对它量的，松手再抓也不该漂移
+    const rest = { pos: entry.group.position.clone(), quat: entry.group.quaternion.clone() };
+    this.grabbed = { entry, offset, distance: this.camera.position.distanceTo(point),
+                     restore, constraint, rest };
     this.target.copy(entry.group.position);
     this.log.push({ event: 'grab', id: entry.id, at: point.toArray() });
     return true;
@@ -82,14 +114,52 @@ export class Manipulator {
     return true;
   }
 
+  /** 把拖动目标投到约束上。自由拖动原样返回；抽屉只保留沿轴的分量并卡住行程；
+   *  柜门换算成绕轴的角度并卡住开合范围，同时给出该有的朝向。 */
+  constrain(desired) {
+    const { constraint, rest } = this.grabbed;
+    if (!constraint || constraint.mode === 'free') return { pos: desired, quat: null, value: null };
+    const { mode, axis, limit } = constraint;
+    if (mode === 'slide') {
+      const along = desired.clone().sub(rest.pos).dot(axis);
+      const value = clamp(along, limit);
+      return { pos: rest.pos.clone().addScaledVector(axis, value), quat: null, value };
+    }
+    const pivot = constraint.pivot ?? rest.pos;
+    // 投到垂直于转轴的平面上，再量从静止位置转过了多少
+    const toRest = rest.pos.clone().sub(pivot);
+    const toWant = desired.clone().sub(pivot);
+    const flat = (v) => v.clone().addScaledVector(axis, -v.dot(axis));
+    const a = flat(toRest), b = flat(toWant);
+    if (a.lengthSq() < 1e-9 || b.lengthSq() < 1e-9) return { pos: rest.pos.clone(), quat: rest.quat.clone(), value: 0 };
+    const sign = Math.sign(a.clone().cross(b).dot(axis)) || 1;
+    const raw = sign * a.angleTo(b);
+    const value = clamp(raw, limit);
+    const turn = new THREE.Quaternion().setFromAxisAngle(axis, value);
+    const pos = pivot.clone().add(toRest.clone().applyQuaternion(turn));
+    return { pos, quat: rest.quat.clone().premultiply(turn), value };
+  }
+
   /** 每帧在 physics.step() 之前调一次。 */
   update() {
     if (!this.grabbed) return;
     const { entry } = this.grabbed;
-    const delta = this.target.clone().sub(entry.group.position);
-    const velocity = delta.divideScalar(this.dt);
+    const goal = this.constrain(this.target);
+    this.grabbed.value = goal.value;
+    const velocity = goal.pos.clone().sub(entry.group.position).divideScalar(this.dt);
     if (velocity.length() > MAX_SPEED) velocity.setLength(MAX_SPEED);
     entry.body.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
+    if (!goal.quat) return;
+    // 朝向也用角速度推，不直接改——这样柜门扫过去仍然会撞到挡路的东西
+    const delta = goal.quat.clone().multiply(entry.group.quaternion.clone().invert());
+    const angle = 2 * Math.acos(Math.min(1, Math.abs(delta.w)));
+    const sin = Math.sqrt(Math.max(0, 1 - delta.w * delta.w));
+    if (angle < 1e-6 || sin < 1e-9) { entry.body.setAngvel({ x: 0, y: 0, z: 0 }, true); return; }
+    const flip = delta.w < 0 ? -1 : 1;
+    const spin = new THREE.Vector3(delta.x, delta.y, delta.z)
+      .multiplyScalar(flip * angle / sin / this.dt);
+    if (spin.length() > MAX_SPIN) spin.setLength(MAX_SPIN);
+    entry.body.setAngvel({ x: spin.x, y: spin.y, z: spin.z }, true);
   }
 
   release() {

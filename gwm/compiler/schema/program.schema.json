@@ -42,6 +42,12 @@
         "metalness": {"type": "number", "minimum": 0, "maximum": 1}, "emissive": {"$ref": "#/$defs/color"},
         "emissive_intensity": {"type": "number", "minimum": 0}, "opacity": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}},
     "material": {"anyOf": [{"$ref": "#/$defs/materialName"}, {"$ref": "#/$defs/color"}, {"$ref": "#/$defs/surface"}]},
+    "interaction": {"type": "object", "additionalProperties": false,
+      "properties": {
+        "grab": {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["free", "slide", "hinge", "none"]}]},
+        "axis": {"$ref": "#/$defs/vec3"}, "pivot": {"$ref": "#/$defs/vec3"},
+        "limit": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
+        "notes": {"type": "string"}}},
     "lighting": {"type": "object", "additionalProperties": false,
       "properties": {
         "ambient": {"type": "object", "additionalProperties": false,
@@ -88,6 +94,6 @@
         "geom": {"anyOf": [{"$ref": "#/$defs/primitiveGeom"}, {"$ref": "#/$defs/assetGeom"}, {"$ref": "#/$defs/generatedGeom"}]},
         "pose": {"$ref": "#/$defs/pose"}, "instances": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/pose"}},
         "material": {"$ref": "#/$defs/material"}, "motion": {"$ref": "#/$defs/motion"}, "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
-        "support": {"type": "string"}, "notes": {"type": "string"}}}
+        "support": {"type": "string"}, "notes": {"type": "string"}, "interaction": {"$ref": "#/$defs/interaction"}}}
   }
 }

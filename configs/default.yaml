@@ -14,7 +14,11 @@ perception:
   max_objects: 8
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
-  detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
+  detection_keyframes: 6          # 在 6 个均匀关键帧上检测后关联。实测这是召回最大的杠杆：
+                                  # 同一段视频 1 帧检出 9 个物体、画面覆盖 0.23，6 帧检出 62 个、
+                                  # 覆盖 0.53，代价是感知从 50 秒涨到 108 秒。再降阈值能到 0.78，
+                                  # 但资产命中率从 0.74 掉到 0.58（检出一堆对不上类别的东西），
+                                  # 耗时翻到 241 秒，所以阈值保持不动。
   association:                    # 类别／重叠／空间／时间关联；保留身份候选
     max_frame_gap: 24
     max_bbox_center_distance_ratio: 2.5
