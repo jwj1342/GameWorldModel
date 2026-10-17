@@ -56,6 +56,10 @@ def resolve_assets(program: dict, cfg: dict | None = None) -> dict:
                 request["ref_miss"] = geom["ref"]
             asset, score, how = (hits[0][0], hits[0][1], "library") if hits and hits[0][1] >= min_score else (None, 0.0, None)
         if asset is not None:
+            # 挂了真网格之后，程序里那条 material 不生效——内核用 GLB 自带的材质
+            # （kernel/scene.js 的 buildNode）。美术做好的多色材质比我们量到的一个
+            # 平均色更接近真实，但这件事必须记下来，否则会有人以为 #8 量的颜色用上了。
+            request["program_material_applied"] = False
             request.update(resolved=how, asset_id=asset.id, kit=asset.kit,
                            score=score, license="CC0",
                            source=str(Path(root) / asset.path),

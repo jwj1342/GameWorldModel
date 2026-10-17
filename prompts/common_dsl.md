@@ -8,6 +8,7 @@ Vocabulary (only these are allowed):
 - events: {type:"despawn_on_contact", with:"player"} | {type:"trigger_on_enter", volume{pos,extent}, target, action}.
 - camera: {intrinsics{fov_deg, aspect, far}, keyframes[{t,pos,quat}], interp}. Camera quaternions are three.js convention (camera looks down its -Z).
 - material is the style half. Three forms, pick whichever fits what you see:
+  - When Evidence provides observed_sRGB, prefer {base_color:"#rrggbb"} for that target. It is an observed display-color proxy, not an illumination-corrected albedo; unknown is not a measured color. Do not infer roughness, metalness or lighting from this measurement alone.
   - a palette word: grass stone wood metal concrete plastic rubber gold red blue green yellow white black lava water glass cardboard default.
     These are the only accepted words. Anything else is rejected, so do not invent one.
   - a hex colour "#rrggbb" when the palette has nothing close to what the frames show.

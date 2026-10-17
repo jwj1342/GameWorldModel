@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
+from .color import observe_colors
 from .registration import infer_articulation, looks_static, track_rigid
 
 
@@ -196,6 +197,9 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         if lam <= 0 or np.linalg.norm(hit - origin) > 60: return None
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
+    appearances = observe_colors(frames, {o.id: o.masks for o in tracks.objects}, tracks.frame_size,
+                                 cfg["perception"].get("color_min_pixels", 4),
+                                 cfg["perception"].get("color_aspect_tolerance", 0.02))
     for o in tracks.objects:
         obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
         best_frame, best_area = None, 0
@@ -289,6 +293,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
                         "observations": observations,
+                        "appearance": appearances[o.id],
                         **({"articulation": articulation} if articulation else {}),
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
