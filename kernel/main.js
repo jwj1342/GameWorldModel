@@ -108,6 +108,29 @@ async function boot() {
       return { t: game.t, frame: game.frame, mode: game.modeName, player: template.state(),
         objects: registry.map(e => ({ id: e.id, name: e.name, kind: e.kind, class: e.class, pos: e.group.position.toArray(), quat: e.group.quaternion.toArray(), visible: e.visible, dynamic: e.dynamic })) };
     },
+    // 把场景放下来自己稳一稳：只动没有脚本运动的物体——它们的位姿完全来自感知，
+    // 而感知给的是按可见表面拟合的包围盒中心，常常半悬空或者和别的物体穿插。
+    // 有脚本运动的物体位姿由 pose(t) 决定，不参与。
+    settle(seconds = 1.5) {
+      const movable = registry.filter(e => e.kind === 'object'
+        && (!e.spec.motion || e.spec.motion.type === 'static'));
+      const before = new Map(movable.map(e => [e.id, e.group.position.clone()]));
+      const saved = movable.map(e => ({ e, dynamic: e.dynamic, simulated: e.simulated }));
+      for (const e of movable) { physics.makeDynamic(e); e.dynamic = true; e.simulated = true; }
+      const steps = Math.max(1, Math.round(seconds / DT));
+      for (let i = 0; i < steps; i++) {
+        physics.step();
+        for (const e of registry) physics.syncSimulated(e);
+      }
+      const result = movable.map(e => ({
+        id: e.id,
+        pos: e.group.position.toArray(),
+        quat: e.group.quaternion.toArray(),
+        moved: e.group.position.distanceTo(before.get(e.id)),
+      }));
+      for (const s of saved) { s.e.dynamic = s.dynamic; s.e.simulated = s.simulated; }
+      return { seconds, settled: result };
+    },
     cameraInfo() { const c = activeCamera(); return { pos: c.position.toArray(), quat: c.quaternion.toArray(), fov: c.fov, aspect: c.aspect, near: c.near, far: c.far }; },
   });
   updateMotions(0); game.mode(game.modeName);

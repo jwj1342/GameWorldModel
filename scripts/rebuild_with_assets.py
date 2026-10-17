@@ -36,9 +36,24 @@ from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
+from gwm.synthesis.stabilise import apply_settled                # noqa: E402
 from gwm.config import load_config, site_name                   # noqa: E402
 from gwm.perception.run import load_masks, run_perception       # noqa: E402
 from gwm.synthesis.direct import evidence_to_program            # noqa: E402
+
+
+def _settle(game_dir: Path, out: Path, seconds: float) -> dict:
+    """调 harness 跑一段仿真。跑不起来就当没稳定过，不让它挡住整条链路。"""
+    import subprocess
+    target = out / "settle.json"
+    try:
+        subprocess.run([str(REPO / "scripts/node_harness.sh"), "settle.mjs",
+                        "--game", str(game_dir), "--out", str(target),
+                        "--seconds", str(seconds)], check=True, capture_output=True, timeout=600)
+        return json.loads(target.read_text(encoding="utf-8"))
+    except (subprocess.SubprocessError, OSError, ValueError) as error:
+        print(f"物理稳定跳过: {type(error).__name__}", flush=True)
+        return {}
 
 
 def main() -> int:
@@ -49,6 +64,8 @@ def main() -> int:
     ap.add_argument("--phrases", default="", help="逗号分隔的检测短语；留空走默认词表")
     ap.add_argument("--max-objects", type=int, default=0, help=">0 时覆盖配置里的物体数上限")
     ap.add_argument("--config", action="append", default=[])
+    ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
+    ap.add_argument("--settle-seconds", type=float, default=1.5)
     ap.add_argument("--no-image-retrieval", action="store_true",
                     help="只用文字检索，用来和带图像检索的结果做对照")
     a = ap.parse_args()
@@ -136,7 +153,32 @@ def main() -> int:
               f"{sorted({u['code'] for u in unresolved})}", flush=True)
 
     (out / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False), encoding="utf-8")
+    (out / "program_before_settle.json").write_text(
+        json.dumps(program, indent=1, ensure_ascii=False), encoding="utf-8")
     result = compile_program(program, out / "game", cfg)
+    rows = []
+    if result["ok"] and not a.no_settle:
+        # 编译一次先把场景放进物理里稳一稳，再把采纳的位姿写回去重编译。
+        # 感知给的是按可见表面拟合的包围盒中心，物体常常半悬空或互相穿插。
+        settled = _settle(Path(result["game_dir"]), out, a.settle_seconds)
+        rows = apply_settled(program, settled)
+        taken = [r for r in rows if r["applied"]]
+        timings["stabilised"] = len(taken)
+        if taken:
+            # 仿真允许极小的穿透来保持接触稳定，而校验器按几何判定，两者容差对不上。
+            # 所以稳定之后再过一次接触装配，把贴着地面的物体精确推到表面上。
+            after = [m for m in settle_on_ground(program) if m["applied"]]
+            print(f"物理稳定: {len(taken)} 个物体落位，最大位移 "
+                  f"{max(r['moved_m'] for r in taken):.3f} m，"
+                  f"放弃 {len(rows) - len(taken)} 个；稳定后再贴合 {len(after)} 个", flush=True)
+            (out / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False), encoding="utf-8")
+            result = compile_program(program, out / "game", cfg)
+            if not result["ok"]:
+                # 仍然不过就回到稳定之前那一版：稳定是锦上添花，不该把整条链路挡死
+                print("物理稳定后校验未过，回退到稳定前的位姿", flush=True)
+                program = json.loads((out / "program_before_settle.json").read_text(encoding="utf-8"))
+                result = compile_program(program, out / "game", cfg)
+                timings["stabilised"] = 0
     if not result["ok"]:
         print("编译失败:", json.dumps(result["validation"], ensure_ascii=False)[:400])
         return 2
@@ -147,7 +189,7 @@ def main() -> int:
     summary = {"clip": a.clip, "objects": len(program.get("objects", [])),
                "static": len(program.get("static", [])), "asset_nodes": asset_nodes,
                "assets_resolved": resolved, "image_retrieval": bool(index) if root else False,
-               "timings": timings, "completeness": completeness, "decisions": decisions, "metric_scale": scale_report, "resized": resized, "game_dir": result["game_dir"]}
+               "timings": timings, "completeness": completeness, "stabilised": rows, "decisions": decisions, "metric_scale": scale_report, "resized": resized, "game_dir": result["game_dir"]}
     (out / "rebuild.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k != "decisions"}, ensure_ascii=False))
     return 0
