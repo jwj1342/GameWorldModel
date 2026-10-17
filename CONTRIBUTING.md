@@ -63,11 +63,13 @@ GameWorldModel/
     feedback/    render.py metrics.py
     binding/     platformer.py
     playtest/    autopilot.py
+    dataset/     style.py behavior.py generator.py（合成数据集：样式与行为分两路采样）
   kernel/      固定运行时（buildless ESM）：main.js scene.js motions.js physics.js passes.js replay_camera.js templates/platformer_3p.js index.html
   harness/     Node + Playwright：common.mjs render.mjs playtest.mjs record.mjs serve.mjs
   examples/handwritten/program.json
   scripts/     setup_env.sh env_setup.sh stage_node_deps.sh download_weights.py pipeline.sh smoke_kernel.sh
                run_tests.sh serve_vlm.sh trim_clips.sh node_harness.sh collect_results.sh make_release.sh release_files/
+               generate_dataset.py render_dataset.py probe_perception_cost.py（合成数据集：造程序、渲视频、测感知成本）
   tests/       单元测试（CPU 作业跑）
   data/clips/{raw,trimmed}   视频（不入 git；SOURCES.md 入 git）
   out/<clip>/<run_id>/        产物（不入 git）

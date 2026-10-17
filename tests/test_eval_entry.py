@@ -121,9 +121,9 @@ def test_entry_reports_failure_instead_of_exiting_zero(tmp_path, monkeypatch, ca
     """全部评不出来还退 0 的话，作业脚本会把一次全盘失败当成成功。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     monkeypatch.setattr(ev, "eval_one",
-                        lambda run, work, harness: {"run": str(run), "clip": "x", "config": "c@0",
-                                                    "truth_link": "directory_name",
-                                                    "metrics": {"error": "没有重叠时间段"}})
+                        lambda run, work, harness, gt_roots=None: {"run": str(run), "clip": "x", "config": "c@0",
+                                                                   "truth_link": "directory_name",
+                                                                   "metrics": {"error": "没有重叠时间段"}})
     code = ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
                     "--out", str(tmp_path / "table.json")])
     assert code == 1
@@ -136,7 +136,7 @@ def test_the_same_run_given_twice_is_counted_once(tmp_path, monkeypatch):
     """同一个目录给两遍，表里不该占两行、也不该把样本量算成两个。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     seen = []
-    def one(run, work, harness):
+    def one(run, work, harness, gt_roots=None):
         seen.append(str(run))
         return {"run": str(run), "clip": "x", "config": "c@0", "truth_link": "directory_name",
                 "metrics": {"full": {"trajectory": {"median_m": 1.0, "per_object": {"o": 1.0}},
@@ -156,9 +156,9 @@ def test_name_only_truth_links_are_flagged_in_the_report(tmp_path, monkeypatch):
     """按名字定位到的真值要在报告里标出来，不能让读者以为来源核过了。"""
     monkeypatch.setattr(ev, "REPO", tmp_path)
     monkeypatch.setattr(ev, "eval_one",
-                        lambda run, work, harness: {"run": str(run), "clip": "合成场景", "config": "c@0",
-                                                    "truth_link": "program_meta_clip",
-                                                    "metrics": {"full": {}, "holdout": {}}})
+                        lambda run, work, harness, gt_roots=None: {"run": str(run), "clip": "合成场景", "config": "c@0",
+                                                                   "truth_link": "program_meta_clip",
+                                                                   "metrics": {"full": {}, "holdout": {}}})
     (tmp_path / "r1").mkdir()
     ev.main(["--run", str(tmp_path / "r1"), "--work", str(tmp_path / "w"),
              "--out", str(tmp_path / "table.json")])
@@ -300,3 +300,31 @@ def test_legacy_record_metadata_without_endpoint_remains_default_mode(tmp_path, 
     rec = tmp_path / "w" / "rec"
     write(rec / "record.json", {"frames": 10})
     assert ev._cached(rec, ev.record_key(program.read_bytes(), 1, 10))
+
+
+def test_extra_ground_truth_root_finds_a_dataset_outside_the_repo(tmp_path):
+    """合成数据集产在 $SCRATCH 上，不在仓库里。不能指进来的话，#4 的指标永远只有一个片段可算。"""
+    write(tmp_path / "syn_00001" / "program.json", {"meta": {"clip": "syn_00001"}})
+    path, link, _ = ev.find_ground_truth("syn_00001", [str(tmp_path)])
+    assert path == tmp_path / "syn_00001" / "program.json"
+    assert link == "directory_name"
+    # 不给这个根目录就找不到，默认行为不变
+    assert ev.find_ground_truth("syn_00001")[0] is None
+
+
+def test_extra_root_still_refuses_when_two_roots_both_match(tmp_path):
+    """两份不同的真值选错一份，误差是假的而且表上看不出来——加了外部根目录也不能放宽这条。"""
+    for name in ("a", "b"):
+        write(tmp_path / name / "syn_00002" / "program.json", {"meta": {"clip": "syn_00002"}})
+    path, link, candidates = ev.find_ground_truth(
+        "syn_00002", [str(tmp_path / "a"), str(tmp_path / "b")])
+    assert path is None and link == "ambiguous_directory_name" and len(candidates) == 2
+
+
+def test_ground_truth_path_outside_the_repo_is_recorded_absolute(tmp_path):
+    """仓库外的真值路径不能按仓库相对去写，那会直接抛 ValueError。"""
+    outside = tmp_path / "syn_00003" / "program.json"
+    write(outside, {"meta": {"clip": "syn_00003"}})
+    assert ev._display_path(outside) == str(outside)
+    inside = ev.REPO / "examples" / "handwritten" / "program.json"
+    assert ev._display_path(inside) == "examples/handwritten/program.json"
