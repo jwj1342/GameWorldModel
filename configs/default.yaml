@@ -12,6 +12,9 @@ perception:
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
   segmentation_fallbacks: [none]   # 检测器崩了也要出包，退化成只有静态结构的场景
   max_objects: 8
+  min_track_frame_frac: 0.0  # 被看到的帧数低于这个比例的轨迹直接丢掉。0 表示不过滤。
+                             # 只被看到几帧的轨迹基本是噪声（运动估计成功率 0%），
+                             # 而它们把物体精确率压得很低。合适的值用小批量真值指标定。
   color_min_pixels: 4             # 最少实测像素；缺图/缺mask时不猜颜色
   color_aspect_tolerance: 0.02     # 相对长宽比容差，允许几何模型patch尺寸取整
   grounding_box_threshold: 0.25

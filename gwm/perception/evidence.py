@@ -197,6 +197,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         if lam <= 0 or np.linalg.norm(hit - origin) > 60: return None
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
+    dropped_tracks: list[dict] = []
     appearances = observe_colors(frames, {o.id: o.masks for o in tracks.objects}, tracks.frame_size,
                                  cfg["perception"].get("color_min_pixels", 4),
                                  cfg["perception"].get("color_aspect_tolerance", 0.02))
@@ -235,6 +236,14 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             clouds.append(pts)
             if area > best_area: best_area, best_frame = area, fi
         if not obbs: continue
+        # 只在很少几帧里被看到的轨迹基本是噪声：实测被看到不到 10% 帧的物体，
+        # 运动估计成功率是 0%，而它们占了预测物体的一大块，把精确率压得很低
+        # （五十条小批量上真值 5 个物体、预测 11.5 个）。这里按被看到的帧数比例过滤。
+        min_frac = float(cfg["perception"].get("min_track_frame_frac", 0.0))
+        if min_frac > 0 and len(geom.frame_indices) and len(obbs) / len(geom.frame_indices) < min_frac:
+            dropped_tracks.append({"id": o.id, "frames": len(obbs),
+                                   "frac": round(len(obbs) / len(geom.frame_indices), 3)})
+            continue
         ts_a, c_a, q_a = np.asarray(ts), np.asarray(centers), np.asarray(quaternions)
         # smooth centers/sizes in the stored OBBs too
         cs = smooth_series(c_a, cfg["perception"]["motion"]["smooth_window"]); sz = smooth_series(np.asarray([ob["size"] for ob in obbs]), 9)
@@ -313,7 +322,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         "meta": {"clip": clip, "fps_sampled": float(round(1 / max(frames[1]["t"] - frames[0]["t"], 1e-6), 3)) if len(frames) > 1 else 0.0, "n_frames": len(frames), "duration": float(frames[-1]["t"]),
                  "geometry_backend": geom.backend, "segmentation_backend": tracks.backend, "tracks_backend": "mask_centroid_obb", "fallbacks": fallbacks,
                  "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices,
-                 "association_diagnostics": association_diagnostics},
+                 "association_diagnostics": association_diagnostics,
+                 "dropped_short_tracks": dropped_tracks},
         "frames": [{"frame_index": int(frame["index"]), "t": float(frame["t"]),
                     "source": {"kind": "video_frame", "ref": Path(frame["file"]).name if frame.get("file") else "unknown"}} for frame in frames],
         "camera": {"intrinsics": {"fx": float(K0[0, 0]), "fy": float(K0[1, 1]), "cx": float(K0[0, 2]), "cy": float(K0[1, 2]), "width": int(W), "height": int(H), "fov_deg": fov_deg}, "poses": cam_poses,
