@@ -1,7 +1,7 @@
 """End-to-end orchestration for one clip: perception -> generation + feedback loop -> binding -> playtest -> report.
 Usage: python -m gwm.run_clip --video data/clips/trimmed/x.mp4 --clip x [--phrases "a,b"] [--no-vlm] [--config configs/ablations/no_feedback.yaml] [--resume]"""
 from __future__ import annotations
-import argparse, copy, hashlib, json, platform, random, re, shutil, subprocess, sys, time, uuid
+import argparse, copy, hashlib, json, platform, random, shutil, subprocess, sys, time, uuid
 from pathlib import Path
 import numpy as np
 from .config import load_config, redact, site_name, REPO
@@ -35,19 +35,8 @@ def resolve_seed(cfg: dict, override: int | None = None) -> int | None:
 
 
 def configuration_identity(cfg: dict) -> str:
-    """Fingerprint effective settings, excluding credential fields, not keyframes.
-
-    The old display redactor also masks names containing 'key' (e.g. keyframes),
-    so its output alone cannot establish that sampling settings are unchanged.
-    """
-    credentials = re.compile(r"(?:^|_)(?:key|token|secret|password|authorization|credential)(?:$|_)", re.I)
-    def public(value):
-        if isinstance(value, dict):
-            return {key: "<redacted>" if credentials.search(key) else public(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [public(item) for item in value]
-        return value
-    payload = json.dumps(public(cfg), sort_keys=True, default=str, separators=(",", ":"))
+    """Fingerprint effective settings using the same redaction as run.json."""
+    payload = json.dumps(redact(cfg), sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

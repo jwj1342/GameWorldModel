@@ -1,5 +1,23 @@
 # 设计笔记
 
+## 配置快照与身份摘要的统一脱敏
+
+`redact()` 保守地匹配字段名中的 key/token/secret/password/authorization/credential
+子串，只对五个精确名称 `keyframes`、`keyframe_max_side`、`detection_keyframes`、
+`max_tokens`、`hazard_keywords` 放行。`apikey`、`api_keys`、`authtoken`、`keystore` 和 camelCase
+凭据拼写均隐藏，不再需要名称规范化。新增实验字段若被误遮，需审核后加入白名单，
+不能为了保留设置放宽凭据规则。白名单容器内部仍递归脱敏。
+凭据 `_file` 路径继续隐藏：它可能暴露个人目录/认证部署信息，且旧配置身份算法
+已排除这些路径；统一规则可保留凭据文件轮换的恢复行为。不读取凭据文件。
+`configuration_identity()` 对同一脱敏快照按原有规范化 JSON 算 SHA-256；
+本次保留 `hazard_keywords` 会使曾将它遮掉的配置摘要变化，旧恢复门禁会拒绝失配；
+改变危险词表也会改变新摘要。测试逐份检查已发布 YAML，仅允许显式凭据字段被遮，
+防止新增普通设置被静默误伤；不读取凭据文件。旧规则未遮掉的非标准字段（如 `apikey`），
+以及现在被保守遮掉的非白名单设置，可能改变摘要，此时恢复仍按原门禁拒绝，
+不重写历史或自动放行。密钥只放在被忽略的凭据文件中，不内联进 YAML。
+这修复未来配置记录，不能恢复旧报告中已经被 `<redacted>` 替换的采样值；
+也不是任意字符串中凭据的通用扫描器，不应将含认证信息的 URL 等写进公开配置。
+
 这份文档记录每一层为什么是现在这个样子：当时有哪些候选、比较了什么、最后选了谁。调研的原始报告在 `../survey/`，这里是结论。
 
 实际用了哪些、跑出来什么样，看 [status.md](status.md)。系统怎么搭的，看 [architecture.md](architecture.md)。

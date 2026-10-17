@@ -42,12 +42,17 @@ def load_config(files: list[str | Path] | None = None, overrides: dict | None = 
     return cfg
 
 
-SECRET_KEYS = re.compile(r"key|token|secret|password", re.I)
+SECRET_KEYS = re.compile(r"key|token|secret|password|authorization|credential", re.I)
+# Exact names only: unknown spellings fail closed instead of exposing credentials.
+NOT_SECRET = frozenset({"keyframes", "keyframe_max_side", "detection_keyframes", "max_tokens",
+                        "hazard_keywords"})
 
 def redact(value: Any) -> Any:
     """把配置里像密钥的字段换成占位符。run.json 会被 collect_results.sh 复制进入库的 docs/results/，
-    所以写进去之前必须过一遍，别让人不小心把 key 写进 config 覆盖文件就提交上去。"""
+    所以写进去之前必须过一遍，别让人不小心把 key 写进 config 覆盖文件就提交上去。
+    凭据文件路径也隐藏，与配置身份摘要共用规则；不会读取凭据文件。"""
     if isinstance(value, dict):
-        return {k: ("<redacted>" if SECRET_KEYS.search(k) and not k.endswith("_file") else redact(v)) for k, v in value.items()}
+        return {k: ("<redacted>" if isinstance(k, str) and SECRET_KEYS.search(k) and k not in NOT_SECRET
+                    else redact(v)) for k, v in value.items()}
     if isinstance(value, list): return [redact(v) for v in value]
     return value
