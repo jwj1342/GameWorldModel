@@ -45,6 +45,18 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
 }
 VARIANT_WEIGHT = 0.85      # 同义词和单复数算命中，但比原词低一点，优先挑字面对上的
 
+# 这些词只是同一个东西的不同款式，不是语义内容：ball-red 和 ball-blue 都是球。
+# 它们不该参与「名字里多余的词」那一项扣分——挑哪个款式是图像重排的事，
+# 不该因为库里把颜色写进了文件名就让这个资产的文字分变低。
+# 实测 "metal ball" 对上 ball-red 算出 0.446，差 0.004 过不了 0.45 的阈值，
+# 就是被这一项扣掉的。
+VARIANT_TOKENS = frozenset({
+    "red", "blue", "green", "yellow", "white", "black", "orange", "purple",
+    "pink", "brown", "grey", "gray", "gold", "silver", "dark", "light",
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n",
+    "large", "small", "wide", "narrow", "long", "short", "tall", "low", "high",
+})
+
 
 def _variants(token: str) -> set[str]:
     """一个查询词的所有可接受写法：本身、单复数、同义词。
@@ -86,7 +98,9 @@ def score_asset(query_tokens: list[str], asset: Asset) -> float:
     base = hit / len(query_tokens)
     if base <= 0:
         return 0.0
-    extra = max(0, len(name_set) - in_name)
+    # 款式词不算「多余」，见 VARIANT_TOKENS 的注释
+    meaningful = {t for t in name_set if t not in VARIANT_TOKENS and not t.isdigit()}
+    extra = max(0, len(meaningful) - in_name)
     score = base / (1.0 + 0.12 * extra)
     # 查询词正好是某个 kit 的 slug 时给这个 kit 加权：查 "toy train" 应该落到 train 这个
     # kit 的机车上，而不是过山车 kit 里那节叫 coaster-train 的车厢。

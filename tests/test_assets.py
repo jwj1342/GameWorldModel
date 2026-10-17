@@ -225,3 +225,23 @@ def test_字面对上的排在同义词前面():
     catalog = [Asset(id="a/cup", path="p", kit="a", kit_title="A", name="cup"),
                Asset(id="a/mug", path="p", kit="a", kit_title="A", name="mug")]
     assert retrieve("cup", catalog, k=2)[0][0].id == "a/cup"
+
+
+def test_款式词不该把正确的匹配扣到阈值以下():
+    """库里把颜色写进文件名（ball-red / ball-blue），不该因此让「ball」这个查询
+    的分数变低。实测 "metal ball" 对上 ball-red 算出 0.446，差 0.004 过不了 0.45。"""
+    from gwm.assets.library import Asset
+    from gwm.assets.retrieve import retrieve, score_asset, tokenize
+    ball = Asset(id="minigolf/ball-red", path="p", kit="minigolf", kit_title="Minigolf Kit", name="ball-red")
+    plain = Asset(id="minigolf/ball", path="p", kit="minigolf", kit_title="Minigolf Kit", name="ball")
+    assert score_asset(tokenize("metal ball"), ball) >= 0.45
+    # 没有款式词的那个仍然不低于带款式词的，挑哪个交给图像
+    assert score_asset(tokenize("metal ball"), plain) >= score_asset(tokenize("metal ball"), ball)
+
+
+def test_真正多余的词仍然扣分():
+    from gwm.assets.library import Asset
+    from gwm.assets.retrieve import score_asset, tokenize
+    simple = Asset(id="k/table", path="p", kit="k", kit_title="K", name="table")
+    busy = Asset(id="k/tableLampShelfCorner", path="p", kit="k", kit_title="K", name="tableLampShelfCorner")
+    assert score_asset(tokenize("table"), simple) > score_asset(tokenize("table"), busy)
