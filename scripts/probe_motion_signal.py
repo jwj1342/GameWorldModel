@@ -32,6 +32,7 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
+from gwm.perception.registration import track_rigid                                # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
 
@@ -157,7 +158,62 @@ def mode_signal(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     return out
 
 
-MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal}
+def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
+    """跨帧刚体配准 vs 包围盒中心：同一批物体、同一批帧，比轨迹形状和静止漂移。
+
+    位置的绝对值不可比——配准给的是相对第一帧锚点的轨迹，锚点落在可见表面上，本来就
+    偏。所以比的是**相对第一帧的位移**，那才是运动估计真正用到的量。
+    """
+    from gwm.perception.masks import resize_mask
+    geom = load_geometry(run / "geometry.npz")
+    masks = load_masks(run)
+    frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    times = {f["frame_index"]: round(float(f["t"]), 3) for f in evidence.get("frames", [])}
+    boxes = {o["id"]: {round(float(b["t"]), 3): np.array(b["center"], float) for b in o["obb"]}
+             for o in evidence["objects"]}
+    out: dict[str, list] = {"step/obb": [], "step/register": [],
+                            "drift_static/obb": [], "drift_static/register": [],
+                            "rmse": []}
+    for oid, per_frame in masks.items():
+        if oid not in truth:
+            continue
+        clouds, stamps = [], []
+        for fi, mask in sorted(per_frame.items()):
+            k, t = frame_of.get(fi), times.get(fi)
+            if k is None or t is None or t not in truth[oid]:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           _fix(geom.cam_to_world[k]))
+            if len(pts) >= 30:
+                clouds.append(pts); stamps.append(t)
+        if len(clouds) < 6:
+            continue
+        tracked = track_rigid(clouds)
+        if not tracked["ok"]:
+            continue
+        registered = np.array(tracked["positions"], float)
+        out["rmse"].extend(r for r in tracked["residuals"] if r is not None)
+        gt = np.stack([truth[oid][t] for t in stamps])
+        obb = np.stack([boxes.get(oid, {}).get(t, np.full(3, np.nan)) for t in stamps])
+        gt_rel = gt - gt[0]
+        reg_rel = registered - registered[0]
+        out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        if not np.isnan(obb).any():
+            obb_rel = obb - obb[0]
+            out["step/obb"].extend(np.linalg.norm(obb_rel - gt_rel, axis=1).tolist())
+        if kinds.get(oid) == "static":
+            out["drift_static/register"].append(
+                float(np.linalg.norm(registered.max(0) - registered.min(0))))
+            if not np.isnan(obb).any():
+                out["drift_static/obb"].append(float(np.linalg.norm(obb.max(0) - obb.min(0))))
+    return out
+
+
+MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal,
+         "register": mode_register}
 
 
 def main() -> int:
