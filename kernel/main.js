@@ -1,6 +1,8 @@
 // main.js — 固定运行时入口：解释 program.json，固定步长，window.__game 控制面
 import * as THREE from 'three';
 import { buildScene } from './scene.js';
+import { loadAssets } from './assets.js';
+import { Manipulator } from './manipulate.js';
 import { renderPass } from './passes.js';
 import { makeReplayCamera } from './replay_camera.js';
 import { initRapier, Physics } from './physics.js';
@@ -32,13 +34,21 @@ async function boot() {
   renderer.domElement.style.width = '100vw'; renderer.domElement.style.height = '100vh';
   document.body.appendChild(renderer.domElement);
   await initRapier();
-  const { scene, registry } = buildScene(program, kernelCfg);
+  // 资产先全部读完再建场景：buildScene 保持同步，物体 id 的注册顺序也就不受加载快慢影响。
+  const { scenes: assetScenes, failures: assetFailures } = await loadAssets('.');
+  game.assets = { loaded: Object.keys(assetScenes).length, failures: assetFailures };
+  const { scene, registry } = buildScene(program, kernelCfg, assetScenes);
   const physics = new Physics(DT);
   for (const e of registry) physics.addEntry(e);
   const replay = makeReplayCamera(program.camera, W / H);
   const template = new PlatformerTemplate({ program, scene, registry, physics, kernelCfg });
   template.camera.aspect = W / H; template.camera.updateProjectionMatrix();
   const far = program.camera?.intrinsics?.far ?? 100;
+
+  // 直接操纵：鼠标拖动场景里的物体。构造放在控制块之前，这样 tests/test_physics_runtime.mjs
+  // 提取出来的那段代码只依赖 manipulator 这个对象本身，不依赖 Manipulator 这个类。
+  const manipulator = new Manipulator({ camera: template.camera, registry, physics, scene, dt: DT });
+  if (!HEADLESS) manipulator.attach(renderer.domElement);
 
   const hasSimulated = registry.some(e => e.simulated);
 
@@ -56,7 +66,12 @@ async function boot() {
   function updateCamera() { if (game.modeName === 'replay') replay.update(game.t); }
 
   Object.assign(game, {
-    dt: DT, registry, scene, renderer, physics, template,
+    dt: DT, registry, scene, renderer, physics, template, manipulator,
+    grab: (x, y) => manipulator.grabAt(x, y)?.id ?? null,
+    dragTo: (x, y, z) => manipulator.dragToPoint(x, y, z),
+    dragNdc: (x, y) => manipulator.dragTo(x, y),
+    release: () => manipulator.release()?.id ?? null,
+    grabLog: () => manipulator.log,
     mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); return game.modeName; },
     step(dt = DT) {
       if (!Number.isFinite(dt) || dt <= 0) throw new Error('step needs a positive finite dt');
@@ -65,6 +80,7 @@ async function boot() {
       game.t = hasSimulated ? game.frame * DT : game.t + dt;
       updateMotions(game.t);
       if (game.modeName === 'play') template.update(game.input, game.t);
+      manipulator.update();
       physics.step();
       for (const e of registry) physics.syncSimulated(e);   // 仿真之后把位姿读回来
       updateCamera();

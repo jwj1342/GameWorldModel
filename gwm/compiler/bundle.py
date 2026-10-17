@@ -72,6 +72,34 @@ def kernel_config(program: dict, cfg: dict | None = None) -> dict:
         "hazard_classes": b.get("hazard_classes", ["lava", "spike", "water", "fire", "acid"]),
     }
 
+def copy_assets(out: Path, manifest: dict | None) -> dict:
+    """把解析到的 GLB 拷进 game 目录，返回内核要读的那份映射：物体 id -> 相对路径。
+
+    game 目录是自包含的：它会被起一个静态服务器直接伺服，所以资产必须在目录里面，
+    不能留一个指向 /project 的绝对路径。源文件缺失时这一条降级成基本体而不是报错，
+    理由和检索分数过低时一样——宁可少一个网格，也不要让整条片段跑不出来。
+    """
+    resolved, missing = {}, []
+    for request in (manifest or {}).get("requests", []):
+        source, rel = request.get("source"), request.get("file")
+        # library（文字检索）和 library_ref（程序里写死了 ref）都要拷。只认前者的话，
+        # 看过画面挑出来的那一批会被整批跳过，而清单上又显示解析成功，很难发现。
+        if not str(request.get("resolved", "")).startswith("library") or not source or not rel:
+            continue
+        src = Path(source)
+        if not src.is_file():
+            missing.append(request["id"]); request["resolved"] = "primitive_fallback"
+            request["fallback_reason"] = "source_missing"
+            continue
+        dst = out / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        resolved[request["id"]] = {"file": rel, "asset_id": request.get("asset_id"),
+                                   "score": request.get("score"), "license": request.get("license")}
+    return {"objects": resolved, "missing_sources": missing,
+            "library": (manifest or {}).get("library")}
+
+
 def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = None, validation: dict | None = None, cfg: dict | None = None) -> Path:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     kdst = out / "kernel"
@@ -81,6 +109,7 @@ def bundle(program: dict, out_dir: str | Path, asset_manifest: dict | None = Non
     _copy_vendor(out)
     (out / "program.json").write_text(json.dumps(program, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     (out / "kernel_config.json").write_text(json.dumps(kernel_config(program, cfg), indent=1, allow_nan=False), encoding="utf-8")
+    (out / "assets.json").write_text(json.dumps(copy_assets(out, asset_manifest), indent=1, ensure_ascii=False), encoding="utf-8")
     report = {"bundled_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kernel_files": sorted(p.name for p in KERNEL.glob("*.js")),
               "assets": asset_manifest or {}, "validation": validation or {}, "objects": len(program.get("objects", [])), "static": len(program.get("static", []))}
     (out / "compile_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")

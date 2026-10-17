@@ -58,7 +58,7 @@
     "heightfieldGeom": {"type": "object", "required": ["kind", "scale"], "additionalProperties": false,
       "properties": {"kind": {"const": "heightfield"}, "ref": {"type": "string"}, "scale": {"$ref": "#/$defs/vec3"}}},
     "assetGeom": {"type": "object", "required": ["kind", "query", "extent"], "additionalProperties": false,
-      "properties": {"kind": {"const": "asset"}, "query": {"type": "string", "maxLength": 80}, "extent": {"$ref": "#/$defs/vec3"}}},
+      "properties": {"kind": {"const": "asset"}, "query": {"type": "string", "maxLength": 80}, "extent": {"$ref": "#/$defs/vec3"}, "ref": {"type": "string", "maxLength": 120}}},
     "generatedGeom": {"type": "object", "required": ["kind", "ref", "extent"], "additionalProperties": false,
       "properties": {"kind": {"const": "generated"}, "ref": {"type": "string"}, "extent": {"$ref": "#/$defs/vec3"}}},
     "staticNode": {"type": "object", "required": ["id", "geom", "pose"], "additionalProperties": false,

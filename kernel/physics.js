@@ -109,6 +109,24 @@ export class Physics {
     for (const h of entry.colliderHandles) this.colliderToEntry.delete(h);
     this.bodyToEntry.delete(entry.body.handle); entry.body = null;
   }
+  // 直接操纵：抓住期间改成动力学刚体并关掉重力，由 Manipulator 用速度驱动。
+  // 不直接改位姿是有意的——改位姿会穿过别的物体，速度驱动才会把东西推开、叠起来。
+  grabBody(entry) {
+    if (!entry.body) return false;
+    entry.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    entry.body.setGravityScale(0, true);
+    entry.body.setLinearDamping(6); entry.body.setAngularDamping(6);
+    return true;
+  }
+
+  // 松手：重力恢复，阻尼调回正常，物体自己落下去并稳定下来
+  releaseBody(entry) {
+    if (!entry.body) return false;
+    entry.body.setGravityScale(1, true);
+    entry.body.setLinearDamping(0.05); entry.body.setAngularDamping(0.05);
+    return true;
+  }
+
   syncKinematic(entry) {
     if (!entry.body || !entry.dynamic || entry.simulated) return;   // 物理驱动的不往回推
     const p = entry.group.position, q = entry.group.quaternion;

@@ -1,6 +1,7 @@
 // scene.js — 把 program.json 的 static[] 与 objects[] 变成 three.js 节点，并给每个物体分配 24 位 ID 颜色
 import * as THREE from 'three';
 import { makePose, isSimulated } from './motions.js';
+import { fitToExtent } from './assets.js';
 
 // 调色板是 DSL 契约的一部分：schema 的 $defs.materialName 列的就是这些词，
 // tests/test_style_kernel.mjs 盯着两边不许漂。名字写错了会悄悄变成灰色，
@@ -83,8 +84,12 @@ function primitiveGeometry(g) {
   }
 }
 
-export function buildNode(spec, material) {
+export function buildNode(spec, assetScene = null) {
   // returns THREE.Group containing one or more meshes; also returns collider description list
+  //
+  // 碰撞体**永远**从基本体那一套算，哪怕这个节点挂了一个真网格。这是有意的：
+  // 外形换成什么样，都不改变这个物体能不能被拖动、能不能被踩上去、物理怎么解。
+  // 表征和交互是两半，分界线就在这个函数里——group 是表征，colliders 是交互。
   const group = new THREE.Group();
   const geom = spec.geom ?? { kind: 'primitive', shape: 'box', extent: [1, 1, 1] };
   const extent = geom.extent ?? geom.size ?? [1, 1, 1];
@@ -92,15 +97,21 @@ export function buildNode(spec, material) {
   if (geom.kind === 'asset' || geom.kind === 'generated') resolved = fallbackForClass(spec.class ?? geom.query, extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent);
   const colliders = [];
   const mat = makeMaterial(spec.material ?? resolved.material ?? (geom.kind !== 'primitive' ? guessMaterial(spec.class) : 'default'));
-  if (resolved.kind === 'composite') {
-    for (const p of resolved.parts) {
-      const m = new THREE.Mesh(primitiveGeometry(p), p.material ? makeMaterial(p.material) : mat);
-      m.position.set(...(p.offset ?? [0, 0, 0])); m.castShadow = m.receiveShadow = true; group.add(m);
-      colliders.push({ shape: p.shape, extent: p.extent, radius: p.radius, height: p.height, offset: p.offset ?? [0, 0, 0] });
+  const parts = resolved.kind === 'composite'
+    ? resolved.parts.map(p => ({ part: p, collider: { shape: p.shape, extent: p.extent, radius: p.radius, height: p.height, offset: p.offset ?? [0, 0, 0] } }))
+    : [{ part: resolved, collider: { shape: resolved.shape, extent: resolved.extent ?? resolved.scale, size: resolved.size, radius: resolved.radius, height: resolved.height, axis: resolved.axis, offset: [0, 0, 0] } }];
+  for (const { collider } of parts) colliders.push(collider);
+  if (assetScene) {
+    // 真网格只替换外观。材质跟着 GLB 自己带的走——库里的资产是美术做好的，
+    // 再套一层我们按类名猜出来的调色板词只会让它更不像。
+    group.add(fitToExtent(assetScene.clone(true), extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent));
+  } else if (resolved.kind === 'composite') {
+    for (const { part } of parts) {
+      const m = new THREE.Mesh(primitiveGeometry(part), part.material ? makeMaterial(part.material) : mat);
+      m.position.set(...(part.offset ?? [0, 0, 0])); m.castShadow = m.receiveShadow = true; group.add(m);
     }
   } else {
     const m = new THREE.Mesh(primitiveGeometry(resolved), mat); m.castShadow = m.receiveShadow = true; group.add(m);
-    colliders.push({ shape: resolved.shape, extent: resolved.extent ?? resolved.scale, size: resolved.size, radius: resolved.radius, height: resolved.height, axis: resolved.axis, offset: [0, 0, 0] });
   }
   return { group, colliders };
 }
@@ -124,7 +135,7 @@ export function idToColor(i) {
   return new THREE.Color(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
 
-export function buildScene(program, kernelCfg = null) {
+export function buildScene(program, kernelCfg = null, assetScenes = null) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(program.style?.background ?? '#87a7c7');
   scene.fog = null;
@@ -147,7 +158,7 @@ export function buildScene(program, kernelCfg = null) {
   // simulated = 物理驱动，位姿由 Rapier 算出来再读回 group，方向相反
   let idIndex = 1;
   const add = (spec, kind, base, motion, instanceIndex = 0) => {
-    const { group, colliders } = buildNode(spec);
+    const { group, colliders } = buildNode(spec, assetScenes?.[spec.id] ?? null);
     group.name = instanceIndex ? `${spec.id}#${instanceIndex}` : spec.id;
     group.position.set(...base.pos); group.quaternion.set(...(base.quat ?? [0, 0, 0, 1])).normalize();
     scene.add(group);

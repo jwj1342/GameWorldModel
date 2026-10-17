@@ -104,6 +104,13 @@ writer:
   repair_attempts: 3
   candidates: 2
   use_evidence: true
+assets:
+  # CC0 资产库（Kenney 镜像，4812 个 GLB）。没有这个目录就整条退回基本体，管线照常跑。
+  library: /project/aip-zhouyang/jwj/GameWorldModel/deps/assets_src/kenney
+  min_score: 0.45          # 检索命中分低于这个值就退回基本体：塞一个不相干的网格比放个盒子更糟
+  image_weight: 0.6          # 图像分数在融合里的权重；只有文字时退回纯文字
+  candidates: 3            # 清单里记几个候选，便于复核检索质量
+  enabled: true
 feedback:
   rounds: 2
   max_rounds: 3
