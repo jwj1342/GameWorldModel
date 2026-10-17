@@ -32,7 +32,10 @@ from gwm.assets.embed import AssetIndex, Embedder               # noqa: E402
 from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
+from gwm.feedback.completeness import assess, format_table      # noqa: E402
+from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
+from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
 from gwm.config import load_config, site_name                   # noqa: E402
 from gwm.perception.run import load_masks, run_perception       # noqa: E402
 from gwm.synthesis.direct import evidence_to_program            # noqa: E402
@@ -91,6 +94,35 @@ def main() -> int:
 
     # 直译出来的位姿直接取自包围盒中心，地面估歪一点就会有物体陷进地里。
     # 模型那条路本来就会过一遍保守修复，直译这条也该过——它只在证据支持时才动位姿。
+    # 度量尺度：现在的锚是「相机离地 1.2 米」，俯拍桌面时会整体放大两三倍。
+    # 改用物体尺寸当锚——命名那一步问过的 size_m 就存在 namer.json 里，一直没人用。
+    namer = out / "perception" / "namer.json"
+    vlm_sizes = {}
+    if namer.is_file():
+        try:
+            for item in (json.loads(namer.read_text(encoding="utf-8")) or {}).get("objects") or []:
+                if isinstance(item, dict) and item.get("phrase") and item.get("size_m"):
+                    vlm_sizes[str(item["phrase"]).lower()] = item["size_m"]
+        except (OSError, ValueError):
+            pass
+    factor, scale_report = estimate_metric_scale(program, vlm_sizes)
+    if abs(factor - 1.0) > 1e-6:
+        program = scale_program(program, factor)
+        program.setdefault("meta", {})["metric_scale"] = round(factor, 4)
+        print(f"度量尺度: x{factor:.3f}（依据 {len(scale_report['samples'])} 个物体，"
+              f"来源 {scale_report['source']}，离散度 {scale_report.get('spread')}）", flush=True)
+    else:
+        print(f"度量尺度: 不改（{scale_report.get('reason', '无依据')}）", flush=True)
+    timings["metric_scale"] = round(factor, 4)
+
+    # 全局尺度之后再单独处理个别离谱的物体：小物体的包围盒被深度噪声撑大，
+    # 实测同一段视频里玩具火车会被量成一米一，而桌子只差百分之十几。
+    resized = regularize_object_sizes(program, vlm_sizes)
+    if resized:
+        print(f"尺寸回收: {len(resized)} 个物体 "
+              f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
+    timings["resized"] = len(resized)
+
     moves = settle_on_ground(program)
     if moves:
         applied = [m for m in moves if m["applied"]]
@@ -108,11 +140,14 @@ def main() -> int:
     if not result["ok"]:
         print("编译失败:", json.dumps(result["validation"], ensure_ascii=False)[:400])
         return 2
+    completeness = assess(program, evidence, result["assets"],
+                          load_masks(out / "perception"))
+    print(format_table(completeness), flush=True)
     resolved = sum(1 for r in result["assets"]["requests"] if r["resolved"].startswith("library"))
     summary = {"clip": a.clip, "objects": len(program.get("objects", [])),
                "static": len(program.get("static", [])), "asset_nodes": asset_nodes,
                "assets_resolved": resolved, "image_retrieval": bool(index) if root else False,
-               "timings": timings, "decisions": decisions, "game_dir": result["game_dir"]}
+               "timings": timings, "completeness": completeness, "decisions": decisions, "metric_scale": scale_report, "resized": resized, "game_dir": result["game_dir"]}
     (out / "rebuild.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k != "decisions"}, ensure_ascii=False))
     return 0

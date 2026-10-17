@@ -1,0 +1,135 @@
+"""场景完整度：两轴分开报。
+
+现有的反馈分数只对**已配对上的物体**求平均，所以场景里少了三十个物体一分都不扣。
+这就是为什么重建出五个盒子也能一路通过门禁——没有任何指标在衡量「像不像」。
+
+这里按两轴报，对应论文的两条主张：
+
+* **还原程度**：画面里该有的东西有没有、尺寸对不对、有多少是真网格而不是占位盒子。
+* **可交互程度**：有多少物体能上手动、动起来之后是不是真有行为。
+
+两轴不合成一个总分。合成之后，一个「什么都没重建出来但剩下那个能拖」的场景会拿到
+不低的分数，而那恰恰是我们现在最该避免的失败模式。
+"""
+from __future__ import annotations
+
+import math
+
+
+def _longest(node: dict) -> float | None:
+    geom = node.get("geom") or {}
+    for key in ("extent", "size", "scale"):
+        values = geom.get(key)
+        if isinstance(values, (list, tuple)) and values:
+            longest = max(float(v) for v in values)
+            if longest > 1e-6:
+                return longest
+    lengths = [float(geom[k]) * (2 if "radius" in k else 1)
+               for k in ("radius", "radius_top", "radius_bottom", "height")
+               if isinstance(geom.get(k), (int, float))]
+    return max(lengths) if lengths and max(lengths) > 1e-6 else None
+
+
+def _evidence_longest(obj: dict) -> float | None:
+    boxes = obj.get("obb") or []
+    sizes = [max(float(v) for v in b["size"]) for b in boxes
+             if isinstance(b.get("size"), (list, tuple)) and len(b["size"]) == 3]
+    return max(sizes) if sizes else None
+
+
+def fidelity(program: dict, evidence: dict | None = None,
+             asset_manifest: dict | None = None,
+             masks: dict | None = None) -> dict:
+    """还原程度。不需要渲染，所以每次生成都能顺手算一遍。"""
+    objects = program.get("objects") or []
+    statics = program.get("static") or []
+    nodes = objects + statics
+    out: dict = {"objects": len(objects), "static": len(statics)}
+
+    # 有多少物体身上挂的是真网格，而不是占位的盒子
+    requests = (asset_manifest or {}).get("requests") or []
+    if requests:
+        resolved = sum(1 for r in requests if str(r.get("resolved", "")).startswith("library"))
+        out["asset_coverage"] = round(resolved / len(requests), 3)
+        out["asset_requests"] = len(requests)
+
+    if evidence is not None:
+        ev_objects = evidence.get("objects") or []
+        program_ids = {n.get("id") for n in nodes}
+        from ..taxonomy import slug
+        matched = [o for o in ev_objects if o.get("id") in program_ids or slug(o.get("id", "")) in program_ids]
+        out["evidence_objects"] = len(ev_objects)
+        out["object_recall"] = round(len(matched) / len(ev_objects), 3) if ev_objects else None
+
+        # 尺寸一致性：程序里写的大小和证据量到的大小差几倍，取绝对对数误差的中位数。
+        # 用对数是因为「大了一倍」和「小了一半」应该一样严重。
+        by_id = {o["id"]: o for o in ev_objects}
+        by_id.update({slug(o["id"]): o for o in ev_objects if o.get("id")})
+        errors = []
+        for node in objects:
+            observed = _evidence_longest(by_id.get(node.get("id"), {}))
+            written = _longest(node)
+            if observed and written:
+                errors.append(abs(math.log(written / observed)))
+        if errors:
+            errors.sort()
+            out["size_log_error_median"] = round(errors[len(errors) // 2], 3)
+
+    # 画面被解释了多少。这一项是前面几项的必要补充：只看 object_recall 的话，
+    # 一个塞满东西的房间只检出九个物体、九个全都重建了出来，也会得到满分，
+    # 而那恰恰是「重建出来不像」最主要的来源。
+    if masks:
+        covered = union = None
+        for per_frame in masks.values():
+            for frame_index, mask in per_frame.items():
+                if union is None:
+                    import numpy as np
+                    union = np.zeros_like(np.asarray(mask), dtype=bool)
+                    covered = frame_index
+                if frame_index == covered:
+                    union |= np.asarray(mask).astype(bool)
+        if union is not None and union.size:
+            out["evidence_pixel_coverage"] = round(float(union.mean()), 3)
+    return out
+
+
+def interactivity(program: dict) -> dict:
+    """可交互程度。四档各报一个比例，对应 kernel/manipulate.js 里写的那张表。"""
+    objects = program.get("objects") or []
+    total = len(objects)
+    if not total:
+        return {"objects": 0}
+    grabbable = sum(1 for o in objects if (o.get("interaction") or {}).get("grab") is not False)
+    motions = [(o.get("motion") or {}).get("type", "static") for o in objects]
+    scripted = sum(1 for t in motions if t not in ("static", "dynamic"))
+    articulated = sum(1 for t in motions if t in ("revolute", "prismatic"))
+    simulated = sum(1 for t in motions if t == "dynamic")
+    return {
+        "objects": total,
+        # 直接操纵：能用鼠标抓起来的比例。静态结构不算，它们本来就不该被拖走
+        "manipulable_fraction": round(grabbable / total, 3),
+        # 观测运动：从视频里恢复出了行为的比例
+        "scripted_motion_fraction": round(scripted / total, 3),
+        # 关节交互：抽屉、柜门这一档
+        "articulated_fraction": round(articulated / total, 3),
+        # 物理驱动：交给仿真自己算的比例
+        "simulated_fraction": round(simulated / total, 3),
+    }
+
+
+def assess(program: dict, evidence: dict | None = None,
+           asset_manifest: dict | None = None, masks: dict | None = None) -> dict:
+    """两轴一起算。刻意不给总分，理由见模块开头。"""
+    return {"fidelity": fidelity(program, evidence, asset_manifest, masks),
+            "interactivity": interactivity(program)}
+
+
+def format_table(report: dict) -> str:
+    """给报告和日志用的一张小表。"""
+    lines = ["还原程度:"]
+    for key, value in report["fidelity"].items():
+        lines.append(f"  {key:<26} {value}")
+    lines.append("可交互程度:")
+    for key, value in report["interactivity"].items():
+        lines.append(f"  {key:<26} {value}")
+    return "\n".join(lines)

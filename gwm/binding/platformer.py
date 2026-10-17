@@ -33,6 +33,9 @@ def scale_program(program: dict, s: float) -> dict:
         m = n.get("motion")
         if m:
             if m.get("pivot"): m["pivot"] = v(m["pivot"])
+            # 初速度的单位是米每秒，场景放大了它也得跟着放大，否则物理驱动的物体
+            # 在放大后的场景里会显得慢下来
+            if m.get("linear_velocity"): m["linear_velocity"] = v(m["linear_velocity"])
             if m.get("amp") is not None: m["amp"] = float(m["amp"]) * s
             if m.get("rate") is not None and m.get("type") == "prismatic": m["rate"] = float(m["rate"]) * s
             if m.get("range") and m.get("type") == "prismatic": m["range"] = v(m["range"])
@@ -44,7 +47,10 @@ def scale_program(program: dict, s: float) -> dict:
             if ev.get("volume"):
                 if "pos" in ev["volume"]: ev["volume"]["pos"] = v(ev["volume"]["pos"])
                 if "extent" in ev["volume"]: ev["volume"]["extent"] = v(ev["volume"]["extent"])
-    for kf in (p.get("camera") or {}).get("keyframes", []) or []: kf["pos"] = v(kf["pos"])
+    for kf in (p.get("camera") or {}).get("keyframes", []) or []:
+        kf["pos"] = v(kf["pos"])
+        # look_at 也是世界坐标。只缩 pos 不缩它的话，场景一放大相机就瞄到别处去了。
+        if kf.get("look_at"): kf["look_at"] = v(kf["look_at"])
     if p.get("camera", {}).get("intrinsics", {}).get("far"): p["camera"]["intrinsics"]["far"] = float(p["camera"]["intrinsics"]["far"]) * s
     slots = (p.get("binding") or {}).get("slots") or {}
     if slots.get("player_spawn"): slots["player_spawn"] = v(slots["player_spawn"])
