@@ -32,7 +32,7 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
-from gwm.perception.registration import track_rigid                                # noqa: E402
+from gwm.perception.registration import infer_articulation, track_rigid            # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
 
@@ -212,8 +212,55 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     return out
 
 
+def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
+    """关节推断准不准。合成片段里 revolute 和 prismatic 就是真的关节，别的都不是，
+    所以可以直接算查准和查全——这是判断阈值该定多松的唯一依据。"""
+    from gwm.perception.masks import resize_mask
+    geom = load_geometry(run / "geometry.npz")
+    masks = load_masks(run)
+    frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    joint_types = {"revolute": "hinge", "prismatic": "slide"}
+    out: dict[str, list] = {"true_joint/fired": [], "non_joint/fired": [], "correct_kind": [],
+                            "fired/axis_consistency": [], "fired/rotation_deg": [],
+                            "fired/straightness": []}
+    for oid, per_frame in masks.items():
+        kind = kinds.get(oid)
+        if kind is None:
+            continue
+        clouds = []
+        for fi, mask in sorted(per_frame.items()):
+            k = frame_of.get(fi)
+            if k is None:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           _fix(geom.cam_to_world[k]))
+            if len(pts) >= 30:
+                clouds.append(pts)
+        if len(clouds) < 6:
+            continue
+        spec = infer_articulation(track_rigid(clouds))
+        fired = 1.0 if spec else 0.0
+        if kind in joint_types:
+            out["true_joint/fired"].append(fired)
+            if spec:
+                out["correct_kind"].append(1.0 if spec["grab"] == joint_types[kind] else 0.0)
+        else:
+            out["non_joint/fired"].append(fired)
+        if spec:
+            ev = spec.get("evidence") or {}
+            for key, name in (("axis_consistency", "fired/axis_consistency"),
+                              ("total_rotation_deg", "fired/rotation_deg"),
+                              ("straightness", "fired/straightness")):
+                if key in ev:
+                    out[name].append(float(ev[key]))
+    return out
+
+
 MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal,
-         "register": mode_register}
+         "register": mode_register, "articulation": mode_articulation}
 
 
 def main() -> int:
@@ -240,8 +287,10 @@ def main() -> int:
         return 1
     print(f"模式 {a.mode}，片段 {len(clips)} 条")
     for key, values in merged.items():
-        if values:
-            print(f"  {key:<24} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}")
+        if not values:
+            continue
+        extra = f"  均值 {statistics.mean(values):>6.3f}" if key.endswith("fired") or key == "correct_kind" else ""
+        print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
     return 0
 
 
