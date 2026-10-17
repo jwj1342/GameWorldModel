@@ -241,7 +241,20 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
                 clouds.append(pts)
         if len(clouds) < 6:
             continue
-        spec = infer_articulation(track_rigid(clouds))
+        tracked = track_rigid(clouds)
+        spec = infer_articulation(tracked)
+        # 原始判据一并记下来：这样扫阈值不用重跑感知，一次测量能回答「阈值定多少」
+        total_rot = float(np.degrees(np.arccos(np.clip(
+            (np.trace(np.asarray(tracked.get("total_rotation") or np.eye(3), float)) - 1.0) / 2.0, -1.0, 1.0))))
+        out.setdefault("rows", []).append({
+            "id": oid, "gt_kind": kind, "is_joint": kind in joint_types,
+            "fired": spec["grab"] if spec else None,
+            "total_rotation_deg": round(total_rot, 3),
+            "axis_consistency": round(float((spec.get("evidence") or {}).get("axis_consistency", 0.0)), 3) if spec else None,
+            "straightness": round(float((spec.get("evidence") or {}).get("straightness", 0.0)), 3) if spec else None,
+            "travel_m": round(float(np.linalg.norm(np.asarray(tracked.get("total_translation") or np.zeros(3), float))), 3),
+            "residual": round(float(np.median([r for r in tracked.get("residuals") or [] if r is not None] or [0.0])), 4),
+        })
         fired = 1.0 if spec else 0.0
         if kind in joint_types:
             out["true_joint/fired"].append(fired)
@@ -286,6 +299,12 @@ def main() -> int:
         print("没有可比对的样本")
         return 1
     print(f"模式 {a.mode}，片段 {len(clips)} 条")
+    rows = merged.pop("rows", None)
+    if rows:
+        import os
+        target = Path(a.work) / "rows.json"
+        target.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"  逐物体记录写到 {target}")
     for key, values in merged.items():
         if not values:
             continue
