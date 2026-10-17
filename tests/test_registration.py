@@ -84,3 +84,25 @@ def test_静止物体在可见面变化时不该被解出运动():
 
 def test_空输入不炸():
     assert track_rigid([])["ok"] is False
+
+
+def test_静止判据看每步修正量而不是累积位置():
+    """累积位置会被配准的缓慢滑移带偏，而真正没动的物体每一步修正都接近单位阵。"""
+    from gwm.perception.registration import looks_static
+    base = box_cloud(n=1200, seed=11)
+    clouds = [base[base[:, 2] > np.quantile(base[:, 2], 0.2 + 0.04 * k)] for k in range(12)]
+    tracked = track_rigid(clouds)
+    assert looks_static(tracked, scale_m=1.2), tracked["step_translation"][:3]
+
+
+def test_真的在动的物体不会被判成静止():
+    from gwm.perception.registration import looks_static
+    base = box_cloud(n=1200, seed=13)
+    clouds = [base + np.array([0.12 * k, 0.0, 0.0]) for k in range(12)]
+    tracked = track_rigid(clouds)
+    assert not looks_static(tracked, scale_m=1.2)
+
+
+def test_没有步数时不乱判():
+    from gwm.perception.registration import looks_static
+    assert looks_static({"step_translation": []}, scale_m=1.0) is False

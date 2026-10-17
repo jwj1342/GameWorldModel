@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
+from .registration import looks_static, track_rigid
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -196,7 +197,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
     for o in tracks.objects:
-        obbs, observations, ts, centers, quaternions = [], [], [], [], []
+        obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = is_static_class(o.phrase, cfg)
         for k, fi in enumerate(geom.frame_indices):
@@ -227,6 +228,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                  "source": {"geometry": geom.backend or "unknown", "segmentation": tracks.backend or "unknown", "tracking": "mask_centroid_obb"},
                                  "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
             obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); quaternions.append(ob["quat"])
+            clouds.append(pts)
             if area > best_area: best_area, best_frame = area, fi
         if not obbs: continue
         ts_a, c_a, q_a = np.asarray(ts), np.asarray(centers), np.asarray(quaternions)
@@ -235,10 +237,32 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         for i, ob in enumerate(obbs): ob["center"] = [float(v) for v in cs[i]]; ob["size"] = [float(v) for v in sz[i]]
         median_size = np.median(sz, axis=0)
         footprint_ratio = max(median_size[0], median_size[2]) / max(min(median_size[0], median_size[2]), 1e-6)
-        motion_result = estimate_motion(ts_a, c_a, q_a, cfg, size=median_size, coordinate_space="world",
+        # 喂给运动估计的位置换成跨帧配准的结果。包围盒中心是可见点在各轴上的分位中点，
+        # 可见面一变它就跟着动；配准只解帧与帧之间的变换，不依赖单帧算出一个稳定的量。
+        # 实测相对第一帧的位移误差 0.253 -> 0.188 m（见 scripts/probe_motion_signal.py）。
+        # 留一个开关是因为静止物体的漂移目前还比包围盒中心大，出问题时要能退回去。
+        motion_positions, motion_source = c_a, "obb_centre"
+        if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
+            tracked = track_rigid(clouds)
+            if tracked["ok"] and len(tracked["positions"]) == len(c_a):
+                diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))
+                if looks_static(tracked, diag):
+                    # 每步修正都接近单位阵，说明物体没动。这种情况下配准的累积轨迹会被
+                    # 缓慢滑移带偏（实测静止漂移 0.286 m，比包围盒中心的 0.182 m 还大），
+                    # 所以把位置钉在第一帧，让静止这个假设干干净净地成立。
+                    motion_positions = np.repeat(c_a[:1], len(c_a), axis=0)
+                    motion_source = "registration_static"
+                else:
+                    registered = np.asarray(tracked["positions"], float)
+                    # 配准给的是相对锚点的轨迹，锚点落在可见表面上。平移到第一帧的包围盒
+                    # 中心，保住绝对位置，用它的形状。
+                    motion_positions = registered - registered[0] + c_a[0]
+                    motion_source = "cross_frame_registration"
+        motion_result = estimate_motion(ts_a, motion_positions, q_a, cfg, size=median_size, coordinate_space="world",
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
+        mg["position_source"] = motion_source
         # contacts with ground
         bottoms = cs[:, 1] - sz[:, 1] / 2
         on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)

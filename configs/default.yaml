@@ -32,7 +32,10 @@ perception:
     time_decay_frames: 12.0
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
-  motion:                         # 世界坐标多假设估计；证据、残差、置信度阈值
+  motion:
+    use_registration: true   # 运动估计用跨帧配准的轨迹，而不是包围盒中心序列。
+                             # 实测位移误差 0.253 -> 0.188 m；静止物体漂移目前反而略大，
+                             # 所以留了开关。见 scripts/probe_motion_signal.py --mode register                         # 世界坐标多假设估计；证据、残差、置信度阈值
     min_support_frames: 5
     min_temporal_span_s: 0.75
     max_missing_fraction: 0.50

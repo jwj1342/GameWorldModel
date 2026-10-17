@@ -100,6 +100,8 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     point = model.mean(0) if anchor is None else np.asarray(anchor, float)
     positions = [point.copy()]
     residuals: list[float | None] = []
+    steps_t: list[float] = []                  # 每一步解出来的平移量
+    steps_r: list[float] = []                  # 每一步解出来的转角（度）
     R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
     for index, current in enumerate(clouds[1:], start=1):
         cloud = np.asarray(current, float)
@@ -107,6 +109,11 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
         guess = cloud @ R_acc.T + t_acc
         step = icp(guess, model, **icp_kwargs)
         if step["ok"]:
+            # 每步的修正量是判静止最稳的信号：累积位置会被缓慢滑移带偏，
+            # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。
+            steps_t.append(float(np.linalg.norm(step["translation"])))
+            angle = (np.trace(step["rotation"]) - 1.0) / 2.0
+            steps_r.append(float(np.degrees(np.arccos(np.clip(angle, -1.0, 1.0)))))
             R_acc = step["rotation"] @ R_acc
             t_acc = step["rotation"] @ t_acc + step["translation"]
             # 只让前几帧进模型。让它一直长下去的话，静止物体会跟着可见面缓慢滑移——
@@ -120,4 +127,25 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
         positions.append(R_acc.T @ (point - t_acc))
     return {"positions": [np.asarray(p, float).tolist() for p in positions],
             "residuals": residuals, "anchor": point.tolist(),
+            "step_translation": steps_t, "step_rotation_deg": steps_r,
             "ok": True, "frames": len(positions)}
+
+
+def looks_static(tracked: dict, scale_m: float, *, translation_frac: float = 0.02,
+                 rotation_deg: float = 1.5) -> bool:
+    """每一步的修正都小到可以忽略，就认为这个物体没动。
+
+    判静止用每步修正量，不用累积位置：累积位置会被配准的缓慢滑移带偏（实测静止物体
+    的累积漂移 0.286 m，比包围盒中心的 0.182 m 还大），而逐步修正量不受滑移影响——
+    滑移是每步一点点攒出来的，每一步本身仍然很小。
+
+    阈值按物体自己的尺度给：`scale_m` 传物体包围盒的对角线长度。
+    """
+    translations = tracked.get("step_translation") or []
+    rotations = tracked.get("step_rotation_deg") or []
+    if not translations:
+        return False
+    limit = max(translation_frac * float(scale_m), 1e-4)
+    moved = float(np.median(translations))
+    turned = float(np.median(rotations)) if rotations else 0.0
+    return moved <= limit and turned <= rotation_deg
