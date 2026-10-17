@@ -28,6 +28,39 @@ def tokenize(text: str) -> list[str]:
     return [p.lower() for p in _SPLIT.split(spaced) if p and p.lower() not in STOP]
 
 
+# 同义词。只收那些在库里真的各自存在、而查询时又常用另一个说法的词对。
+# 库里有 bookcaseOpen 没有 bookshelf，有 books 没有 book——这两类是资产命中率
+# 缺口里最主要的来源，不是检索算法的问题，是词对不上。
+SYNONYMS: dict[str, tuple[str, ...]] = {
+    "bookshelf": ("bookcase",), "bookcase": ("bookshelf",),
+    "sofa": ("couch",), "couch": ("sofa",),
+    "rug": ("carpet",), "carpet": ("rug",),
+    "cupboard": ("cabinet",), "cabinet": ("cupboard",),
+    "mug": ("cup",), "cup": ("mug",),
+    "tv": ("television", "monitor"), "television": ("tv", "monitor"),
+    "bin": ("trash",), "trash": ("bin",),
+    "plant": ("planter", "pot"), "planter": ("plant",),
+    "block": ("cube", "brick"), "brick": ("block",), "cube": ("block",),
+    "couchtable": ("coffee",),
+}
+VARIANT_WEIGHT = 0.85      # 同义词和单复数算命中，但比原词低一点，优先挑字面对上的
+
+
+def _variants(token: str) -> set[str]:
+    """一个查询词的所有可接受写法：本身、单复数、同义词。
+
+    单复数要双向处理：查 "book" 要能命中 `books.glb`，查 "books" 也要能命中
+    名字写单数的资产。
+    """
+    out = {token, token + "s", token + "es"}
+    if len(token) > 3 and token.endswith("es"):
+        out.add(token[:-2])
+    if len(token) > 2 and token.endswith("s"):
+        out.add(token[:-1])
+    out.update(SYNONYMS.get(token, ()))
+    return out
+
+
 def score_asset(query_tokens: list[str], asset: Asset) -> float:
     """[0, 1]。名字里命中算满分，kit 标题里命中算四折；名字越长扣得越多。
 
@@ -39,11 +72,21 @@ def score_asset(query_tokens: list[str], asset: Asset) -> float:
     name_tokens = tokenize(asset.name)
     kit_tokens = tokenize(asset.kit_title) + tokenize(asset.kit)
     name_set, kit_set = set(name_tokens), set(kit_tokens)
-    hit = sum(1.0 if t in name_set else 0.4 if t in kit_set else 0.0 for t in query_tokens)
+    hit, in_name = 0.0, 0
+    for token in query_tokens:
+        variants = _variants(token)
+        if token in name_set:
+            hit += 1.0; in_name += 1
+        elif variants & name_set:
+            hit += VARIANT_WEIGHT; in_name += 1
+        elif token in kit_set:
+            hit += 0.4
+        elif variants & kit_set:
+            hit += 0.4 * VARIANT_WEIGHT
     base = hit / len(query_tokens)
     if base <= 0:
         return 0.0
-    extra = max(0, len(name_set) - len([t for t in query_tokens if t in name_set]))
+    extra = max(0, len(name_set) - in_name)
     score = base / (1.0 + 0.12 * extra)
     # 查询词正好是某个 kit 的 slug 时给这个 kit 加权：查 "toy train" 应该落到 train 这个
     # kit 的机车上，而不是过山车 kit 里那节叫 coaster-train 的车厢。

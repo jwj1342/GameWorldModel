@@ -39,9 +39,35 @@ class GroundingDinoDetectionProvider:
             keep.append((score, bbox, label))
             if len(keep) >= pc["max_objects"]: break
         del model; torch.cuda.empty_cache()
-        return [DetectionRecord(detection_id=f"f{frame_index}_{i:03d}", frame_index=frame_index, class_label=label,
+        return [DetectionRecord(detection_id=f"f{frame_index}_{i:03d}", frame_index=frame_index,
+                                class_label=snap_label(label, phrases),
                                 score=score, bbox=tuple(bbox), source=self.name)
                 for i, (score, bbox, label) in enumerate(keep)]
+
+
+def snap_label(label: str, phrases: list[str]) -> str:
+    """把检测器返回的标签收敛到我们真正问过的某一个短语上。
+
+    Grounding DINO 的提示词是把所有短语用句点拼成一串的，一个框如果同时落在好几个
+    短语的词上，返回的标签就是它们的拼接——实测见过 "wooden block cardboard box
+    storage box drawer" 这种。这样的类名在库里查不到任何资产，而且写进程序之后
+    也没法读。
+
+    规则是取**最长的那个**能在标签里原样找到的查询短语。拼接本身没有可靠的主次顺序，
+    所以不去猜哪个是主体；但一个具体的类名总比一串拼接有用，至少它能被检索和阅读。
+    一个都对不上就原样返回，不编。
+    """
+    text = (label or "").strip().lower()
+    if not text:
+        return label
+    candidates = [p.strip().lower() for p in phrases if p and p.strip()]
+    if text in candidates:
+        return text
+    contained = [c for c in candidates if c and c in text]
+    if not contained:
+        return label
+    contained.sort(key=lambda c: (-len(c), c))
+    return contained[0]
 
 class GroundedSAM2Backend:
     name = "grounded_sam2"

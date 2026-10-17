@@ -198,3 +198,30 @@ def test_bundling_copies_both_search_hits_and_explicit_refs(library, tmp_path, r
     mapping = copy_assets(out, manifest)
     assert "obj_1" in mapping["objects"], f"resolved={manifest['requests'][0]['resolved']} 没被拷贝"
     assert (out / mapping["objects"]["obj_1"]["file"]).is_file()
+
+
+@pytest.mark.parametrize("query,expect", [
+    ("book", "furniture/books"),          # 库里只有复数形式
+    ("books", "furniture/books"),
+    ("bookshelf", "furniture/bookcase"),  # 库里叫 bookcase
+    ("couch", "furniture/sofa"),
+])
+def test_单复数与同义词能对上库里的实际命名(query, expect):
+    """资产命中率的缺口大半不是算法问题，是词对不上：库里有 books.glb 没有 book.glb，
+    有 bookcaseOpen 没有 bookshelf。"""
+    from gwm.assets.library import Asset
+    from gwm.assets.retrieve import retrieve
+    catalog = [Asset(id="furniture/books", path="p", kit="furniture", kit_title="Furniture Kit", name="books"),
+               Asset(id="furniture/bookcase", path="p", kit="furniture", kit_title="Furniture Kit", name="bookcaseOpen"),
+               Asset(id="furniture/sofa", path="p", kit="furniture", kit_title="Furniture Kit", name="sofa"),
+               Asset(id="train/track", path="p", kit="train", kit_title="Train Kit", name="track")]
+    hits = retrieve(query, catalog, k=1)
+    assert hits and hits[0][0].id == expect, f"{query} -> {[a.id for a, _ in hits]}"
+
+
+def test_字面对上的排在同义词前面():
+    from gwm.assets.library import Asset
+    from gwm.assets.retrieve import retrieve
+    catalog = [Asset(id="a/cup", path="p", kit="a", kit_title="A", name="cup"),
+               Asset(id="a/mug", path="p", kit="a", kit_title="A", name="mug")]
+    assert retrieve("cup", catalog, k=2)[0][0].id == "a/cup"
