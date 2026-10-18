@@ -159,11 +159,15 @@ def main() -> int:
     if structure:
         print("\n  沿主方向的速度结构（真滑轨应该往复、有停顿；自由轨迹和漂移单向）：")
         print(f"    {'真值类型':<20}{'样本':>5}{'往复次数中位数':>14}{'几乎静止的时间占比':>18}")
+        def q(v, p):
+            v = sorted(v)
+            return v[min(len(v) - 1, int(p * len(v)))]
         for want, vals in sorted(structure.items()):
-            rev = sorted(v[0] for v in vals); rest = sorted(v[1] for v in vals)
-            print(f"    {want:<20}{len(vals):>5}{rev[len(rev)//2]:>14}"
-                  f"{rest[len(rest)//2]:>18.2f}")
-        print("    真 prismatic 的往复次数如果明显高于 trajectory 和 static，就能当判别子。")
+            rev = [v[0] for v in vals]; rest = [v[1] for v in vals]
+            print(f"    {want:<20}{len(vals):>5}"
+                  f"  往复 {q(rev,0):>2}/{q(rev,0.5):>2}/{q(rev,0.99):>2}"
+                  f"   静止占比 {q(rest,0):.2f}/{q(rest,0.5):.2f}/{q(rest,0.99):.2f}")
+        print("    三个数分别是最小、中位、最大。要当判别子，两类的区间不能重叠太多。")
     print("\n置信度如果在这里能上到门槛，问题在感知；如果仍然上不去，"
           "分类器的置信度定义本身要重做——它在一条好轨迹上也给不出把握。")
     return 0
