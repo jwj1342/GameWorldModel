@@ -33,6 +33,7 @@ from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
 from gwm.feedback.completeness import assess, format_table      # noqa: E402
+from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
@@ -64,6 +65,8 @@ def main() -> int:
     ap.add_argument("--phrases", default="", help="逗号分隔的检测短语；留空走默认词表")
     ap.add_argument("--max-objects", type=int, default=0, help=">0 时覆盖配置里的物体数上限")
     ap.add_argument("--config", action="append", default=[])
+    ap.add_argument("--likeness", action="store_true",
+                    help="把重建的场景按输入相机轨迹重渲染，和原视频比相似度")
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
     ap.add_argument("--no-image-retrieval", action="store_true",
@@ -184,6 +187,20 @@ def main() -> int:
         return 2
     completeness = assess(program, evidence, result["assets"],
                           load_masks(out / "perception"))
+    if a.likeness:
+        # 唯一直接回答「像不像」的数：按输入的相机轨迹重渲染，和原帧比
+        frames_json = out / "perception" / "frames" / "frames.json"
+        frames_list = json.loads(frames_json.read_text(encoding="utf-8"))["frames"] \
+            if frames_json.is_file() else []
+        like = likeness(Path(result["game_dir"]), frames_list, out / "likeness",
+                        str(REPO / "scripts/node_harness.sh"),
+                        Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
+        completeness["likeness"] = like
+        if like.get("ok"):
+            print(f"重渲染相似度: 中位数 {like['median']}（{like['n']} 帧，"
+                  f"范围 {like['min']}~{like['max']}）", flush=True)
+        else:
+            print(f"重渲染相似度: 没算成（{like.get('reason')}）", flush=True)
     print(format_table(completeness), flush=True)
     resolved = sum(1 for r in result["assets"]["requests"] if r["resolved"].startswith("library"))
     summary = {"clip": a.clip, "objects": len(program.get("objects", [])),
