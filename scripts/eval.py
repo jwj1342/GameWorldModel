@@ -182,7 +182,8 @@ def work_dir(work: Path, tag: str, identity: str) -> Path:
     return work / f"{tag}_{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
 
 
-def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None, max_dist_m: float | None = None) -> dict:
+def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None,
+             max_dist_m: float | None = None, match_on: str | None = None) -> dict:
     manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
     clip = manifest.get("clip", run.parent.name)
     configs = (manifest.get("args") or {}).get("config") or []
@@ -214,9 +215,15 @@ def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | No
     # 3 米等于「什么都能配上」，在 21 米的场景里又很紧。跨尺度比较必须把它按场景一起缩，
     # 否则比出来的是口径差异不是方法差异。不给就沿用原来的默认值。
     extra = {} if max_dist_m is None else {"max_dist_m": float(max_dist_m)}
+    # 配对判据。默认沿用历史口径（整段平均距离），但那个口径把被评测的量写进了配对
+    # 条件——运动判错的物体配不上，于是既算漏检又被踢出运动准确率的分母。详见 #7。
+    if match_on is not None:
+        extra["match_on"] = match_on
     row["metrics"] = evaluate(gt, json.loads(pred_bytes), gt_states, pred_states, **extra)
     if max_dist_m is not None:
         row["max_dist_m"] = float(max_dist_m)
+    if match_on is not None:
+        row["match_on"] = match_on
     return row
 
 
@@ -247,6 +254,11 @@ def main(argv: list[str]) -> int:
                     help="额外的真值根目录，可给多次。合成数据集产在 $SCRATCH 上，不在仓库里，"
                          "所以要从外面指进来；不从 run.json 读，那是这次运行自己用过的东西")
     ap.add_argument("--out", default="docs/results/eval_table.json")
+    ap.add_argument("--match-on", choices=["mean", "start"], default=None,
+                    help="物体配对按什么算距离。mean（默认，历史口径）是观察窗内逐时刻"
+                         "距离的平均；它把被评测的量写进了配对条件——运动判错的物体配不上，"
+                         "于是既算漏检、又被踢出运动准确率的分母（实测这是个闭环，见 #7）。"
+                         "start 只看观察窗起点的位置，和运动无关。")
     ap.add_argument("--max-dist", type=float, default=None,
                     help="物体配对的距离容差（米），默认 3.0。它是绝对量，所以跨尺度"
                          "比较时必须按场景尺度一起缩，否则小场景里等于「什么都能配上」。")
@@ -270,6 +282,8 @@ def main(argv: list[str]) -> int:
             # 只在真的给了容差时才往下传：测试里有用三到四个位置参数替换 eval_one 的，
             # 无条件多传一个会把它们打断，而那些测试盯的是入口行为不是签名
             tol = {} if a.max_dist is None else {"max_dist_m": a.max_dist}
+            if a.match_on is not None:
+                tol["match_on"] = a.match_on
             row = eval_one(r, work, a.harness, a.gt_root, **tol)
         except Exception as e:
             failed.append({"run": str(r), "error": repr(e)[:300]}); continue

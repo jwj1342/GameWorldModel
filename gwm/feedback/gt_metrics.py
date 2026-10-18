@@ -176,6 +176,7 @@ def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray,
 
 def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_states: list[dict],
              holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120,
+             match_on: str = "mean",
              min_time_coverage: float | None = None) -> dict:
     """Keep existing metric keys, using a GT window and frozen prefix identities."""
     if min_time_coverage is None:
@@ -183,6 +184,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     if (isinstance(min_time_coverage, bool) or not isinstance(min_time_coverage, (int, float))
             or not np.isfinite(min_time_coverage) or not 0 <= min_time_coverage <= 1):
         raise ValueError("min_time_coverage must be finite and within [0, 1]")
+    if match_on not in ("mean", "start"):
+        raise ValueError("match_on must be 'mean' or 'start'")
     if not 0 < holdout_frac < 1 or n_samples < 2 or not np.isfinite(max_dist_m) or max_dist_m < 0:
         raise ValueError("invalid metric configuration")
     try:
@@ -242,7 +245,20 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             R0, t0v = align_gauge(np.vstack(gp), np.vstack(pp))
     aligned = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
 
-    pairs = match_objects(observed_gt, prefix(aligned), obs_times, max_dist_m)
+    # 配对判据。默认 "mean"（观察窗内逐时刻距离的平均）是历史口径，但它**把被评测的量
+    # 写进了配对条件**：一个真值里走了几米的物体，如果我们把它的运动写成 static，
+    # 平均距离就是行程的一半，远超容差，于是配不上——既算成漏检，又被踢出运动准确率
+    # 的分母。实测这是个闭环：分母里剩下的全是不怎么动的物体，于是「恒答 static」
+    # 成为最优解，而七个配置的准确率**精确等于**那个常数基线（见 #7）。
+    # "start" 用观察窗起点的位置配，和运动无关：物体是不是同一个，和我们有没有把它
+    # 的运动猜对，本来是两件事。
+    pair_times = obs_times
+    if match_on == "start" and len(obs_times):
+        pair_times = np.asarray([obs_times[0]], float)
+    try:
+        pairs = match_objects(observed_gt, prefix(aligned), pair_times, max_dist_m)
+    except ValueError:                           # 某条轨迹不覆盖那一瞬，退回整段口径
+        pairs = match_objects(observed_gt, prefix(aligned), obs_times, max_dist_m)
     pairs += [(g, None, float("inf")) for g in sorted(set(gt_tr) - set(observed_gt))]
     matched = [(g, p, d) for g, p, d in pairs if p is not None]
 
@@ -268,6 +284,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         "by_mean_distance": len(mean_matched),
         "by_start_position": len(start_matched) if start_pairs else "unknown",
         "only_by_start_position": sorted(start_matched - mean_matched) if start_pairs else [],
+        "used": match_on,
         "note": "按整段平均距离配对，会把运动判错的物体一并算成没检出。"
                 "only_by_start_position 里的是「位置对上了但运动没对上」的那些。",
     }

@@ -292,3 +292,32 @@ def test_sensitivity_script_success_and_inapplicable_period(tmp_path, monkeypatc
     assert module.main(args) == 1
     rows = json.loads(output.read_text(encoding="utf-8"))
     assert rows[-1]["check"]["status"] == "not_applicable"
+
+
+def test_配对判据可选而且起点口径不吃运动误差():
+    """`match_on="start"` 要能把「位置对上了、运动没对上」的物体配上。
+
+    默认的 "mean" 口径代价是观察窗内逐时刻距离的平均，于是一个真值里走了几米的
+    物体，如果预测把它写成静止，平均距离就是行程的一半，远超容差配不上——既算成
+    漏检，又被踢出运动准确率的分母。实测这是个闭环：分母里剩下的全是不怎么动的
+    物体，于是「恒答 static」成为最优解，七个配置的准确率精确等于那个常数基线。
+    """
+    import numpy as np
+    import pytest
+
+    times = np.linspace(0.0, 4.0, 9)
+    # 真值：从原点沿 x 走 4 米。预测：同一个起点，但被写成静止。
+    moving = {"t": times, "pos": np.column_stack([times, np.zeros(9), np.zeros(9)])}
+    frozen = {"t": times, "pos": np.zeros((9, 3))}
+
+    # 整段平均距离约 2 米，容差 0.5 米配不上
+    by_mean = match_objects({"a": moving}, {"p": frozen}, times, 0.5)
+    assert by_mean[0][1] is None, "整段口径下本该配不上，夹具没造对"
+
+    # 起点距离是 0，配得上
+    by_start = match_objects({"a": moving}, {"p": frozen}, np.asarray([times[0]]), 0.5)
+    assert by_start[0][1] == "p"
+
+    with pytest.raises(ValueError):
+        evaluate(program(["a"]), program(["a"]), states(["a"]), states(["a"]),
+                 match_on="whatever")
