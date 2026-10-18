@@ -77,3 +77,33 @@ def test_方底面上的真实转动仍能看见只要每步不到四十五度()
 def test_少于两帧原样返回():
     one = quats_from_deg([0.0])
     assert np.allclose(continuous_footprint_yaw(one, 1.0), one)
+
+
+def test_被周期性闸挡掉的拟合会被记下来():
+    """周期候选没生成时，要留下「是拟合不行还是闸划错了」的证据。
+
+    实测（真值感知）：八个真值 `periodic_rotate` 里有六个的 periodic_rotate 候选
+    压根没生成，于是只剩 spin 和 static 两个靠得很近的候选，分不开就退回 unknown，
+    而 unknown 到了合成那边等于写成 static——这是 76% 塌成 static 的直接来源。
+    不记下 r2，就没法回答是拟合不行还是 0.70 这条线划错了。
+    """
+    from gwm.config import load_config
+    from gwm.perception.motion import estimate_motion
+
+    cfg = load_config([])
+    n = 24
+    ts = np.arange(n) * 0.25
+    # 一个沿 x 轴匀速走的物体：周期拟合应该失败，但失败要留下记录
+    pos = np.column_stack([ts * 0.3, np.full(n, 0.5), np.zeros(n)])
+    quat = np.tile([0.0, 0.0, 0.0, 1.0], (n, 1))
+    out = estimate_motion(ts, pos, quat, cfg, size=np.array([0.3, 0.3, 0.3]),
+                          coordinate_space="world")
+    rejected = out["motion_guess"].get("rejected_periodic")
+    assert isinstance(rejected, list), f"诊断字段没出现：{sorted(out['motion_guess'])}"
+    kinds = {r["type"] for r in rejected}
+    # 两条周期假设都该有记录，要么是 no_fit，要么带着 r2
+    assert kinds <= {"periodic_translate", "periodic_rotate"}
+    for r in rejected:
+        assert r["reason"] in ("no_fit", "r2_below_gate", "orientation_unreliable")
+        if r["reason"] == "r2_below_gate":
+            assert 0.0 <= r["r2"] < r["gate"]
