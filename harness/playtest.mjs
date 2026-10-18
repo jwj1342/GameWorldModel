@@ -51,6 +51,16 @@ const finalState = await g.page.evaluate(() => window.__game.state());
 verdict.deaths = finalState.player.deaths; verdict.collected = finalState.player.collected; verdict.collectibles_total = finalState.player.collectibles_total;
 verdict.sim_seconds = finalState.t; verdict.wall_ms = Date.now() - wall0; verdict.sim_fps = finalState.frame / Math.max(verdict.wall_ms / 1000, 1e-3);
 verdict.playable = verdict.reached_goal && verdict.deaths < 10;
+// 这次判定是怎么来的。槽位由模板猜出来的时候，出生点和目标被放在同一块地面的两个
+// 角上，中间没有障碍，于是几乎必然通关——那种结果不该和真的走到目标的混在一起算
+// 通过率。trustworthy 为 false 的判定，汇总时要单独看。
+verdict.binding = await g.page.evaluate(() => window.__game.bindingInfo());
+verdict.trustworthy = (verdict.binding?.inferred_slots ?? []).length === 0;
+if (!verdict.trustworthy) {
+  verdict.untrustworthy_reason =
+    `槽位由模板兜底猜出：${verdict.binding.inferred_slots.join('、')}；`
+    + `这条链路没走 gwm/binding/，也就没做尺度归一化`;
+}
 fs.writeFileSync(path.join(outDir, 'verdict.json'), JSON.stringify(verdict, null, 2));
 await g.close();
 console.log(JSON.stringify(verdict));
