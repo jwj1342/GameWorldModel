@@ -167,11 +167,12 @@ def _hypothesis(candidates: list[dict]) -> dict | None:
 
 
 def _unknown(reason: str, support: dict, candidates: list[dict] | None = None,
-             rejected: list[dict] | None = None) -> dict:
+             rejected: list[dict] | None = None, moves: bool | str = "unknown") -> dict:
     ranked = sorted(candidates or [], key=lambda candidate: (-candidate["confidence"], candidate["type"]))
     margin = ranked[0]["confidence"] - ranked[1]["confidence"] if len(ranked) > 1 else "unknown"
     return {
-        "motion_guess": {"type": "unknown", "conf": "unknown", "rejected_periodic": rejected or [],
+        "motion_guess": {"type": "unknown", "conf": "unknown", "moves": moves,
+                         "rejected_periodic": rejected or [],
                          "support_frames": support["frames"],
                          "temporal_span_s": support["span"], "residual": "unknown",
                          "candidate_margin": margin, "coordinate_space": "world", "notes": reason,
@@ -335,6 +336,23 @@ def estimate_motion(
             rejected.append({"type": label, "reason": "r2_below_gate", "r2": round(fit["r2"], 4),
                              "period": round(fit["period"], 4), "gate": float(settings["periodic_min_r2"])})
 
+    # 「会不会动」这个二分单独给一个结论，**不过下面那两道闸**。
+    #
+    # 那两道闸（min_primary_confidence、min_hypothesis_margin）是为**七分类**设的：
+    # 分不清是 spin 还是 periodic_rotate 的时候，与其猜一个写进程序，不如写 unknown
+    # ——往程序里塞一个错的运动模型，用户一看就穿帮。这个取舍是对的。
+    #
+    # 但二分不该跟着一起被扔。「这个物体会动」和「它绕 y 轴以 1.75 度每秒周期转动」
+    # 是两件信息量差很远的事。实测（真值感知、92 个物体）：直接比候选分数，会动的
+    # 查全 **0.929**、命中率 0.500（瞎猜 0.250）；而链路最终只说出来不到两成，
+    # 92 个里 58 个是 unknown。信息本来就在，是被闸挡掉的（见 #7）。
+    #
+    # 所以 type 可以是 unknown 而 moves 是 True——两者不矛盾：知道它在动，
+    # 不知道它怎么动。这一档正对应可交互性的第一档「观测运动」。
+    static_conf = next((c["confidence"] for c in candidates if c["type"] == "static"), None)
+    moving_conf = max((c["confidence"] for c in candidates if c["type"] != "static"), default=None)
+    moves = "unknown" if static_conf is None or moving_conf is None else bool(moving_conf > static_conf)
+
     ordered = sorted(candidates, key=lambda candidate: (-candidate["confidence"], candidate["type"]))
     ranked = [candidate for candidate in ordered if candidate["confidence"] >= float(settings["min_candidate_confidence"])]
     if len(ranked) < 2:
@@ -342,14 +360,14 @@ def estimate_motion(
     margin = ranked[0]["confidence"] - ranked[1]["confidence"] if len(ranked) > 1 else 1.0
     if severe_gap or severe_missing or severe_occlusion:
         reason = "severe track gaps" if severe_gap else ("too many missing observations" if severe_missing else "severe occlusion")
-        return _unknown(reason, support, ranked, rejected)
+        return _unknown(reason, support, ranked, rejected, moves)
     if ranked[0]["confidence"] < float(settings["min_primary_confidence"]) or margin < float(settings["min_hypothesis_margin"]):
         reason = "object orientation is unreliable" if not orientation_reliable and static_pos_rmse < static_scale else "motion hypotheses are not sufficiently separated"
-        return _unknown(reason, support, ranked, rejected)
+        return _unknown(reason, support, ranked, rejected, moves)
 
     best = ranked[0]
     guess = {key: value for key, value in best.items() if key != "confidence"}
-    guess.update({"rejected_periodic": rejected,
+    guess.update({"moves": moves, "rejected_periodic": rejected,
                   "conf": best["confidence"], "support_frames": support["frames"], "temporal_span_s": support["span"],
                   "candidate_margin": round(float(margin), 6), "coordinate_space": "world",
                   "missing_fraction": support["missing_fraction"], "max_gap_s": support["max_gap_s"],

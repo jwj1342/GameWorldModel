@@ -62,3 +62,30 @@ def test_位置仍然取第一帧而不是中位():
     node = only_object(program)
     # 运动可能把 pose.pos 换成轨迹基点，所以这里只断言它不是中位（2.0）
     assert abs(node["pose"]["pos"][0] - 2.0) > 1e-6, "位置被误改成了逐帧中位"
+
+
+def test_判不出运动模型但判得出它在动时要记下来():
+    """「它会动」和「它怎么动」是两件信息量差很远的事，不该绑在一起丢掉。
+
+    实测（真值感知、92 个物体）：直接比候选分数，会动的查全 0.929；而链路最终
+    只说出来不到两成，92 个里 58 个是 unknown——七分类过不了闸，连「它会动」
+    也跟着没了，节点默默变成一个静止的盒子（#7）。
+
+    那两道闸是为七分类设的，这个取舍本身对：往程序里塞一个猜错的运动模型，
+    用户一看就穿帮。但二分不该陪葬。
+    """
+    sizes = [[1.0, 1.0, 1.0]] * 6
+    ev = evidence_with_sizes(sizes)
+    ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown",
+                                        "moves": True, "notes": "候选分不开"}
+    node = only_object(evidence_to_program(ev, "c", {}))
+    assert "motion" not in node, "判不出模型就不该写 motion，写了会穿帮"
+    assert "在动" in node.get("notes", ""), f"没记下来：{node.get('notes')!r}"
+
+
+def test_判出它不动时不要乱记():
+    sizes = [[1.0, 1.0, 1.0]] * 6
+    ev = evidence_with_sizes(sizes)
+    ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": False}
+    node = only_object(evidence_to_program(ev, "c", {}))
+    assert "在动" not in node.get("notes", "")

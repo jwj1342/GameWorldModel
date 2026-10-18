@@ -141,6 +141,14 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             base = m.pop("_base", None)
             if base: node["pose"]["pos"] = base
             node["motion"] = m
+        elif o["motion_guess"].get("moves") is True:
+            # 运动模型判不出来，但「它在动」这件事是判得出来的，而且判得挺准：
+            # 真值感知上会动的查全 0.929（见 #7）。原来这两件事绑在一起——七分类
+            # 过不了闸，连「它会动」也一起丢掉，节点默默变成一个静止的盒子。
+            # 这里先只记进 notes：往程序里写一个猜的运动模型会穿帮，但把观测到的
+            # 事实记下来不会。要让它真的影响渲染和交互，得先给 schema 加字段。
+            node["notes"] = (f"观测到它在动，但运动模型判不出来"
+                             f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
         if any(c["with_id"] == "ground" for c in o.get("contacts", [])) and g: node["support"] = "ground"
         program["objects"].append(node)
     return program
