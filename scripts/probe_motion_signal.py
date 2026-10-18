@@ -386,10 +386,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     masks = load_masks(run)
     frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
     out: dict[str, list] = {}
+    skipped: dict[str, int] = {}
     for oid, per_frame in masks.items():
         kind = kinds.get(oid)
         series = gt_quat.get(oid)
         if kind is None or not series:
+            skipped["no_truth_for_object"] = skipped.get("no_truth_for_object", 0) + 1
             continue
         clouds, frames = [], []
         for fi, mask in sorted(per_frame.items()):
@@ -408,9 +410,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         tracked = track_rigid(clouds)
         orientations = tracked.get("orientations") or []
         if len(orientations) != len(clouds):
+            skipped["orientations_length_mismatch"] = skipped.get("orientations_length_mismatch", 0) + 1
             continue
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
+            skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
             continue
         base = R.from_quat(truth_q[0]).inv()
         true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
@@ -423,15 +427,25 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
+    # 一个样本都没有的时候要说清楚卡在哪，别只打印「没有可比对的样本」
+    if not out and skipped:
+        print(f"  icp: 一个都没留下，原因 {skipped}", flush=True)
     return out
 
 
-def _gt_quaternions(run: Path) -> dict:
+# 片段目录只有 main 知道，而 icp 模式要从里面读 gt_states.jsonl 里的逐帧朝向。
+# 改 gt_series 的返回会动到另外四个模式，所以这里用一个模块级变量，main 每轮设一次。
+CURRENT_CLIP_DIR: Path | None = None
+
+
+def _gt_quaternions(_run: Path) -> dict:
     """逐帧真值朝向，按物体 id 再按帧序号索引。"""
-    states = run.parent / "gt_states.jsonl"
+    if CURRENT_CLIP_DIR is None:
+        print("  icp: 没拿到片段目录", flush=True)
+        return {}
+    states = CURRENT_CLIP_DIR / "gt_states.jsonl"
     if not states.is_file():
-        states = Path(str(run).replace("/perception", "")) / "gt_states.jsonl"
-    if not states.is_file():
+        print(f"  icp: {states} 不在", flush=True)
         return {}
     out: dict = {}
     for line in states.read_text(encoding="utf-8").splitlines():
@@ -464,6 +478,7 @@ def main() -> int:
             print(f"{clip_dir.name}: 失败 {type(error).__name__}: {error}"[:200], flush=True)
             continue
         truth, kinds = gt_series(clip_dir)
+        globals()["CURRENT_CLIP_DIR"] = clip_dir
         for key, values in MODES[a.mode](evidence, truth, kinds, work / clip_dir.name).items():
             merged.setdefault(key, []).extend(values)
     if not any(merged.values()):
