@@ -476,6 +476,19 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     scene_matched = [(g, q) for g, q, _ in scene_pairs if q is not None]
     n_scene_gt, n_scene_pred = len(scene_gt), len(scene_pred)
 
+    # 结构件 / 可动物体 这个二分判对了没有。
+    #
+    # 位置配上了之后才谈得上「归错列表」，所以只在配上的对子里统计。整批真值里
+    # static 占 54%，而我们产出的节点里 static 只占 18%——该进 static 的东西大部分
+    # 被写进了 objects。这个矩阵是去改 direct.py 那条结构件判据之前要先拿到的数。
+    def kind_of(key: str) -> str:
+        return "static" if key.startswith("static::") else "object"
+
+    kind_confusion: dict[str, int] = {}
+    for g, q in scene_matched:
+        key = f"{kind_of(g)}->{kind_of(q)}"
+        kind_confusion[key] = kind_confusion.get(key, 0) + 1
+
     def same_class(gt_id: str, pred_id: str) -> bool:
         a, b = gt_class.get(gt_id, ""), pred_class.get(pred_id, "")
         return bool(a) and bool(b) and (a == b or a in b or b in a)
@@ -548,6 +561,9 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                       "recall": len(scene_matched) / n_scene_gt if n_scene_gt else None,
                       "precision": len(scene_matched) / n_scene_pred if n_scene_pred else None,
                       "gt_static": len(gt_static), "pred_static": len(pred_static),
+                      "kind_confusion": kind_confusion,
+                      "kind_note": "只在位置配上的对子里统计「结构件还是可动物体」判对了没有。"
+                                   "键是「真值->预测」。位置都没配上就谈不上归错列表。",
                       "note": "object + static 一起算。objects 那一档的分母只有真值 objects，"
                               "而这批真值里 static 比 object 还多（69 对 59），超过一半的几何体"
                               "从来没进过指标——一个正确落在结构件上的检出被记成假阳性。"

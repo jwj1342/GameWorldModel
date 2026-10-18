@@ -92,3 +92,43 @@ def test_汇总表多出场景两列():
     md = as_markdown(table)
     assert "场景召回" in md and "场景精确率" in md
     assert table["t"]["scene_recall"]["median"] == pytest.approx(1.0)
+
+
+def test_结构件归错列表要能看出来():
+    """真值是结构件、我们写成了可动物体——位置对了，但列表错了。
+
+    这正是整批数据的处境：真值里 static 占 54%，我们产出的节点里 static 只占 18%。
+    改 direct.py 那条结构件判据之前，先要有这个矩阵。
+
+    真值这边放两个 object：规范对齐是在 objects 上拟合的，只给一个点的话偏航和
+    平移都定不下来，配对会乱掉——这不是被测代码的毛病，是这条测试自己要搭对。
+    """
+    gt_nodes = [("g_a", "object", (0, 0.5, 0)), ("g_b", "object", (5, 0.5, 0)),
+                ("g_wall", "static", (0, 0.5, 6.0))]
+    pred_nodes = [("p_a", "object", (0, 0.5, 0)), ("p_b", "object", (5, 0.5, 0)),
+                  ("p_wall", "object", (0, 0.5, 6.0))]
+    out = evaluate(program([("g_a", (0, 0.5, 0)), ("g_b", (5, 0.5, 0))],
+                           [("g_wall", (0, 0.5, 6.0))]),
+                   program([("p_a", (0, 0.5, 0)), ("p_b", (5, 0.5, 0)),
+                            ("p_wall", (0, 0.5, 6.0))], []),
+                   states(gt_nodes), states(pred_nodes), max_dist_m=0.45)
+    conf = out["full"]["scene"]["kind_confusion"]
+    assert conf.get("static->object") == 1, "结构件被写进 objects，要记下来"
+    assert conf.get("object->object") == 2
+    assert "static->static" not in conf
+
+
+def test_位置没配上就不进这个矩阵():
+    """归错列表是在「位置本来就对」的前提下才成立的问题。"""
+    gt_nodes = [("g_a", "object", (0, 0.5, 0)), ("g_b", "object", (5, 0.5, 0)),
+                ("g_wall", "static", (0, 0.5, 6.0))]
+    pred_nodes = [("p_a", "object", (0, 0.5, 0)), ("p_b", "object", (5, 0.5, 0)),
+                  ("p_wall", "object", (0, 0.5, 40.0))]
+    out = evaluate(program([("g_a", (0, 0.5, 0)), ("g_b", (5, 0.5, 0))],
+                           [("g_wall", (0, 0.5, 6.0))]),
+                   program([("p_a", (0, 0.5, 0)), ("p_b", (5, 0.5, 0)),
+                            ("p_wall", (0, 0.5, 40.0))], []),
+                   states(gt_nodes), states(pred_nodes), max_dist_m=0.45)
+    conf = out["full"]["scene"]["kind_confusion"]
+    assert conf.get("static->object") is None, "差着三十多米，不该算成归错列表"
+    assert conf.get("object->object") == 2
