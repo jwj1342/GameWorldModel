@@ -100,9 +100,9 @@ def test_没算成的残差不动任何东西():
 
 
 def test_拟合轮数的缺省值进了配置():
-    """十条合成片段实测：每通道误差 19.3 -> 4.6 /255，亮度比 0.777 -> 0.971。
-    代价是每条多约 12 秒。两轮之后已经很接近 1.0，再加轮数收益递减。"""
+    """逐轮扫过：合成片段的亮度比 0.883 / 0.953 / 0.986 / 0.993 / 1.000，第四轮精确
+    收敛；两轮只到 0.971，定早了。真实视频第五轮还在爬但增量很小，而代价线性增长。"""
     import yaml
     from pathlib import Path
     cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
-    assert cfg["synthesis"]["colour_fit_rounds"] == 2
+    assert cfg["synthesis"]["colour_fit_rounds"] == 4
