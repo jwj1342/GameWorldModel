@@ -419,6 +419,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 上界**（真实链路拿不到真值位姿），用来回答「完整性这个论点在真实数据上
         # 还成不成立」，再决定要不要去啃资产网格那条路。
         template_deg = _template_rotation_deg(clouds, frames, poses.get(oid) or {})
+        # 第三条路，也是唯一能落地的一条：模板来自**检索到的资产网格**。
+        # 前两条都不干净——局部点云互配的两边都随视角扫动；用真值位姿拼的「完整模型」
+        # 本身是各帧图像格采样并起来的，格子的痕迹还在，而且第一版还把查询点云
+        # 逐字喂进了模型（同义反复，已更正）。资产网格是从三角面上采的，和相机无关，
+        # 也和观测完全独立。
+        asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -435,6 +441,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
             out.setdefault(f"{kind}/template_rmse_deg", []).append(
                 float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        if len(asset_deg) == len(true_deg):
+            out.setdefault(f"{kind}/asset_range_deg", []).append(float(np.ptp(asset_deg)))
+            out.setdefault(f"{kind}/asset_rmse_deg", []).append(
+                float(np.sqrt(np.mean((asset_deg - true_deg) ** 2))))
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
@@ -473,6 +483,63 @@ def _template_rotation_deg(clouds: list, frames: list, poses: dict) -> np.ndarra
     model = np.vstack(pieces)
     if len(model) > 20000:                       # 配准前先抽稀，否则 KD 树太慢
         model = model[np.linspace(0, len(model) - 1, 20000).astype(int)]
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out)
+
+
+def _class_of(oid: str, evidence: dict) -> str:
+    for o in evidence.get("objects", []):
+        if o.get("id") == oid:
+            return str(o.get("class_guess") or "")
+    return ""
+
+
+_ASSET_CACHE: dict = {}
+
+
+def _asset_points(query: str) -> np.ndarray | None:
+    """按类名检索资产，把网格表面采成点云。检索不到或读不动就返回 None。"""
+    if not query:
+        return None
+    if query in _ASSET_CACHE:
+        return _ASSET_CACHE[query]
+    from gwm.assets.library import library_root, load_catalog
+    from gwm.assets.mesh import load_points
+    from gwm.assets.retrieve import retrieve
+
+    root = library_root()
+    if root is None:
+        _ASSET_CACHE[query] = None; return None
+    catalog = _ASSET_CACHE.setdefault("__catalog__", load_catalog(root))
+    hits = retrieve(query, catalog, k=1)
+    pts = load_points(Path(root) / hits[0][0].path, samples=3000) if hits else None
+    _ASSET_CACHE[query] = pts
+    return pts
+
+
+def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
+    """拿检索到的资产网格当模板，逐帧把观测配上去。
+
+    资产的尺度和物体未必一致（检索只保证类别像），所以配准前先按两边的包围盒
+    对角线把模板缩到同一尺度——ICP 解的是刚体变换，尺度不对会被旋转和平移吸收。
+    """
+    from gwm.perception.registration import icp
+    template = _asset_points(cls)
+    if template is None or not clouds:
+        return np.array([])
+    span = np.vstack(clouds)
+    obs_diag = float(np.linalg.norm(span.max(0) - span.min(0)))
+    tpl_diag = float(np.linalg.norm(template.max(0) - template.min(0)))
+    if tpl_diag <= 1e-9 or obs_diag <= 1e-9:
+        return np.array([])
+    model = (template - template.mean(0)) * (obs_diag / tpl_diag)
     warm_R, warm_t = np.eye(3), np.zeros(3)
     out = []
     for cloud in clouds:
