@@ -412,6 +412,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         if len(orientations) != len(clouds):
             skipped["orientations_length_mismatch"] = skipped.get("orientations_length_mismatch", 0) + 1
             continue
+        # 第二条路：用**完整模型**当模板，而不是让局部点云互相配。
+        # 合成实验里这条路把假转动压小五倍而真转动不丢（#7），但那是完美的长方体模板。
+        # 这里用真值位姿把各帧点云摆回物体自身坐标系、并起来当模型——它是个**预言机
+        # 上界**（真实链路拿不到真值位姿），用来回答「完整性这个论点在真实数据上
+        # 还成不成立」，再决定要不要去啃资产网格那条路。
+        template_deg = _template_rotation_deg(clouds, frames, series)
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -424,6 +430,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
         out.setdefault(f"{kind}/angle_rmse_deg", []).append(
             float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
+        if len(template_deg) == len(true_deg):
+            out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
+            out.setdefault(f"{kind}/template_rmse_deg", []).append(
+                float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
@@ -436,6 +446,29 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
 # 片段目录只有 main 知道，而 icp 模式要从里面读 gt_states.jsonl 里的逐帧朝向。
 # 改 gt_series 的返回会动到另外四个模式，所以这里用一个模块级变量，main 每轮设一次。
 CURRENT_CLIP_DIR: Path | None = None
+
+
+def _template_rotation_deg(clouds: list, frames: list, series: dict) -> np.ndarray:
+    """用真值位姿拼出完整模型，再把每一帧配回去。预言机上界，不是可落地的做法。"""
+    from gwm.perception.registration import icp
+    pieces = []
+    for cloud, f in zip(clouds, frames):
+        q = series.get(f)
+        if q is None:
+            return np.array([])
+        inv = R.from_quat(q).inv()
+        pieces.append((cloud - cloud.mean(0)) @ inv.as_matrix().T)
+    model = np.vstack(pieces)
+    if len(model) > 20000:                       # 配准前先抽稀，否则 KD 树太慢
+        model = model[np.linspace(0, len(model) - 1, 20000).astype(int)]
+    warm = np.eye(3)
+    out = []
+    for cloud in clouds:
+        centred = (cloud - cloud.mean(0)) @ warm.T
+        step = icp(centred, model)
+        warm = np.asarray(step["rotation"], float) @ warm
+        out.append(float(np.degrees(R.from_matrix(warm).magnitude())))
+    return np.asarray(out)
 
 
 def _gt_quaternions(_run: Path) -> dict:
