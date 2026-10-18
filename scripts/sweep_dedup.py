@@ -69,7 +69,11 @@ def main() -> int:
         if a.max_dist is not None:
             cmd += ["--max-dist", str(a.max_dist)]
         print(f"\n########## 阈值 {threshold}：合掉 {dropped} 个 ##########", flush=True)
-        subprocess.run(cmd, cwd=REPO, check=False, capture_output=True)
+        done = subprocess.run(cmd, cwd=REPO, check=False, capture_output=True, text=True)
+        if not out.is_file():
+            # 吞掉报错只会留下一张空表，查起来比直接看报错慢得多。第一版就是这样，
+            # 实际原因是 --max-dist 那个参数在这条分支上还不存在，一行报错就说清了。
+            print("  评测没产出结果：", (done.stderr or done.stdout or "")[-400:], flush=True)
         if out.is_file():
             rows = json.loads(out.read_text(encoding="utf-8"))["rows"]
             g = p = m = 0
