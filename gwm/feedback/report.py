@@ -72,13 +72,28 @@ def compare(groups: dict[str, list[dict]], window: str = "full") -> dict:
 
 
 def as_markdown(table: dict) -> str:
-    """渲染成 markdown，直接能贴进论文或 status 文档。"""
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 物体召回 | 物体精确率 |",
-            "|---|---|---|---|---|---|"]
+    """渲染成 markdown，直接能贴进论文或 status 文档。
+
+    哪一列报中位数、哪一列报均值，不是风格问题，是对不对的问题。
+    轨迹误差是连续量，中位数是稳健统计，该报中位数。运动类型准确率汇总到物体一级
+    之后是一串 0 和 1，**它的中位数只会取 0 或 1**：判对不到一半就恒等于 0.000，
+    超过一半就恒等于 1.000，中间的信息全丢。而 0/1 的均值本来就是准确率的定义。
+
+    实测后果：几何消融的三档真实准确率是 0.182 / 0.158 / 0.200，这张表当时全印成
+    0.000，我据此写过「换真值相机、换真值深度都纹丝不动」的结论——结论方向没错，
+    但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
+    仍报中位数。
+    """
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 配对物体数 | 物体召回 | 物体精确率 |",
+            "|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
+        acc = a["motion_type_accuracy"]
+        acc_txt = "—" if not acc else format(acc["mean"], ".3f")
+        acc_n = "—" if not acc else acc["n"]
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
-                    f"{f(a['motion_type_accuracy'])} | {f(a['object_recall'])} | {f(a['object_precision'])} |")
+                    f"{acc_txt} | {acc_n} | "
+                    f"{f(a['object_recall'])} | {f(a['object_precision'])} |")
     return "\n".join(rows)
 
 
