@@ -9,6 +9,7 @@ from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
+from .registration import infer_articulation, looks_static, track_rigid
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -196,11 +197,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         if lam <= 0 or np.linalg.norm(hit - origin) > 60: return None
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
+    dropped_tracks: list[dict] = []
     appearances = observe_colors(frames, {o.id: o.masks for o in tracks.objects}, tracks.frame_size,
                                  cfg["perception"].get("color_min_pixels", 4),
                                  cfg["perception"].get("color_aspect_tolerance", 0.02))
     for o in tracks.objects:
-        obbs, observations, ts, centers, quaternions = [], [], [], [], []
+        obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = is_static_class(o.phrase, cfg)
         for k, fi in enumerate(geom.frame_indices):
@@ -231,18 +233,75 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                  "source": {"geometry": geom.backend or "unknown", "segmentation": tracks.backend or "unknown", "tracking": "mask_centroid_obb"},
                                  "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
             obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); quaternions.append(ob["quat"])
+            clouds.append(pts)
             if area > best_area: best_area, best_frame = area, fi
         if not obbs: continue
+        # 只在很少几帧里被看到的轨迹基本是噪声：实测被看到不到 10% 帧的物体，
+        # 运动估计成功率是 0%，而它们占了预测物体的一大块，把精确率压得很低
+        # （五十条小批量上真值 5 个物体、预测 11.5 个）。这里按被看到的帧数比例过滤。
+        min_frac = float(cfg["perception"].get("min_track_frame_frac", 0.0))
+        if min_frac > 0 and len(geom.frame_indices) and len(obbs) / len(geom.frame_indices) < min_frac:
+            dropped_tracks.append({"id": o.id, "frames": len(obbs),
+                                   "frac": round(len(obbs) / len(geom.frame_indices), 3)})
+            continue
         ts_a, c_a, q_a = np.asarray(ts), np.asarray(centers), np.asarray(quaternions)
         # smooth centers/sizes in the stored OBBs too
         cs = smooth_series(c_a, cfg["perception"]["motion"]["smooth_window"]); sz = smooth_series(np.asarray([ob["size"] for ob in obbs]), 9)
         for i, ob in enumerate(obbs): ob["center"] = [float(v) for v in cs[i]]; ob["size"] = [float(v) for v in sz[i]]
         median_size = np.median(sz, axis=0)
         footprint_ratio = max(median_size[0], median_size[2]) / max(min(median_size[0], median_size[2]), 1e-6)
-        motion_result = estimate_motion(ts_a, c_a, q_a, cfg, size=median_size, coordinate_space="world",
+        # 喂给运动估计的位置换成跨帧配准的结果。包围盒中心是可见点在各轴上的分位中点，
+        # 可见面一变它就跟着动；配准只解帧与帧之间的变换，不依赖单帧算出一个稳定的量。
+        # 实测相对第一帧的位移误差 0.253 -> 0.188 m（见 scripts/probe_motion_signal.py）。
+        # 留一个开关是因为静止物体的漂移目前还比包围盒中心大，出问题时要能退回去。
+        motion_positions, motion_quaternions = c_a, q_a
+        motion_source, articulation = "obb_centre", None
+        if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
+            tracked = track_rigid(clouds)
+            if tracked["ok"] and len(tracked["positions"]) == len(c_a):
+                diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))
+                def _registered_quats(base_quat):
+                    """把配准解出的朝向接到第一帧的包围盒朝向上。
+
+                    返回的是绝对朝向序列，和 q_a 同一个约定，所以可以直接替换。
+                    """
+                    base = R.from_quat(base_quat)
+                    return np.asarray([(R.from_matrix(np.asarray(m, float)) * base).as_quat()
+                                       for m in tracked["orientations"]], float)
+
+                # 静止判据默认关着。实测它在真值静止的物体上**一次都没触发过**，
+                # 却在 5.4% 的运动物体上误触发。根因是每步位移这个量分不开两类：
+                # 静止物体每步位移是对角线的 0.165，运动物体是 0.179，两条分布重合。
+                # 不是阈值没调好，是判据本身没有区分力。
+                if cfg["perception"]["motion"].get("use_static_detector", False) \
+                        and looks_static(tracked, diag):
+                    # 每步修正都接近单位阵，说明物体没动。这种情况下配准的累积轨迹会被
+                    # 缓慢滑移带偏（实测静止漂移 0.286 m，比包围盒中心的 0.182 m 还大），
+                    # 所以把位置钉在第一帧，让静止这个假设干干净净地成立。
+                    motion_positions = np.repeat(c_a[:1], len(c_a), axis=0)
+                    # 位置钉住了，朝向也要钉住。只钉位置的话，包围盒朝向的抖动会和
+                    # 「静止」这个假设打架，静止候选反而拿不到高分。
+                    motion_quaternions = np.repeat(q_a[:1], len(q_a), axis=0)
+                    motion_source = "registration_static"
+                else:
+                    registered = np.asarray(tracked["positions"], float)
+                    # 配准给的是相对锚点的轨迹，锚点落在可见表面上。平移到第一帧的包围盒
+                    # 中心，保住绝对位置，用它的形状。
+                    motion_positions = registered - registered[0] + c_a[0]
+                    if len(tracked.get("orientations") or []) == len(q_a):
+                        motion_quaternions = _registered_quats(q_a[0])
+                    motion_source = "cross_frame_registration"
+                    # 关节推断默认关着。在四十条有标准答案的合成片段上扫过阈值：
+                    # 最好的一档「可用率」（报出来的东西里既是真关节、类型也判对的比例）
+                    # 只有 0.333，再收紧就一个都报不出来。报一个假关节比不报更糟——
+                    # 用户拖一下就会发现。等运动信号再好一些再打开。
+                    if cfg["perception"]["motion"].get("infer_articulation", False):
+                        articulation = infer_articulation(tracked)
+        motion_result = estimate_motion(ts_a, motion_positions, motion_quaternions, cfg, size=median_size, coordinate_space="world",
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
+        mg["position_source"] = motion_source
         # contacts with ground
         bottoms = cs[:, 1] - sz[:, 1] / 2
         on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)
@@ -253,6 +312,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
                         "observations": observations,
                         "appearance": appearances[o.id],
+                        **({"articulation": articulation} if articulation else {}),
                         "attribute_confidence": {"class": float(min(1.0, o.score)), "identity": "unknown", "geometry": geometry_conf,
                                                  "motion": float(mg["conf"]) if isinstance(mg.get("conf"), (int, float)) else "unknown"},
                         "hypotheses": copy.deepcopy(o.identity_hypotheses) + ([motion_result["hypothesis"]] if motion_result["hypothesis"] else []),
@@ -271,7 +331,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         "meta": {"clip": clip, "fps_sampled": float(round(1 / max(frames[1]["t"] - frames[0]["t"], 1e-6), 3)) if len(frames) > 1 else 0.0, "n_frames": len(frames), "duration": float(frames[-1]["t"]),
                  "geometry_backend": geom.backend, "segmentation_backend": tracks.backend, "tracks_backend": "mask_centroid_obb", "fallbacks": fallbacks,
                  "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices,
-                 "association_diagnostics": association_diagnostics},
+                 "association_diagnostics": association_diagnostics,
+                 "dropped_short_tracks": dropped_tracks},
         "frames": [{"frame_index": int(frame["index"]), "t": float(frame["t"]),
                     "source": {"kind": "video_frame", "ref": Path(frame["file"]).name if frame.get("file") else "unknown"}} for frame in frames],
         "camera": {"intrinsics": {"fx": float(K0[0, 0]), "fy": float(K0[1, 1]), "cx": float(K0[0, 2]), "cy": float(K0[1, 2]), "width": int(W), "height": int(H), "fov_deg": fov_deg}, "poses": cam_poses,

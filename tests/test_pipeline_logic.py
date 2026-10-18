@@ -249,9 +249,13 @@ def test_eval_aggregation_pools_objects_not_clips():
     assert a["trajectory_m"]["n"] == 5
     assert abs(a["trajectory_m"]["median"] - 0.0) < 1e-9
     assert abs(a["trajectory_m"]["mean"] - 0.2) < 1e-9
-    # 准确率是片段级的量，按片段汇总：两个片段 1.0 和 0.5
-    assert a["motion_type_accuracy"]["n"] == 2
-    assert abs(a["motion_type_accuracy"]["mean"] - 0.75) < 1e-9
+    # 准确率按**物体**汇总，不是按片段。模块文档一直这么写（「一个片段里物体数量不一样，
+    # 先按片段平均会让物体少的片段权重过高」），但实现原来是按片段收的，这条测试把错的
+    # 行为固化住了。实测后果：二十条片段共 35 个配对物体、判对 5 个（0.143），逐片段
+    # 中位数却报成 0.000，因为多数片段只配上一两个物体且恰好判错。
+    # 这里一个片段 1 个物体全对、另一个 4 个物体对一半，合起来是 5 个物体里对 3 个。
+    assert a["motion_type_accuracy"]["n"] == 5
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.6) < 1e-9
     # 混淆矩阵要累加
     assert a["confusion"]["static->spin"] == 2
     # 没有数据时不能假装有

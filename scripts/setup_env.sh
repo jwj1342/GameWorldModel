@@ -7,6 +7,7 @@ export GWM_PROJECT=/project/aip-zhouyang/jwj/GameWorldModel
 export GWM_VENV=$GWM_PROJECT/venv
 export GWM_WEIGHTS=$GWM_PROJECT/weights
 export GWM_DEPS=$GWM_PROJECT/deps
+export GWM_ASSETS=$GWM_DEPS/assets_src/kenney
 export GWM_SCRATCH=${SCRATCH:-/scratch/$USER}/gwm
 export HF_HOME=${SCRATCH:-/scratch/$USER}/hf_cache
 export XDG_CACHE_HOME=${SCRATCH:-/scratch/$USER}/cache

@@ -10,7 +10,7 @@ def compile_program(program: dict, out_dir: str | Path, cfg: dict | None = None)
     report = validate(program)
     if not report["ok"]:
         return {"ok": False, "validation": report}
-    manifest = resolve_assets(program)
+    manifest = resolve_assets(program, cfg)
     game_dir = bundle(program, out_dir, manifest, report, cfg)
     return {"ok": True, "validation": report, "assets": manifest, "game_dir": str(game_dir)}
 

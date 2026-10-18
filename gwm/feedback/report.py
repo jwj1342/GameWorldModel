@@ -36,7 +36,14 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
         mt, ob = w.get("motion_type") or {}, w.get("objects") or {}
-        if mt.get("accuracy") is not None: accs.append(float(mt["accuracy"]))
+        # 按**物体**汇总，不是按片段。按片段平均的话，只配上一个物体的片段和配上十个的
+        # 片段权重一样，而配上一个的那种片段准确率只能是 0 或 1，中位数会被它们带着走。
+        # 实测踩过：二十条片段共 35 个配对物体、判对 5 个（0.143），逐片段中位数却是
+        # 0.000，因为多数片段只配上一两个物体且恰好都判错。
+        matched = int(mt.get("n") or 0)
+        if mt.get("accuracy") is not None and matched:
+            accs.extend([1.0] * round(float(mt["accuracy"]) * matched))
+            accs.extend([0.0] * (matched - round(float(mt["accuracy"]) * matched)))
         if ob.get("recall") is not None: recalls.append(float(ob["recall"]))
         if ob.get("precision") is not None: precs.append(float(ob["precision"]))
         for truth, preds in (mt.get("confusion") or {}).items():
@@ -52,7 +59,7 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "window": window,
         "n_runs": len(runs),
         "trajectory_m": stat(traj),                 # 按物体汇总
-        "motion_type_accuracy": stat(accs),         # 按片段汇总
+        "motion_type_accuracy": stat(accs),         # 按物体汇总，n 就是配对上的物体数
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},

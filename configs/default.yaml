@@ -12,11 +12,18 @@ perception:
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
   segmentation_fallbacks: [none]   # 检测器崩了也要出包，退化成只有静态结构的场景
   max_objects: 8
+  min_track_frame_frac: 0.0  # 被看到的帧数低于这个比例的轨迹直接丢掉。0 表示不过滤。
+                             # 只被看到几帧的轨迹基本是噪声（运动估计成功率 0%），
+                             # 而它们把物体精确率压得很低。合适的值用小批量真值指标定。
   color_min_pixels: 4             # 最少实测像素；缺图/缺mask时不猜颜色
   color_aspect_tolerance: 0.02     # 相对长宽比容差，允许几何模型patch尺寸取整
   grounding_box_threshold: 0.25
   grounding_text_threshold: 0.2
-  detection_keyframes: 1          # 1 保持原首帧/中帧回退；>1 在均匀关键帧上检测后关联
+  detection_keyframes: 6          # 在 6 个均匀关键帧上检测后关联。实测这是召回最大的杠杆：
+                                  # 同一段视频 1 帧检出 9 个物体、画面覆盖 0.23，6 帧检出 62 个、
+                                  # 覆盖 0.53，代价是感知从 50 秒涨到 108 秒。再降阈值能到 0.78，
+                                  # 但资产命中率从 0.74 掉到 0.58（检出一堆对不上类别的东西），
+                                  # 耗时翻到 241 秒，所以阈值保持不动。
   association:                    # 类别／重叠／空间／时间关联；保留身份候选
     max_frame_gap: 24
     max_bbox_center_distance_ratio: 2.5
@@ -30,7 +37,18 @@ perception:
     time_decay_frames: 12.0
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
-  motion:                         # 世界坐标多假设估计；证据、残差、置信度阈值
+  motion:
+    infer_articulation: false  # 从配准的逐步变换里推铰链轴和滑轨行程。默认关着：
+                               # 四十条有真值的合成片段上扫过阈值，最好一档的可用率
+                               # （报出来的里既是真关节、类型也判对的比例）只有 0.333，
+                               # 再收紧就一个都报不出来。见 scripts/sweep_articulation.py
+    use_static_detector: false # 用每步修正量判静止。默认关着：实测在真值静止的物体上
+                               # 一次都没触发，却在 5.4% 的运动物体上误触发。静止物体
+                               # 每步位移是对角线的 0.165、运动物体 0.179，两条分布重合，
+                               # 没有可用的阈值。见 probe_motion_signal.py --mode register
+    use_registration: true   # 运动估计用跨帧配准的轨迹，而不是包围盒中心序列。
+                             # 实测位移误差 0.253 -> 0.188 m；静止物体漂移目前反而略大，
+                             # 所以留了开关。见 scripts/probe_motion_signal.py --mode register                         # 世界坐标多假设估计；证据、残差、置信度阈值
     min_support_frames: 5
     min_temporal_span_s: 0.75
     max_missing_fraction: 0.50
@@ -106,6 +124,21 @@ writer:
   repair_attempts: 3
   candidates: 2
   use_evidence: true
+assets:
+  # CC0 资产库（Kenney 镜像，4812 个 GLB）。没有这个目录就整条退回基本体，管线照常跑。
+  library: /project/aip-zhouyang/jwj/GameWorldModel/deps/assets_src/kenney
+  min_score: 0.45          # 检索命中分低于这个值就退回基本体：塞一个不相干的网格比放个盒子更糟
+  image_weight: 0.6          # 图像分数在融合里的权重；只有文字时退回纯文字
+  candidates: 3            # 清单里记几个候选，便于复核检索质量
+  enabled: true
+synthesis:
+  size_regularisation: false   # 把偏离先验太远的物体按先验缩回去。默认关着：三条真实
+                               # 视频上用重渲染相似度做过消融，plarail 上开着 0.281、
+                               # 关着 0.473，是整张消融表里最大的单项效应。缩物体却不
+                               # 改相机距离，取景就变了——度量更对，画面更不像。
+  max_object_area_frac: 0.35   # 掩码占画面超过这个比例的检测按结构件处理，不进 objects。
+                               # 实测检出过占画面 67% 的「slab」，而真值里最大的物体只占
+                               # 2.1%——那种东西会变成一块和场景一样大的可拖动板子。
 feedback:
   rounds: 2
   max_rounds: 3
