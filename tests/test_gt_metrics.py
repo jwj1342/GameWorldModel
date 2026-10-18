@@ -142,7 +142,12 @@ def test_assignment_maximizes_feasible_matches():
 
 def test_empty_prediction_is_zero_recall_not_execution_failure():
     result = evaluate(program(["a"]), program([]), states(["a"]), states([]))
-    assert result["full"]["objects"] == {"gt": 1, "pred": 0, "matched": 0, "recall": 0, "precision": None}
+    objects = result["full"]["objects"]
+    assert {k: objects[k] for k in ("gt", "pred", "matched", "recall", "precision")} == {
+        "gt": 1, "pred": 0, "matched": 0, "recall": 0, "precision": None}
+    # 配对判据的诊断也不能在空预测上炸：两种判据都该是零个配上
+    assert objects["match_criterion"]["by_mean_distance"] == 0
+    assert objects["match_criterion"]["only_by_start_position"] == []
     assert result["full"]["trajectory"]["median_m"] is None
     assert result["full"]["motion_type"]["accuracy"] is None
     assert evaluate(program(["a"]), program([]), states(["a"]), [])["status"] == "invalid_states"

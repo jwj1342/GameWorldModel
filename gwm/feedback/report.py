@@ -33,9 +33,14 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     """runs 里每一项是 {clip, config, metrics}，metrics 是 gt_metrics.evaluate 的输出。"""
     traj = _pool_objects(runs, window, "trajectory")
     accs, recalls, precs, confusion = [], [], [], Counter()
+    mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
         mt, ob = w.get("motion_type") or {}, w.get("objects") or {}
+        crit = ob.get("match_criterion") or {}
+        if isinstance(crit.get("by_mean_distance"), int):
+            mean_matched += crit["by_mean_distance"]
+            start_only += len(crit.get("only_by_start_position") or [])
         # 按**物体**汇总，不是按片段。按片段平均的话，只配上一个物体的片段和配上十个的
         # 片段权重一样，而配上一个的那种片段准确率只能是 0 或 1，中位数会被它们带着走。
         # 实测踩过：二十条片段共 35 个配对物体、判对 5 个（0.143），逐片段中位数却是
@@ -63,6 +68,11 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},
+        # 按整段平均距离配对，会把运动判错的物体一并算成没检出。这两个数说明那个偏差
+        # 有多大：start_position_only 是「位置对上了、但运动没对上所以被判成未检出」的
+        # 物体数。它不为零，就说明召回量到的不只是检出，运动类型准确率的分母也有偏。
+        "matched_by_mean_distance": mean_matched,
+        "matched_by_start_position_only": start_only,
     }
 
 

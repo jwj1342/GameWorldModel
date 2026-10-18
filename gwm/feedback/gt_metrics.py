@@ -246,6 +246,32 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     pairs += [(g, None, float("inf")) for g in sorted(set(gt_tr) - set(observed_gt))]
     matched = [(g, p, d) for g, p, d in pairs if p is not None]
 
+    # 诊断：换一个**和运动无关**的配对判据，看能多配上几个。
+    #
+    # 上面的代价是观察窗内逐时刻距离的平均。一个真值里走了几米的物体，如果我们把它
+    # 写成 static（全真那一档里 76% 都是），平均距离就是行程的一半左右，远超容差，
+    # 于是配不上。后果有两层：召回量到的其实是「检出**且运动也对**」，而运动类型
+    # 准确率只在「位置本来就差不多」的物体上算，系统性偏向不怎么动的那些。
+    #
+    # 这里只报数、不改默认配对，先看这个偏差有多大。判据是观察窗**起点**的位置：
+    # 物体是不是同一个，和我们有没有把它的运动猜对，本来就是两件事。
+    start_pairs: list = []
+    if len(obs_times):
+        t_first = np.asarray([obs_times[0]], float)
+        try:
+            start_pairs = match_objects(observed_gt, prefix(aligned), t_first, max_dist_m)
+        except ValueError:                       # 某条轨迹不覆盖这一瞬，退回不报
+            start_pairs = []
+    start_matched = {g for g, p, _ in start_pairs if p is not None}
+    mean_matched = {g for g, p, _ in pairs if p is not None}
+    match_criterion = {
+        "by_mean_distance": len(mean_matched),
+        "by_start_position": len(start_matched) if start_pairs else "unknown",
+        "only_by_start_position": sorted(start_matched - mean_matched) if start_pairs else [],
+        "note": "按整段平均距离配对，会把运动判错的物体一并算成没检出。"
+                "only_by_start_position 里的是「位置对上了但运动没对上」的那些。",
+    }
+
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
         for g, p, _ in pairs:
@@ -299,7 +325,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             "motion_type": {"accuracy": acc, "n": len(hits), "confusion": confusion},
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
                         "recall": len(matched) / n_gt if n_gt else None,
-                        "precision": len(matched) / n_pred if n_pred else None},
+                        "precision": len(matched) / n_pred if n_pred else None,
+                        "match_criterion": match_criterion},
             "window_s": [round(t0, 3), round(t1, 3)],
         }
 
