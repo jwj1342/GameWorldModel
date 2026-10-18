@@ -84,6 +84,39 @@ def main() -> int:
         return 1
     print(f"真值类型分布: {Counter(t for t, _ in samples).most_common()}")
 
+    # 真值感知下量到两条候选规则（见 #7）：往复次数 >= 3 就不该接受 prismatic
+    # （真 prismatic 最大 2、static 最小 3），静止时间占比 > 0.26 就不该接受
+    # trajectory（trajectory 最大 0.26）。神经感知下漂移大得多，这里看两条线还在不在。
+    structure: dict[str, list] = {}
+    for truth, (times, pos, quat, size) in samples:
+        if len(pos) < 6:
+            continue
+        delta = pos[-1] - pos[0]
+        span = float(np.linalg.norm(delta))
+        principal = delta / span if span > 1e-9 else np.array([1.0, 0.0, 0.0])
+        along = pos @ principal
+        vel = np.diff(along)
+        scale_v = float(np.max(np.abs(vel))) if len(vel) else 0.0
+        if scale_v <= 1e-9:
+            continue
+        sign = np.sign(vel)
+        nonzero = sign[np.abs(vel) > 0.1 * scale_v]
+        reversals = int(np.sum(np.diff(nonzero) != 0)) if len(nonzero) > 1 else 0
+        rest = float(np.mean(np.abs(vel) < 0.1 * scale_v))
+        structure.setdefault(truth, []).append((reversals, rest))
+    if structure:
+        def q(v, p):
+            v = sorted(v)
+            return v[min(len(v) - 1, int(p * len(v)))]
+        print("\n神经感知下的速度结构（最小 / 中位 / 最大）：")
+        print(f"  {'真值类型':<20}{'样本':>5}   往复次数        静止时间占比")
+        for want, vals in sorted(structure.items()):
+            rev = [v[0] for v in vals]; rst = [v[1] for v in vals]
+            print(f"  {want:<20}{len(vals):>5}   {q(rev,0):>2}/{q(rev,0.5):>2}/{q(rev,0.99):>2}"
+                  f"        {q(rst,0):.2f}/{q(rst,0.5):.2f}/{q(rst,0.99):.2f}")
+        print("  真值感知下的两条线：prismatic 往复最大 2 而 static 最小 3；"
+              "trajectory 静止占比最大 0.26。")
+
     print(f"\n{'放大倍数':>9}{'判对':>7}{'准确率':>9}  预测类型分布")
     for raw in a.scales.split(","):
         s = float(raw)
