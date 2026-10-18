@@ -336,6 +336,11 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         raise ValueError("invalid metric configuration")
     try:
         gt_tr, pred_tr = tracks(gt_states), tracks(pred_states)
+        # 静态结构单独再取一份。**这批真值里 static 占 69 个、object 占 59 个**
+        # ——超过一半的几何体从来没有被评测过，一个正确落在结构件上的检出至今被
+        # 记成假阳性。见下面的 "scene" 一节。
+        gt_static = tracks(gt_states, kinds=("static",))
+        pred_static = tracks(pred_states, kinds=("static",))
     except (ValueError, TypeError, KeyError) as exc:
         return {"error": str(exc), "status": "invalid_states"}
     if not gt_tr:
@@ -447,6 +452,30 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                 "only_by_start_position 里的是「位置对上了但运动没对上」的那些。",
     }
 
+    # 场景几何：object + static 一起算。
+    #
+    # 为什么要有这一档。`objects` 那一档的分母只有真值 objects，而这批数据的真值里
+    # static 有 69 个、object 只有 59 个——**54% 的几何体从来没进过任何指标**。
+    # 后果是一个正确落在结构件上的检出被记成假阳性：实测 112 个预测物体里有 22.3%
+    # 落在真值 static 上（验过是碎片不是误分类），它们在 `objects` 的精确率里全部
+    # 算错（见 #56）。
+    #
+    # 规范变换**沿用 objects 那一档拟合出来的**，不重新拟合：重新拟合会让两档的
+    # 数不可比，而且 static 点多，会把对齐往结构件上拉，`objects` 的历史数就变了。
+    # 这一档是纯增量，不动任何既有的数。
+    aligned_static = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in pred_static.items()}
+    scene_gt = {**gt_tr, **{f"static::{k}": v for k, v in gt_static.items()}}
+    scene_pred = {**aligned, **{f"static::{k}": v for k, v in aligned_static.items()}}
+    try:
+        scene_pairs = match_objects(prefix(scene_gt), prefix(scene_pred), pair_times, max_dist_m)
+    except ValueError:
+        try:
+            scene_pairs = match_objects(prefix(scene_gt), prefix(scene_pred), obs_times, max_dist_m)
+        except ValueError:
+            scene_pairs = []
+    scene_matched = [(g, q) for g, q, _ in scene_pairs if q is not None]
+    n_scene_gt, n_scene_pred = len(scene_gt), len(scene_pred)
+
     def same_class(gt_id: str, pred_id: str) -> bool:
         a, b = gt_class.get(gt_id, ""), pred_class.get(pred_id, "")
         return bool(a) and bool(b) and (a == b or a in b or b in a)
@@ -515,6 +544,14 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                                         "只做刚性对齐，相对结构错了仍会暴露。"},
             "trajectory": traj,
             "motion_type": {"accuracy": acc, "n": len(hits), "confusion": confusion},
+            "scene": {"gt": n_scene_gt, "pred": n_scene_pred, "matched": len(scene_matched),
+                      "recall": len(scene_matched) / n_scene_gt if n_scene_gt else None,
+                      "precision": len(scene_matched) / n_scene_pred if n_scene_pred else None,
+                      "gt_static": len(gt_static), "pred_static": len(pred_static),
+                      "note": "object + static 一起算。objects 那一档的分母只有真值 objects，"
+                              "而这批真值里 static 比 object 还多（69 对 59），超过一半的几何体"
+                              "从来没进过指标——一个正确落在结构件上的检出被记成假阳性。"
+                              "规范变换沿用 objects 那一档的，不重新拟合，所以这一档是纯增量。"},
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
                         "recall": len(matched) / n_gt if n_gt else None,
                         "precision": len(matched) / n_pred if n_pred else None,

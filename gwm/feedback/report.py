@@ -33,11 +33,17 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     """runs 里每一项是 {clip, config, metrics}，metrics 是 gt_metrics.evaluate 的输出。"""
     traj = _pool_objects(runs, window, "trajectory")
     accs, recalls, precs, class_hits, confusion = [], [], [], [], Counter()
+    scene_recalls, scene_precs = [], []
     shape_hits, scale_hits, scale_ratios = [], [], []
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
         mt, ob = w.get("motion_type") or {}, w.get("objects") or {}
+        # 场景几何那一档：object + static 一起。真值里 static 比 object 还多
+        # （整批 69 对 59），只报 objects 等于有一半的几何体没在量。
+        sc = w.get("scene") or {}
+        if sc.get("recall") is not None: scene_recalls.append(float(sc["recall"]))
+        if sc.get("precision") is not None: scene_precs.append(float(sc["precision"]))
         crit = ob.get("match_criterion") or {}
         if isinstance(crit.get("by_mean_distance"), int):
             mean_matched += crit["by_mean_distance"]
@@ -90,6 +96,8 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "motion_type_accuracy": stat(accs),         # 按物体汇总，n 就是配对上的物体数
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
+        "scene_recall": stat(scene_recalls),
+        "scene_precision": stat(scene_precs),
         "class_accuracy": stat(class_hits),
         "shape_ok": stat(shape_hits),
         "scale_ok": stat(scale_hits),
@@ -126,8 +134,8 @@ def as_markdown(table: dict) -> str:
     但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
     仍报中位数。
     """
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 形状对 | 尺度中位 |",
-            "|---|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 场景召回 | 场景精确率 | 形状对 | 尺度中位 |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
         acc = a["motion_type_accuracy"]
@@ -142,7 +150,9 @@ def as_markdown(table: dict) -> str:
         scl_txt = "—" if not scl else format(scl["median"], ".2f")
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
                     f"{acc_txt} | {base_txt} | {acc_n} | "
-                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | {shp_txt} | {scl_txt} |")
+                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | "
+                    f"{f(a.get('scene_recall'))} | {f(a.get('scene_precision'))} | "
+                    f"{shp_txt} | {scl_txt} |")
     return "\n".join(rows)
 
 
