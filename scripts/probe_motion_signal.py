@@ -183,7 +183,13 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                             # 决定了这个判据有没有可用的阈值——两条分布重叠得厉害
                             # 就说明判据本身不行，不是阈值没调好。
                             "step_frac/static": [],
-                            "step_frac/moving": []}
+                            "step_frac/moving": [],
+                            # 点到面 vs 点到点：平板上点到点会沿面滑动，而我们的物体
+                            # 大多是盒子和平板，所以这是最该试的一条
+                            "step/register_plane": [],
+                            "drift_static/register_plane": [],
+                            "step_frac/plane_static": [],
+                            "step_frac/plane_moving": []}
     for oid, per_frame in masks.items():
         if oid not in truth:
             continue
@@ -204,13 +210,13 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         tracked = track_rigid(clouds)
         if not tracked["ok"]:
             continue
+        is_static = kinds.get(oid) == "static"
+        sizes_ = [b["size"] for b in (next((o["obb"] for o in evidence["objects"]
+                                            if o["id"] == oid), []) or [])]
+        diag = float(np.linalg.norm(np.median(sizes_, axis=0))) if sizes_ else 1.0
         registered = np.array(tracked["positions"], float)
         out["rmse"].extend(r for r in tracked["residuals"] if r is not None)
-        sizes = [b["size"] for b in (next((o["obb"] for o in evidence["objects"]
-                                           if o["id"] == oid), []) or [])]
-        diag = float(np.linalg.norm(np.median(sizes, axis=0))) if sizes else 1.0
         fired = 1.0 if looks_static(tracked, diag) else 0.0
-        is_static = kinds.get(oid) == "static"
         out["static_detector/on_static" if is_static else "static_detector/on_moving"].append(fired)
         steps = tracked.get("step_translation") or []
         if steps and diag > 1e-6:
@@ -221,6 +227,18 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         gt_rel = gt - gt[0]
         reg_rel = registered - registered[0]
         out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        plane = track_rigid(clouds, point_to_plane=True)
+        if plane["ok"] and len(plane["positions"]) == len(gt):
+            p_pos = np.array(plane["positions"], float)
+            out["step/register_plane"].extend(
+                np.linalg.norm((p_pos - p_pos[0]) - gt_rel, axis=1).tolist())
+            p_steps = plane.get("step_translation") or []
+            if p_steps and diag > 1e-6:
+                out["step_frac/plane_static" if is_static else "step_frac/plane_moving"].append(
+                    float(np.median(p_steps)) / diag)
+            if is_static:
+                out["drift_static/register_plane"].append(
+                    float(np.linalg.norm(p_pos.max(0) - p_pos.min(0))))
         if not np.isnan(obb).any():
             obb_rel = obb - obb[0]
             out["step/obb"].extend(np.linalg.norm(obb_rel - gt_rel, axis=1).tolist())

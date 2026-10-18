@@ -161,3 +161,34 @@ def test_自由平移不会被说成滑轨以外的东西():
     clouds = [base + rng.normal(0, 0.12, 3) for _ in range(12)]     # 乱走
     spec = infer_articulation(track_rigid(clouds))
     assert spec is None or spec["grab"] != "hinge", spec
+
+
+def test_法向估计在平面上指向面外():
+    from gwm.perception.registration import estimate_normals
+    rng = np.random.default_rng(3)
+    plane = np.column_stack([rng.random(400), np.zeros(400), rng.random(400)])   # y=0 的平面
+    n = estimate_normals(plane)
+    assert np.abs(np.abs(n[:, 1]) - 1.0).mean() < 0.05, "平面的法向该是 y"
+
+
+def test_点到面在平板上比点到点稳():
+    """平板是点到点最坏的情况：它会沿着面滑动。我们的物体大多是盒子和平板。"""
+    from gwm.perception.registration import icp
+    rng = np.random.default_rng(9)
+    slab = np.column_stack([rng.random(900) * 2 - 1, rng.normal(0, 0.01, 900),
+                            rng.random(900) * 2 - 1])               # 很薄的一块板
+    shift = np.array([0.0, 0.08, 0.0])                              # 只沿法向挪
+    moved = slab + shift
+    plane = icp(moved, slab, point_to_plane=True)
+    assert plane["ok"]
+    # 沿法向的分量要解出来
+    assert abs(plane["translation"][1] + 0.08) < 0.03, plane["translation"]
+
+
+def test_点到面不会解出镜像或发散():
+    from gwm.perception.registration import icp
+    cloud = box_cloud(n=800, seed=17)
+    R, t = rot_y(10), np.array([0.2, 0.05, -0.1])
+    out = icp(cloud @ R.T + t, cloud, point_to_plane=True)
+    assert out["ok"] and np.linalg.det(out["rotation"]) > 0.9
+    assert np.all(np.isfinite(out["translation"])) and np.linalg.norm(out["translation"]) < 2.0

@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 
@@ -33,9 +35,48 @@ def _subsample(points: np.ndarray, limit: int, rng: np.random.Generator) -> np.n
     return points[rng.choice(len(points), limit, replace=False)]
 
 
+def estimate_normals(points: np.ndarray, k: int = 12) -> np.ndarray:
+    """每个点的法向，取邻域主成分里最小的那个方向。符号不统一，点到面用的是平方距离，
+    所以不影响结果。"""
+    from scipy.spatial import cKDTree
+
+    points = np.asarray(points, float)
+    if len(points) < k + 1:
+        return np.tile(np.array([0.0, 1.0, 0.0]), (len(points), 1))
+    _, idx = cKDTree(points).query(points, k=k)
+    neighbourhoods = points[idx]                      # (N, k, 3)
+    centred = neighbourhoods - neighbourhoods.mean(axis=1, keepdims=True)
+    # 每个邻域的协方差矩阵，批量做特征分解
+    cov = np.einsum("nki,nkj->nij", centred, centred) / k
+    _, vectors = np.linalg.eigh(cov)
+    return vectors[:, :, 0]                           # 最小特征值对应的方向
+
+
+def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
+                         normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """点到面的一步：小角度线性化之后解一个 6x6 方程。
+
+    点到点在平坦表面上会沿着面滑动——我们的物体大多是盒子和平板，正好是最坏情况。
+    点到面只惩罚沿法向的偏差，允许沿面滑动，所以在这种几何上收敛得稳得多。
+    """
+    cross = np.cross(source, normals)
+    A = np.concatenate([cross, normals], axis=1)                   # (N, 6)
+    b = -np.einsum("ij,ij->i", source - target, normals)           # (N,)
+    solution, *_ = np.linalg.lstsq(A, b, rcond=None)
+    r, t = solution[:3], solution[3:]
+    # 小角度旋转向量转回旋转矩阵
+    theta = float(np.linalg.norm(r))
+    if theta < 1e-12:
+        return np.eye(3), t
+    axis = r / theta
+    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    R = np.eye(3) + math.sin(theta) * K + (1 - math.cos(theta)) * (K @ K)
+    return R, t
+
+
 def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         tolerance: float = 1e-4, reject_factor: float = 2.5,
-        max_points: int = 2000, seed: int = 0) -> dict:
+        max_points: int = 2000, seed: int = 0, point_to_plane: bool = False) -> dict:
     """把 source 配准到 target。返回旋转、平移、残差和参与配准的点数。
 
     `reject_factor` 控制剔除：距离大于「中位距离乘这个系数」的对应点不参与求解。
@@ -51,6 +92,7 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         return {"ok": False, "reason": "too few points",
                 "rotation": np.eye(3), "translation": np.zeros(3), "rmse": None, "pairs": 0}
     tree = cKDTree(dst)
+    normals = estimate_normals(dst) if point_to_plane else None
     R_total, t_total = np.eye(3), np.zeros(3)
     current = src.copy()
     # 先对齐质心：相邻帧位姿差很小，这个初值足够把 ICP 带进收敛域
@@ -64,7 +106,11 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         keep = distances <= max(median * reject_factor, 1e-6)
         if keep.sum() < 10:
             break
-        R_step, t_step = kabsch(current[keep], dst[indices[keep]])
+        if normals is not None:
+            R_step, t_step = _point_to_plane_step(current[keep], dst[indices[keep]],
+                                                  normals[indices[keep]])
+        else:
+            R_step, t_step = kabsch(current[keep], dst[indices[keep]])
         current = current @ R_step.T + t_step
         R_total = R_step @ R_total
         t_total = R_step @ t_total + t_step
