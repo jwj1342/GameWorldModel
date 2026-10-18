@@ -39,7 +39,7 @@ def _git_commit() -> str:
 
 
 def build_specs(split: str, count: int, seed: int, duration: float, fps: int,
-                pairs: int) -> list[SceneSpec]:
+                pairs: int, stage_scale: float = 1.0) -> list[SceneSpec]:
     families = TRAIN_FAMILIES if split == "train" else TEST_FAMILIES
     profile = "train" if split == "train" else "test"
     rng = random.Random(seed)
@@ -48,7 +48,8 @@ def build_specs(split: str, count: int, seed: int, duration: float, fps: int,
         specs.append(SceneSpec(clip=f"{split}_{i:05d}", family=families[i % len(families)],
                                behavior_seed=rng.randrange(2 ** 31), style_seed=rng.randrange(2 ** 31),
                                camera_seed=rng.randrange(2 ** 31), profile=profile,
-                               duration=duration, fps=fps, tags=("base",)))
+                               duration=duration, fps=fps, tags=("base",),
+                               stage_scale=stage_scale))
     # 配对从前 `pairs` 条派生：一条只换样式，一条只换行为。
     for i in range(min(pairs, len(specs))):
         base = specs[i]
@@ -66,11 +67,17 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20261013)
     ap.add_argument("--duration", type=float, default=8.0)
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--stage-scale", type=float, default=1.0,
+                    help="整体相似缩放。1.0 是现在的关卡尺度（走廊 4-7 x 18-30 米，相机"
+                         "高度中位数 7.4 米）；链路把重建标定到米靠的是「相机离地 1.2 米」"
+                         "这个假设，两者差六到十二倍，见 #68。0.15 左右把场景缩到房间/"
+                         "桌面尺度，和目标输入（手持拍卧室、桌子）对上。缩放是相似变换，"
+                         "场景内部的相对结构不变。")
     a = ap.parse_args()
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    specs = build_specs(a.split, a.count, a.seed, a.duration, a.fps, a.pairs)
+    specs = build_specs(a.split, a.count, a.seed, a.duration, a.fps, a.pairs, a.stage_scale)
 
     rows, failures = [], []
     for spec in specs:
