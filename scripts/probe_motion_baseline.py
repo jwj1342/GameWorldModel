@@ -45,6 +45,34 @@ def recompute(confusion: dict, suppress: set) -> tuple[float, float, int]:
     return correct / total, truth_static / total, total
 
 
+def binary(confusion: dict) -> tuple[int, int, int, int]:
+    """把七类折成「会动 / 不动」，看「说它会动」这句话准不准。
+
+    为什么单独看这个：七分类现在的贡献精确为零，但「这东西会不会动」是个二分问题，
+    比七分类容易得多，而且对可交互性本身就有用——观测运动那一档要的就是它。
+
+    **准确率在这里是会骗人的。** 真值里会动的物体占到七八成，于是「恒答不动」这个
+    基线本身就很低（0.13–0.25），任何乱猜「会动」的预测器都能蹭掉一部分，准确率
+    看起来就超过了基线。第一版我就是这么报的，看到一列正的差还以为有信号。
+    真正有判别力的是这个对比：
+
+        说会动的命中率 P(真会动 | 判会动)   对上   瞎猜的命中率 P(真会动)
+
+    后者就是闭眼说「会动」能有的命中率。前者不明显高于后者，这句判断就没有信息。
+
+    返回 (配对数, 真值会动数, 判会动数, 判对的会动数)。
+    """
+    total = moving_total = pred_moving = moving_hit = 0
+    for key, n in confusion.items():
+        truth, pred = key.split("->")
+        t_moving, p_moving = truth != "static", pred != "static"
+        total += n
+        moving_total += n if t_moving else 0
+        pred_moving += n if p_moving else 0
+        moving_hit += n if t_moving and p_moving else 0
+    return total, moving_total, pred_moving, moving_hit
+
+
 def main(paths):
     rows = []
     for path in paths:
@@ -66,6 +94,29 @@ def main(paths):
     for stem, _name, n, now, supp, base in rows:
         print(f"{stem:<22}{n:>5}{now:>8.3f}{supp:>13.3f}{base:>11.3f}"
               f"{now - base:>+11.3f}{supp - base:>+12.3f}")
+    print()
+    print("—— 只问「会不会动」这个二分 ——")
+    print(f"{'产物':<22}{'配对':>5}{'真值会动':>9}{'判会动':>8}{'判对':>6}"
+          f"{'说会动的命中率':>15}{'瞎猜的命中率':>14}{'差':>9}{'会动查全':>9}")
+    for path in paths:
+        q = Path(path)
+        if not q.is_file():
+            continue
+        for _name, agg in json.loads(q.read_text(encoding="utf-8"))["full"].items():
+            conf = agg.get("confusion") or {}
+            if not conf:
+                continue
+            n, moving, pred_moving, hit = binary(conf)
+            chance = moving / n if n else float("nan")
+            recall = hit / moving if moving else float("nan")
+            prec_txt = "   —   " if not pred_moving else f"{hit / pred_moving:.3f}"
+            diff_txt = "   —   " if not pred_moving else f"{hit / pred_moving - chance:+.3f}"
+            print(f"{q.stem:<22}{n:>5}{moving:>9}{pred_moving:>8}{hit:>6}"
+                  f"{prec_txt:>15}{chance:>14.3f}{diff_txt:>9}{recall:>9.3f}")
+    print("  真值里会动的占七八成，所以**准确率这个量在这里会骗人**——「恒答不动」的")
+    print("  基线本来就低，乱猜「会动」也能蹭掉一部分，准确率看着就超过基线了。")
+    print("  要看的是「说会动的命中率」减「瞎猜的命中率」：不明显为正就没有信息。")
+    print("  「会动查全」说的是真会动的里面有几个被说出来了。")
     print()
     print("最后两列是关键：差是正的才说明这一级真的学到了东西。")
     print("压掉转动预测之后差仍然不正，就说明问题不在转动那一路，而在更上游")
