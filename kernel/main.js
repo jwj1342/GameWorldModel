@@ -153,6 +153,19 @@ async function boot() {
       for (const s of saved) { s.e.dynamic = s.dynamic; s.e.simulated = s.simulated; }
       return { seconds, separate_seconds: separateSeconds, settled: result };
     },
+    // 玩法绑定是怎么来的。判定结果要能说出自己走的哪条路：
+    //   slot_source  每个槽位是程序填的（走过 gwm/binding/）还是模板猜的
+    //   game_scale   Python 那边做过的尺度归一化系数；没走绑定就没有归一化，
+    //                而试玩角色是固定尺寸的胶囊，比例会错得很离谱
+    bindingInfo() {
+      return {
+        template: program.binding?.template ?? null,
+        slot_source: template.slotSource ?? null,
+        inferred_slots: Object.entries(template.slotSource ?? {})
+          .filter(([, v]) => v === 'inferred').map(([k]) => k),
+        game_scale: program.meta?.game_scale ?? null,
+      };
+    },
     cameraInfo() { const c = activeCamera(); return { pos: c.position.toArray(), quat: c.quaternion.toArray(), fov: c.fov, aspect: c.aspect, near: c.near, far: c.far }; },
   });
   updateMotions(0); game.mode(game.modeName);
