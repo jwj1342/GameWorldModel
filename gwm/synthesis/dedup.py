@@ -91,3 +91,95 @@ def merge_duplicates(program: dict, max_relative_distance: float = 0.5,
         kept_ids = {n.get("id") for n in keep}
         program["objects"] = [n for n in objects if n.get("id") in kept_ids]
     return merged
+
+
+def merge_fragment_chains(program: dict, max_gap_diagonals: float = 2.5,
+                          min_chain: int = 3, min_elongation: float = 3.0) -> list[dict]:
+    """把**排成一条线的同类小碎块**合成一个长条。
+
+    为什么需要这一步（#56）：真值里一根轨道是 6.4 比 1 的长条，但掩码只覆盖它的
+    一小段，于是一根轨道被切成好几个小块、每块都成了一个独立「物体」。实测十一条
+    片段上，落在真值 static 上的 25 个检出只对应 **11 个**真值结构件（平均 2.27 次，
+    其中一个被切成 6 块），碎片尺寸中位只有真值的 **0.208**。
+
+    这解释了为什么二十条「把假的滤掉」的信号全部失败：**那些东西不是假的**，
+    是真实结构件的碎片，有深度、有掩码、有一致的跨帧跟踪。没有任何信号能把一截
+    真实的轨道判成假的。
+
+    `merge_duplicates` 碰不到它们：碎片沿着轨道排开，相对距离远超它的 0.5 阈值
+    （同类对的相对距离中位是 2.76）。而把那个阈值调大会把真正挨近的不同物体并掉
+    （阈值 2.0 时 283 对里有 86 对会被合）。
+
+    所以这里用一个碎片有、而真实物体没有的特征：**它们排成一条线**。一排小的、
+    同类的、共线的东西是一个长条；两个碰巧挨近的不同物体不会连成链，也不会细长。
+    三个判据缺一不可：
+
+      `max_gap_diagonals`  只连**相邻**的，不是凡是同类就连
+      `min_chain`          至少三个才算链——两个挨近的本来就该交给 merge_duplicates
+      `min_elongation`     合出来必须是**细长**的，不然就是一堆挤在一起的东西
+
+    返回每次合并的记录。合不成链的一个都不动。
+    """
+    import numpy as np
+
+    objects = program.get("objects") or []
+    if len(objects) < min_chain:
+        return []
+
+    usable = []
+    for node in objects:
+        centre, diag = _centre(node), _diagonal(node)
+        if centre is not None and diag > 1e-6:
+            usable.append((node, np.asarray(centre, float), diag))
+    by_class: dict[str, list] = {}
+    for item in usable:
+        by_class.setdefault(str(item[0].get("class", "")).lower(), []).append(item)
+
+    merged: list[dict] = []
+    drop: set[int] = set()
+    for cls, items in by_class.items():
+        if len(items) < min_chain:
+            continue
+        # 相邻就连边，连通分量就是候选链
+        n = len(items)
+        parent = list(range(n))
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]; i = parent[i]
+            return i
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                scale = (items[i][2] + items[j][2]) / 2
+                if float(np.linalg.norm(items[i][1] - items[j][1])) / scale <= max_gap_diagonals:
+                    a, b = find(i), find(j)
+                    if a != b:
+                        parent[a] = b
+        groups: dict[int, list[int]] = {}
+        for i in range(n):
+            groups.setdefault(find(i), []).append(i)
+
+        for members in groups.values():
+            if len(members) < min_chain:
+                continue
+            pts = np.stack([items[i][1] for i in members])
+            halves = np.stack([np.asarray((items[i][0].get("geom") or {}).get("extent")
+                                          or [items[i][2] / 3] * 3, float) / 2 for i in members])
+            lo, hi = (pts - halves).min(0), (pts + halves).max(0)
+            extent = hi - lo
+            elong = float(extent.max() / max(extent.min(), 1e-6))
+            if elong < min_elongation:
+                continue                       # 挤成一团而不是连成一条，不动它
+            head = items[members[0]][0]
+            head.setdefault("geom", {})["extent"] = [float(v) for v in extent]
+            head.setdefault("pose", {})["pos"] = [float(v) for v in (lo + hi) / 2]
+            head["notes"] = (f"{len(members)} 块同类碎片连成一条线，合成一个长条"
+                             f"（细长比 {elong:.1f}）")[:200]
+            for i in members[1:]:
+                drop.add(id(items[i][0]))
+            merged.append({"kept": head["id"], "absorbed": [items[i][0]["id"] for i in members[1:]],
+                           "elongation": round(elong, 2), "class": cls})
+    if drop:
+        program["objects"] = [n for n in objects if id(n) not in drop]
+    return merged

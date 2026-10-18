@@ -38,7 +38,7 @@ from gwm.feedback.interaction_probe import measure as probe_interaction, merge a
 from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
-from gwm.synthesis.dedup import merge_duplicates                # noqa: E402
+from gwm.synthesis.dedup import merge_duplicates, merge_fragment_chains   # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
 from gwm.synthesis.stabilise import apply_settled                # noqa: E402
 from gwm.config import load_config, site_name                   # noqa: E402
@@ -180,6 +180,29 @@ def main() -> int:
         print(f"尺寸回收: {len(resized)} 个物体 "
               f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
     timings["resized"] = len(resized)
+
+    # 先把**排成一条线的同类小碎块**合成一个长条，再去重。顺序不能反：碎片合成
+    # 长条之后，重复检测用的那个「相对对角线」的尺度就变了。
+    #
+    # 为什么需要这一步（#56）：真值里一根轨道是 6.4 比 1 的长条，而掩码只覆盖它的
+    # 一小段，于是一根轨道被切成好几块、每块都成了独立「物体」。实测十一条片段上，
+    # 落在真值 static 上的 25 个检出只对应 **11 个**真值结构件（平均 2.27 次，
+    # 一个被切成 6 块），碎片尺寸中位只有真值的 0.208。
+    #
+    # 这一条解释了为什么二十条「把假的滤掉」的信号全部失败：**那些东西不是假的**，
+    # 是真实结构件的碎片，有深度、有掩码、有一致的跨帧跟踪。
+    syn = cfg.get("synthesis") or {}
+    if syn.get("merge_fragment_chains", True):
+        chains = merge_fragment_chains(
+            program,
+            max_gap_diagonals=float(syn.get("fragment_max_gap_diagonals", 2.5)),
+            min_chain=int(syn.get("fragment_min_chain", 3)),
+            min_elongation=float(syn.get("fragment_min_elongation", 3.0)))
+        if chains:
+            print(f"碎片连链: 合掉 {sum(len(c['absorbed']) for c in chains)} 个，"
+                  f"成链 {len(chains)} 条 "
+                  f"{[(c['kept'], c['class'], c['elongation']) for c in chains[:4]]}", flush=True)
+        timings["fragment_chains"] = len(chains)
 
     # 同一个物体被检出两遍的合掉。放在接触装配之前：重复的节点会互相穿插，
     # 让后面的稳定步做无用功，而且它们本来就不该存在。
