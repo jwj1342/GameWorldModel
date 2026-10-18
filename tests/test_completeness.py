@@ -100,3 +100,43 @@ def test_覆盖率按帧平均而不是只看一帧():
     assert report["evidence_pixel_coverage"] == pytest.approx(0.5)    # (0.2 + 0.8) / 2
     assert report["evidence_pixel_coverage_best"] == pytest.approx(0.8)
     assert report["covered_frames"] == 2
+
+
+# ---- 同类尺寸离谱的诊断（#64，只报不改）----
+
+def test_同类里尺寸离谱的被标出来():
+    from gwm.feedback.completeness import size_outliers
+    objects = [{"id": f"b{i}", "class": "block",
+                "geom": {"extent": [0.3, 0.3, 0.3]}} for i in range(4)]
+    objects.append({"id": "huge", "class": "block", "geom": {"extent": [4.0, 0.3, 0.3]}})
+    found = size_outliers(objects)
+    assert [r["id"] for r in found] == ["huge"]
+    assert found[0]["ratio"] > 3.0
+
+
+def test_同类实例太少就不判():
+    """只有两个实例且其中一个是错的时候，中位数落在两者中间，倍数判据会把好的
+    那个一起冤枉。"""
+    from gwm.feedback.completeness import size_outliers
+    objects = [{"id": "a", "class": "block", "geom": {"extent": [0.3, 0.3, 0.3]}},
+               {"id": "b", "class": "block", "geom": {"extent": [4.0, 0.3, 0.3]}}]
+    assert size_outliers(objects) == []
+
+
+def test_太小的也算离谱():
+    from gwm.feedback.completeness import size_outliers
+    objects = [{"id": f"b{i}", "class": "block",
+                "geom": {"extent": [1.0, 1.0, 1.0]}} for i in range(4)]
+    objects.append({"id": "tiny", "class": "block", "geom": {"extent": [0.05, 0.05, 0.05]}})
+    found = size_outliers(objects)
+    assert [r["id"] for r in found] == ["tiny"]
+    assert found[0]["ratio"] < 0.34
+
+
+def test_不同类之间不互相比():
+    from gwm.feedback.completeness import size_outliers
+    objects = [{"id": f"b{i}", "class": "block",
+                "geom": {"extent": [0.3, 0.3, 0.3]}} for i in range(3)]
+    objects += [{"id": f"w{i}", "class": "wall",
+                 "geom": {"extent": [4.0, 3.0, 0.2]}} for i in range(3)]
+    assert size_outliers(objects) == [], "墙本来就比方块大，不该因此被标出来"
