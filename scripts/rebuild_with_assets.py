@@ -44,14 +44,16 @@ from gwm.perception.run import load_masks, run_perception       # noqa: E402
 from gwm.synthesis.direct import evidence_to_program            # noqa: E402
 
 
-def _settle(game_dir: Path, out: Path, seconds: float) -> dict:
+def _settle(game_dir: Path, out: Path, seconds: float, separate_seconds: float = 0.0) -> dict:
     """调 harness 跑一段仿真。跑不起来就当没稳定过，不让它挡住整条链路。"""
     import subprocess
     target = out / "settle.json"
     try:
         subprocess.run([str(REPO / "scripts/node_harness.sh"), "settle.mjs",
                         "--game", str(game_dir), "--out", str(target),
-                        "--seconds", str(seconds)], check=True, capture_output=True, timeout=600)
+                        "--seconds", str(seconds),
+                        "--separate-seconds", str(separate_seconds)],
+                       check=True, capture_output=True, timeout=600)
         return json.loads(target.read_text(encoding="utf-8"))
     except (subprocess.SubprocessError, OSError, ValueError) as error:
         print(f"物理稳定跳过: {type(error).__name__}", flush=True)
@@ -79,6 +81,8 @@ def main() -> int:
     ap.add_argument("--style-swap", action="store_true",
                     help="顺带量样式-行为解耦：换一套外形网格，轨迹应该一丝不差")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
+    ap.add_argument("--separate-seconds", type=float, default=0.0,
+                    help="重力稳定之前先跑多久的纯分离（不开重力，只把互相插着的顶开）")
     ap.add_argument("--no-image-retrieval", action="store_true",
                     help="只用文字检索，用来和带图像检索的结果做对照")
     a = ap.parse_args()
@@ -180,7 +184,7 @@ def main() -> int:
     if result["ok"] and not a.no_settle:
         # 编译一次先把场景放进物理里稳一稳，再把采纳的位姿写回去重编译。
         # 感知给的是按可见表面拟合的包围盒中心，物体常常半悬空或互相穿插。
-        settled = _settle(Path(result["game_dir"]), out, a.settle_seconds)
+        settled = _settle(Path(result["game_dir"]), out, a.settle_seconds, a.separate_seconds)
         rows = apply_settled(program, settled)
         taken = [r for r in rows if r["applied"]]
         timings["stabilised"] = len(taken)

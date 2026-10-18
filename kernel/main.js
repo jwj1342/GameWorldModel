@@ -111,12 +111,31 @@ async function boot() {
     // 把场景放下来自己稳一稳：只动没有脚本运动的物体——它们的位姿完全来自感知，
     // 而感知给的是按可见表面拟合的包围盒中心，常常半悬空或者和别的物体穿插。
     // 有脚本运动的物体位姿由 pose(t) 决定，不参与。
-    settle(seconds = 1.5) {
+    settle(seconds = 1.5, separateSeconds = 0) {
       const movable = registry.filter(e => e.kind === 'object'
         && (!e.spec.motion || e.spec.motion.type === 'static'));
       const before = new Map(movable.map(e => [e.id, e.group.position.clone()]));
       const saved = movable.map(e => ({ e, dynamic: e.dynamic, simulated: e.simulated }));
       for (const e of movable) { physics.makeDynamic(e); e.dynamic = true; e.simulated = true; }
+      // 第一段：只解穿插，不开重力。
+      //
+      // 重力解不开互相咬住的物体：它只有竖直方向的分量，两个物体横向插在一起的时候，
+      // 重力没有把它们分开的方向可用，跑多久都还是插着。接触求解本身会沿着接触法线
+      // 把重叠顶开，所以先关掉重力单跑一段让它只做这件事，再开重力落到支撑面上。
+      // 两件事混在一个仿真里会互相抵消——顶开一点、重力又压回去。
+      const sepSteps = Math.max(0, Math.round(separateSeconds / DT));
+      if (sepSteps) {
+        for (const e of movable) {
+          e.body.setGravityScale(0, true);
+          e.body.setLinearDamping(4); e.body.setAngularDamping(4);
+        }
+        for (let i = 0; i < sepSteps; i++) {
+          physics.step();
+          for (const e of registry) physics.syncSimulated(e);
+        }
+        // makeDynamic 把重力、阻尼调回正常并清零速度，正好是这里要的
+        for (const e of movable) physics.makeDynamic(e);
+      }
       const steps = Math.max(1, Math.round(seconds / DT));
       for (let i = 0; i < steps; i++) {
         physics.step();
@@ -129,7 +148,7 @@ async function boot() {
         moved: e.group.position.distanceTo(before.get(e.id)),
       }));
       for (const s of saved) { s.e.dynamic = s.dynamic; s.e.simulated = s.simulated; }
-      return { seconds, settled: result };
+      return { seconds, separate_seconds: separateSeconds, settled: result };
     },
     cameraInfo() { const c = activeCamera(); return { pos: c.position.toArray(), quat: c.quaternion.toArray(), fov: c.fov, aspect: c.aspect, near: c.near, far: c.far }; },
   });
