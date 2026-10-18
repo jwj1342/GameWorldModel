@@ -107,3 +107,20 @@ def test_被周期性闸挡掉的拟合会被记下来():
         assert r["reason"] in ("no_fit", "r2_below_gate", "orientation_unreliable")
         if r["reason"] == "r2_below_gate":
             assert 0.0 <= r["r2"] < r["gate"]
+
+
+def test_探针跑不起来时要带上_stderr(tmp_path):
+    """只报异常类名的话，排查时手上只有一个 CalledProcessError。
+
+    实测踩过：一整批片段的可交互性报成 0，stderr 被 capture_output 吃掉，查不动。
+    """
+    from gwm.feedback.interaction_probe import measure, merge
+
+    probe = measure(tmp_path / "no_such_game", tmp_path / "out",
+                    harness=str(tmp_path / "no_such_harness.sh"))
+    assert probe["ok"] is False
+    assert "stderr_tail" in probe, f"没带 stderr：{probe}"
+    merged = merge({"declared": 1.0}, probe)
+    assert merged["declared"] == 1.0          # 声明值不动
+    assert merged["measured"] == probe["reason"]
+    assert merged["measured_error"] == probe["stderr_tail"]

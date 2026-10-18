@@ -26,7 +26,15 @@ def measure(game_dir: Path, out_dir: Path, harness: str,
         subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
         report = json.loads(target.read_text(encoding="utf-8"))
     except (subprocess.SubprocessError, OSError, ValueError) as error:
-        return {"ok": False, "reason": type(error).__name__}
+        # 只报异常类名的话，排查时手上只有一个 "CalledProcessError"。实测踩过：
+        # 一整批片段的可交互性报成 0，而 stderr 被 capture_output 吃掉了，查不动。
+        # 把 stderr 的尾巴带出来——它通常直接写着是哪个文件找不到。
+        stderr = getattr(error, "stderr", None)
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", "replace")
+        detail = " ".join((stderr or "").split())[-400:]
+        return {"ok": False, "reason": type(error).__name__,
+                "stderr_tail": detail or "（没有 stderr）"}
     report["ok"] = True
     return report
 
@@ -40,6 +48,8 @@ def merge(interactivity: dict, probe: dict) -> dict:
     out = dict(interactivity)
     if not probe.get("ok"):
         out["measured"] = probe.get("reason", "没跑成")
+        if probe.get("stderr_tail"):
+            out["measured_error"] = probe["stderr_tail"]
         return out
     s = probe.get("summary") or {}
     out["measured_declared_grabbable"] = s.get("declared_grabbable")
