@@ -9,8 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any, Iterable
 
+from ..taxonomy import GROUND_CLASSES as _GROUND_CLASSES   # 一份来源，别两边各写一套
 
-_GROUND_CLASSES = {"floor", "ground", "terrain"}
 _QUAT_TOLERANCE = 1e-3
 _CONTACT_TOLERANCE_M = 0.05
 

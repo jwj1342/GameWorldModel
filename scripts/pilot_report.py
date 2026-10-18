@@ -47,6 +47,11 @@ def run_one(clip_dir: Path, out_dir: Path, extra: list[str]) -> dict:
     if report.is_file():
         info = json.loads(report.read_text(encoding="utf-8"))
         fidelity = info["completeness"]["fidelity"]
+        inter = info["completeness"].get("interactivity") or {}
+        # 实测可交互性只有带 --probe-interaction 跑的时候才有。没有就留空，不要拿
+        # 声明值顶上——这两个数差多少正是这一项存在的理由。
+        row["measured_interactive"] = inter.get("measured_success_fraction")
+        row["style_swap_deviation"] = inter.get("style_swap_max_deviation")
         row.update(objects=info["objects"], assets_resolved=info["assets_resolved"],
                    asset_coverage=fidelity.get("asset_coverage"),
                    pixel_coverage=fidelity.get("evidence_pixel_coverage"),
@@ -70,6 +75,7 @@ def summarise(rows: list[dict]) -> dict:
             "median_asset_coverage": med("asset_coverage"),
             "median_pixel_coverage": med("pixel_coverage"),
             "median_size_log_error": med("size_log_error"),
+            "median_measured_interactive": med("measured_interactive"),
             "median_metric_scale": med("metric_scale"),
             "median_seconds": med("seconds"),
             "total_hours": round(sum(r["seconds"] for r in rows) / 3600, 2)}
@@ -80,18 +86,25 @@ def main() -> int:
     ap.add_argument("--rendered", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--probe-interaction", action="store_true",
+                    help="每条片段都真抓真拖量一遍可交互性（透传给 rebuild_with_assets）")
     ap.add_argument("--rebuild-arg", action="append", default=[],
-                    help="透传给 rebuild_with_assets 的额外参数")
+                    help="透传给 rebuild_with_assets 的额外参数。值本身以 - 开头时要用等号写，"
+                         "比如 --rebuild-arg=--no-settle，分开写 argparse 会当成另一个选项")
     a = ap.parse_args()
+    extra = list(a.rebuild_arg)
+    if a.probe_interaction and "--probe-interaction" not in extra:
+        extra.append("--probe-interaction")
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     clips = sorted(p for p in Path(a.rendered).iterdir() if (p / "clip.mp4").is_file())[:a.limit]
     rows = []
     for i, clip_dir in enumerate(clips, 1):
-        row = run_one(clip_dir, out, a.rebuild_arg)
+        row = run_one(clip_dir, out, extra)
         rows.append(row)
         print(f"[{i}/{len(clips)}] {row['clip']:<16} {row['seconds']:>6}s "
               f"物体 {row.get('objects', '-'):>3}/{row['gt_objects']:<3} "
               f"资产 {row.get('asset_coverage', '-')} 画面 {row.get('pixel_coverage', '-')}"
+              f"{' 能拖 ' + str(row['measured_interactive']) if row.get('measured_interactive') is not None else ''}"
               f"{'' if row['ok'] else '  失败'}", flush=True)
         (out / "pilot.json").write_text(json.dumps({"rows": rows}, ensure_ascii=False, indent=1),
                                         encoding="utf-8")

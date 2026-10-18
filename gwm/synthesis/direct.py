@@ -6,7 +6,7 @@ from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
 from ..perception.color import measured_color
 
-from ..taxonomy import is_static_class, slug
+from ..taxonomy import is_ground_class, is_static_class, slug
 
 def guess_material(cls: str) -> str:
     c = cls.lower()
@@ -102,7 +102,8 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         # 确实是结构。
         area_cap = float((cfg or {}).get("synthesis", {}).get("max_object_area_frac", 0.35))
         too_large = float(o.get("mask_area_frac") or 0.0) >= area_cap
-        if too_large or (o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg)):
+        is_ground = is_ground_class(cls)
+        if too_large or is_ground or (o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg)):
             # fixed structure: median OBB as a static box
             cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
             sz = [float(max(v, 0.05)) for v in sz]
@@ -111,7 +112,10 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
                            "material": material_from_evidence(o),
                            "notes": ("structure by area: mask covers "
                                      f"{float(o.get('mask_area_frac') or 0):.0%} of the frame"
-                                     if too_large else "static structure from evidence")}
+                                     if too_large else
+                                     "ground-class node is always fixed structure: a floor that "
+                                     "appears to move is camera motion attributed to the floor"
+                                     if is_ground else "static structure from evidence")}
             if _confidence(o.get("confidence")) is not None: static_node["confidence"] = _confidence(o["confidence"])
             program["static"].append(static_node)
             continue
