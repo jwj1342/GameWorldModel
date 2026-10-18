@@ -100,7 +100,13 @@ def fidelity(program: dict, evidence: dict | None = None,
 
 
 def interactivity(program: dict) -> dict:
-    """可交互程度。四档各报一个比例，对应 kernel/manipulate.js 里写的那张表。"""
+    """可交互程度。四档各报一个比例，对应 kernel/manipulate.js 里写的那张表。
+
+    注意这里数的是程序**声明**了什么，不是实际能不能动。声明和能用是两回事：物体
+    可能和桌面穿插着生成、碰撞体退化、或者整个被挡在别的东西后面，这些情况下下面
+    每一项都照样是满的。真的去抓一遍、拖一遍再报的那组数在 interaction_probe.py，
+    键名带 measured_ 前缀，两组并排看，差距本身才是有信息的那一项。
+    """
     objects = program.get("objects") or []
     total = len(objects)
     if not total:
