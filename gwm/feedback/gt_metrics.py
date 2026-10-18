@@ -65,6 +65,10 @@ def motion_types(program: dict) -> dict[str, str]:
     return {o["id"]: (o.get("motion") or {}).get("type", "static") for o in program.get("objects", [])}
 
 
+def class_names(program: dict) -> dict[str, str]:
+    return {o["id"]: str(o.get("class", "")).strip().lower() for o in program.get("objects", [])}
+
+
 def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     """Interpolate within measured support only; never clamp outside endpoints."""
     if not len(times) or times.min() < track["t"][0] or times.max() > track["t"][-1]:
@@ -196,6 +200,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         return {"error": "真值里没有可比的物体"}
 
     gt_motion, pred_motion = motion_types(gt_program), motion_types(pred_program)
+    gt_class, pred_class = class_names(gt_program), class_names(pred_program)
     for side, source, labels in (("gt", gt_tr, gt_motion), ("pred", pred_tr, pred_motion)):
         unknown = sorted({track["object_id"] for track in source.values()} - labels.keys())
         if unknown:
@@ -289,6 +294,12 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                 "only_by_start_position 里的是「位置对上了但运动没对上」的那些。",
     }
 
+    def same_class(gt_id: str, pred_id: str) -> bool:
+        a, b = gt_class.get(gt_id, ""), pred_class.get(pred_id, "")
+        return bool(a) and bool(b) and (a == b or a in b or b in a)
+
+    class_correct = sum(1 for g, q, _ in matched if same_class(g, q))
+
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
         for g, p, _ in pairs:
@@ -343,6 +354,18 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
                         "recall": len(matched) / n_gt if n_gt else None,
                         "precision": len(matched) / n_pred if n_pred else None,
+                        # 配对只看位置，**不看类名**——一个叫 "cardboard box" 的东西
+                        # 摆在真值 marble 的位置上，在召回和精确率里算命中。所以
+                        # 「召回 0.500」的意思是「一半的真值物体位置上有东西」，
+                        # 不是「一半的物体被正确重建了」。
+                        #
+                        # 这不是小事：类名决定检索哪个资产，资产决定场景长什么样。
+                        # 实测即使把场景里确切存在的类名直接喂给检测器，配对上的 24 个
+                        # 里也只有 3 个（12.5%）贴对了标签；换成一组完全不相干的通用
+                        # 词表，配对数和精确率几乎不变（30 个 / 0.218 对 24 个 / 0.226），
+                        # 而类名准确率是 0（见 #56）。
+                        "class_correct": class_correct,
+                        "class_accuracy": (class_correct / len(matched)) if matched else None,
                         "match_criterion": match_criterion},
             "window_s": [round(t0, 3), round(t1, 3)],
         }

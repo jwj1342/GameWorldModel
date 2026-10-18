@@ -321,3 +321,28 @@ def test_配对判据可选而且起点口径不吃运动误差():
     with pytest.raises(ValueError):
         evaluate(program(["a"]), program(["a"]), states(["a"]), states(["a"]),
                  match_on="whatever")
+
+
+def test_配对不看类名所以类名准确率要单独报():
+    """`match_objects` 的代价只有距离，没有类别项——一个叫 "cardboard box" 的东西
+    摆在真值 marble 的位置上，在召回和精确率里算命中。
+
+    所以「召回 0.500」的意思是「一半的真值物体位置上有东西」，不是「一半的物体被
+    正确重建了」。实测：即使把场景里确切存在的类名喂给检测器，配对上的 24 个里也
+    只有 3 个贴对了标签；换一组完全不相干的通用词表，配对数和精确率几乎不变，
+    类名准确率是 0（#56）。
+
+    类名决定检索哪个资产，资产决定场景长什么样——不单独报这一列，「复原得像不像」
+    就没在量。
+    """
+    gt = program(["a"]); gt["objects"][0]["class"] = "marble"
+    right = program(["a"]); right["objects"][0]["class"] = "marble"
+    wrong = program(["a"]); wrong["objects"][0]["class"] = "cardboard box"
+
+    hit = evaluate(gt, right, states(["a"]), states(["a"]))["full"]["objects"]
+    miss = evaluate(gt, wrong, states(["a"]), states(["a"]))["full"]["objects"]
+    # 两种情况下位置完全一样，所以召回和精确率必须一样——这正是问题所在
+    assert hit["recall"] == miss["recall"] and hit["precision"] == miss["precision"]
+    # 而类名准确率要把它们分开
+    assert hit["class_accuracy"] == 1.0, f"类名对了却没算对：{hit}"
+    assert miss["class_accuracy"] == 0.0, f"类名错了却算对了：{miss}"

@@ -32,7 +32,7 @@ def _pool_objects(runs: list[dict], window: str, key: str) -> list[float]:
 def aggregate(runs: list[dict], window: str = "full") -> dict:
     """runs 里每一项是 {clip, config, metrics}，metrics 是 gt_metrics.evaluate 的输出。"""
     traj = _pool_objects(runs, window, "trajectory")
-    accs, recalls, precs, confusion = [], [], [], Counter()
+    accs, recalls, precs, class_hits, confusion = [], [], [], [], Counter()
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
@@ -51,6 +51,12 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
             accs.extend([0.0] * (matched - round(float(mt["accuracy"]) * matched)))
         if ob.get("recall") is not None: recalls.append(float(ob["recall"]))
         if ob.get("precision") is not None: precs.append(float(ob["precision"]))
+        # 配对只看位置不看类名，所以召回和精确率量的是**定位**不是**识别**。
+        # 类名决定检索哪个资产，资产决定场景长什么样——这一列不报，
+        # 「场景复原得像不像」就没在量（见 #56）。按**物体**汇总，和准确率一致。
+        if isinstance(ob.get("class_correct"), int) and ob.get("matched"):
+            class_hits.extend([1.0] * ob["class_correct"])
+            class_hits.extend([0.0] * (ob["matched"] - ob["class_correct"]))
         for truth, preds in (mt.get("confusion") or {}).items():
             for pred, n in preds.items(): confusion[(truth, pred)] += n
 
@@ -73,6 +79,7 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "motion_type_accuracy": stat(accs),         # 按物体汇总，n 就是配对上的物体数
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
+        "class_accuracy": stat(class_hits),
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},
         # 按整段平均距离配对，会把运动判错的物体一并算成没检出。这两个数说明那个偏差
         # 有多大：start_position_only 是「位置对上了、但运动没对上所以被判成未检出」的
@@ -105,8 +112,8 @@ def as_markdown(table: dict) -> str:
     但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
     仍报中位数。
     """
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 |",
-            "|---|---|---|---|---|---|---|---|"]
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 类名准确率 |",
+            "|---|---|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
         acc = a["motion_type_accuracy"]
@@ -114,9 +121,11 @@ def as_markdown(table: dict) -> str:
         acc_n = "—" if not acc else acc["n"]
         base = a.get("always_static_accuracy")
         base_txt = "—" if base is None else format(base, ".3f")
+        cls = a.get("class_accuracy")
+        cls_txt = "—" if not cls else format(cls["mean"], ".3f")
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
                     f"{acc_txt} | {base_txt} | {acc_n} | "
-                    f"{f(a['object_recall'])} | {f(a['object_precision'])} |")
+                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | {cls_txt} |")
     return "\n".join(rows)
 
 
