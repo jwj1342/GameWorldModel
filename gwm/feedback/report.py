@@ -54,6 +54,12 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         for truth, preds in (mt.get("confusion") or {}).items():
             for pred, n in preds.items(): confusion[(truth, pred)] += n
 
+    # 常数基线：「不管看到什么都答 static」能拿多少分，也就是配对物体里真值本来
+    # 就是 static 的比例。混淆矩阵的行是真值，按真值一侧求和即可。
+    truth_total = sum(confusion.values())
+    truth_static = sum(n for (truth, _), n in confusion.items() if truth == "static")
+    always_static = round(truth_static / truth_total, 6) if truth_total else None
+
     def stat(xs: list[float]) -> dict | None:
         if not xs: return None
         a = np.asarray(xs, float)
@@ -73,6 +79,11 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         # 物体数。它不为零，就说明召回量到的不只是检出，运动类型准确率的分母也有偏。
         "matched_by_mean_distance": mean_matched,
         "matched_by_start_position_only": start_only,
+        # 「不管看到什么都答 static」能拿多少分。这一项必须和准确率并排看，否则读不出
+        # 区分力：实测当前主线准确率 0.250，而判对的 6 个**全部**是 static->static，
+        # 常数基线同样是 6/24 = 0.250——一模一样。那不是「准确率偏低」，是这个指标
+        # 此刻对方法没有任何区分力。做成一列是为了下次不用有人想起来才去算。
+        "always_static_accuracy": always_static,
     }
 
 
@@ -94,15 +105,17 @@ def as_markdown(table: dict) -> str:
     但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
     仍报中位数。
     """
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 配对物体数 | 物体召回 | 物体精确率 |",
-            "|---|---|---|---|---|---|---|"]
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 |",
+            "|---|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
         acc = a["motion_type_accuracy"]
         acc_txt = "—" if not acc else format(acc["mean"], ".3f")
         acc_n = "—" if not acc else acc["n"]
+        base = a.get("always_static_accuracy")
+        base_txt = "—" if base is None else format(base, ".3f")
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
-                    f"{acc_txt} | {acc_n} | "
+                    f"{acc_txt} | {base_txt} | {acc_n} | "
                     f"{f(a['object_recall'])} | {f(a['object_precision'])} |")
     return "\n".join(rows)
 

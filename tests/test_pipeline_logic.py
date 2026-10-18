@@ -273,6 +273,42 @@ def test_eval_aggregation_pools_objects_not_clips():
     assert "| 5 |" in md
 
 
+def test_恒答static的常数基线要和准确率并排报():
+    """没有这一列，读不出准确率有没有区分力。
+
+    实测踩过：主线运动类型准确率 0.250，而判对的六个**全部**是 static->static，
+    「不管看到什么都答 static」在同一批上也是 6/24 = 0.250——一模一样。那不是
+    准确率偏低，是这个指标此刻对方法没有任何区分力。表里不并排报，没人会想起来算。
+    """
+    from gwm.feedback.report import aggregate, as_markdown
+
+    def run(confusion):
+        n = sum(sum(p.values()) for p in confusion.values())
+        hits = sum(p.get(t, 0) for t, p in confusion.items())
+        return {"metrics": {"full": {
+            "trajectory": {"per_object": {f"o{i}": 0.1 for i in range(n)},
+                           "median_m": 0.1, "max_m": 0.1, "n": n},
+            "motion_type": {"accuracy": hits / n, "n": n, "confusion": confusion},
+            "objects": {"recall": 0.5, "precision": 0.5},
+        }}}
+
+    # 八个物体：真值 static 的三个全判对，另外五个会动的全判成 static。
+    # 分类器准确率 3/8 = 0.375，而「恒答 static」也是 3/8 —— 零区分力。
+    a = aggregate([run({"static": {"static": 3},
+                        "spin": {"static": 2},
+                        "revolute": {"static": 3}})])
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.375) < 1e-9
+    assert abs(a["always_static_accuracy"] - 0.375) < 1e-9
+    assert "恒答 static" in as_markdown({"甲": a})
+
+    # 反例：真的判出了会动的东西，常数基线就该明显低于准确率
+    b = aggregate([run({"static": {"static": 3},
+                        "spin": {"spin": 2},
+                        "revolute": {"revolute": 3}})])
+    assert abs(b["motion_type_accuracy"]["mean"] - 1.0) < 1e-9
+    assert abs(b["always_static_accuracy"] - 0.375) < 1e-9
+
+
 def test_gauge_alignment_absorbs_unobservable_but_not_real_errors():
     """对齐要吃掉观测不到的规范差异，但不能吃掉真实的建模错误。
 

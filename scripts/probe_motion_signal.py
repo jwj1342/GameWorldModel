@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -362,7 +363,87 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
     return out
 
 
-MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal,
+def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
+    """把 ICP 这一步单独拎出来：解出来的转角和真值转角差多少。
+
+    为什么要单独量它。#7 那边量到的链条是：
+
+        点云 → track_rigid 逐帧配准 → 累积旋转 → 角度序列 → 正弦拟合 → periodic_rotate
+
+    而在**真值感知**上（真值深度 + 真值掩码渲出来的点云），真会周期性转动的物体，
+    正弦拟合的 r2 中位只有 0.124、最大 0.316；真值**静止**的物体反而能到 0.679。
+    分布是反的——噪声比真信号更像正弦。往下调闸只会放进更多假的（排除清单第十三条）。
+
+    所以问题在角度序列本身。这个模式不经过分类、不经过配对、不经过阈值，直接把
+    `track_rigid` 解出的逐帧转角和 `gt_states.jsonl` 里记的真值四元数比。差在这里，
+    就是 ICP 的问题；不差在这里，就得往上游找。
+    """
+    from gwm.perception.masks import resize_mask
+    gt_quat = _gt_quaternions(run)
+    if not gt_quat:
+        return {}
+    geom = load_geometry(run / "geometry.npz")
+    masks = load_masks(run)
+    frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    out: dict[str, list] = {}
+    for oid, per_frame in masks.items():
+        kind = kinds.get(oid)
+        series = gt_quat.get(oid)
+        if kind is None or not series:
+            continue
+        clouds, frames = [], []
+        for fi, mask in sorted(per_frame.items()):
+            k = frame_of.get(fi)
+            if k is None:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           _fix(geom.cam_to_world[k]))
+            if len(pts) >= 30:
+                clouds.append(pts); frames.append(int(fi))
+        if len(clouds) < 6:
+            continue
+        tracked = track_rigid(clouds)
+        orientations = tracked.get("orientations") or []
+        if len(orientations) != len(clouds):
+            continue
+        truth_q = [series.get(f) for f in frames]
+        if any(q is None for q in truth_q):
+            continue
+        base = R.from_quat(truth_q[0]).inv()
+        true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
+        solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
+                                 for m in orientations])
+        out.setdefault(f"{kind}/true_range_deg", []).append(float(np.ptp(true_deg)))
+        out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
+        out.setdefault(f"{kind}/angle_rmse_deg", []).append(
+            float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
+        if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
+            out.setdefault(f"{kind}/corr", []).append(
+                float(np.corrcoef(solved_deg, true_deg)[0, 1]))
+    return out
+
+
+def _gt_quaternions(run: Path) -> dict:
+    """逐帧真值朝向，按物体 id 再按帧序号索引。"""
+    states = run.parent / "gt_states.jsonl"
+    if not states.is_file():
+        states = Path(str(run).replace("/perception", "")) / "gt_states.jsonl"
+    if not states.is_file():
+        return {}
+    out: dict = {}
+    for line in states.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        state = json.loads(line)
+        for obj in state.get("objects", []):
+            out.setdefault(obj["id"], {})[int(state["i"])] = list(obj["quat"])
+    return out
+
+
+MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal, "icp": mode_icp,
          "register": mode_register, "articulation": mode_articulation}
 
 
