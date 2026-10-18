@@ -146,6 +146,36 @@ def make_clouds(motion: str, visibility: str, n_frames: int = 24) -> list[np.nda
     return clouds
 
 
+def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24) -> float:
+    """把**完整模板**配到每一帧的局部观测上，而不是让局部观测互相配。
+
+    受控实验里「完整点云」那一行是全对的（静止 0.3°、转 90° 解出 89.9°），而所有出错
+    的行都有一个共同点：被配准的两边**都**是随视角扫动的局部表面。只要有一边是钉死的
+    完整形状，采样就不再跟着相机跑。
+
+    我们手上已经有这个完整形状——#60 合进来的资产检索给每个物体配了一个网格资产。
+    这里用生成点云的那个长方体当模板，量一下这条路的上限。
+
+    解出的是「把这一帧的观测摆回模板坐标系」的旋转，物体自身的转动是它的逆；
+    这里比的是整段的转角**范围**，取逆不改变大小，所以可以直接比。
+    """
+    from gwm.perception.registration import icp
+    template, _ = box_surface()
+    clouds = make_clouds(motion, visibility, n_frames)
+    angles = []
+    for cloud in clouds:
+        if len(cloud) < 30:
+            continue
+        # **方向很要紧**：source 必须是局部观测、target 必须是完整模板。
+        # 反过来配（模板当 source）的话，模板上一多半的点在局部观测里根本没有对应，
+        # 而 `icp` 的剔除阈值是按对应距离的中位数定的，被这批没有对应的点带偏，
+        # 整个模板会被拽进一个错的位姿。第一版就是反的，静止物体解出 78.3°。
+        step = icp(cloud, template)
+        angles.append(float(np.degrees(R.from_matrix(
+            np.asarray(step["rotation"], float)).magnitude())))
+    return float(np.ptp(angles)) if len(angles) > 1 else float("nan")
+
+
 def solved_rotation_deg(clouds: list[np.ndarray]) -> np.ndarray:
     tracked = track_rigid(clouds)
     orientations = tracked.get("orientations") or []
@@ -236,6 +266,14 @@ def main() -> int:
     print("     ——深度图点云和表面均匀采样最本质的区别就在这里：相机一动，两帧之间")
     print("     看到的根本不是同一批物理点。")
     print("     最后一行是候选修法：体素格钉在世界里不随相机动，看能不能把假转动压回去。")
+    print()
+    print("—— 换一种配法：完整模板 → 每一帧的局部观测 ——")
+    print(f"{'运动':<16}{'真值转角':>9}{'模板配局部解出':>15}")
+    for motion, mlabel in motions:
+        got = solved_rotation_against_template(motion, "orbit_grid", n)
+        print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{got:>14.1f}°")
+    print("  （被配准的两边只要有一边是钉死的完整形状，采样就不再跟着相机跑。")
+    print("   我们已经有这个形状——#60 的资产检索给每个物体都配了网格。）")
     print()
     print("「正反不一致」这个自检信号**失败了**：出错的那几行也是 0.00°。ICP 自洽地错——")
     print("相邻两帧采到的确实是差一个小旋转的两块表面，它如实报告了，问题在问题本身。")
