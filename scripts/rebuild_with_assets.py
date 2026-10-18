@@ -37,6 +37,7 @@ from gwm.feedback.interaction_probe import measure as probe_interaction, merge a
 from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
+from gwm.synthesis.dedup import merge_duplicates                # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
 from gwm.synthesis.stabilise import apply_settled                # noqa: E402
 from gwm.config import load_config, site_name                   # noqa: E402
@@ -164,6 +165,15 @@ def main() -> int:
         print(f"尺寸回收: {len(resized)} 个物体 "
               f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
     timings["resized"] = len(resized)
+
+    # 同一个物体被检出两遍的合掉。放在接触装配之前：重复的节点会互相穿插，
+    # 让后面的稳定步做无用功，而且它们本来就不该存在。
+    dedup_threshold = float((cfg.get("synthesis") or {}).get("dedup_relative_distance", 0.0))
+    duplicates = merge_duplicates(program, dedup_threshold, evidence=evidence)
+    if duplicates:
+        print(f"重复检出: 合掉 {len(duplicates)} 个 "
+              f"{[(d['dropped'], '->', d['kept']) for d in duplicates[:5]]}", flush=True)
+    timings["deduped"] = len(duplicates)
 
     moves = settle_on_ground(program)
     if moves:

@@ -65,3 +65,12 @@ def test_记录里有合并的依据():
     merged = merge_duplicates(program, 0.5)
     assert merged[0]["class"] == "crate"
     assert 0.0 < merged[0]["relative_distance"] <= 0.5, "相对距离要记下来，便于事后核阈值"
+
+
+def test_去重的缺省阈值进了配置():
+    """扫参在十一条片段上做过：0 / 0.3 / 0.5 / 0.7 的 F1 是 0.257 / 0.265 / 0.284 / 0.293，
+    而召回 0.500 / 0.481 / 0.481 / 0.462。取 0.5 是因为再往上召回掉得明显。"""
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
+    assert cfg["synthesis"]["dedup_relative_distance"] == 0.5
