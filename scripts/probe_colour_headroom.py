@@ -26,6 +26,27 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 
+def _current_colour(node: dict) -> str:
+    material = node.get("material")
+    if isinstance(material, dict):
+        base = material.get("base_color")
+        if isinstance(base, str) and base.startswith("#"):
+            return base
+    if isinstance(material, str) and material.startswith("#"):
+        return material
+    return "#9a9a9a"
+
+
+def _opposite(colour: str) -> str:
+    """色相旋转半圈，亮度大致保持。只改颜色，不改明暗，免得把亮度和色彩混在一起。"""
+    import colorsys
+    value = colour.lstrip("#")
+    r, g, b = (int(value[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    r2, g2, b2 = colorsys.hls_to_rgb((h + 0.5) % 1.0, l, max(s, 0.6))
+    return "#%02x%02x%02x" % (int(r2 * 255), int(g2 * 255), int(b2 * 255))
+
+
 def gt_colour(node: dict) -> str | None:
     material = node.get("material")
     if isinstance(material, dict):
@@ -41,6 +62,9 @@ def main() -> int:
     ap.add_argument("--eval", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--limit", type=int, default=4)
+    ap.add_argument("--corrupt", action="store_true",
+                    help="换个方向问：把所有物体的颜色刻意改错，相似度掉多少。"
+                         "掉得很少就说明这个指标看不见颜色，那颜色相关的改动就没法用它验收。")
     a = ap.parse_args()
     from gwm.compiler.compile import compile_program
     from gwm.config import load_config, site_name
@@ -74,14 +98,23 @@ def main() -> int:
 
         swapped = json.loads(json.dumps(base))
         changed = 0
-        for node in swapped.get("objects", []):
-            truth = gt.get(pairs.get(node["id"], ""))
-            colour = gt_colour(truth) if truth else None
-            if colour:
-                node["material"] = colour
+        if a.corrupt:
+            # 把每个物体的颜色整体旋转色相半圈：形状、摆位、光照一个不动，只有颜色错。
+            # 这是指标敏感度的直接测法——如果相似度几乎不掉，它就看不见颜色。
+            for node in swapped.get("objects", []):
+                node["material"] = _opposite(_current_colour(node))
                 changed += 1
+            label = "颜色全改错"
+        else:
+            for node in swapped.get("objects", []):
+                truth = gt.get(pairs.get(node["id"], ""))
+                colour = gt_colour(truth) if truth else None
+                if colour:
+                    node["material"] = colour
+                    changed += 1
+            label = "换成真值颜色"
         out = {}
-        for tag, program in (("原样", base), ("换成真值颜色", swapped)):
+        for tag, program in (("原样", base), (label, swapped)):
             game = work / clip_dir.name / tag
             result = compile_program(program, game, cfg)
             if not result["ok"]:
@@ -90,9 +123,9 @@ def main() -> int:
             like = likeness(Path(result["game_dir"]), frames, work / clip_dir.name / f"lk_{tag}",
                             harness, weights)
             out[tag] = like.get("median") if like.get("ok") else None
-        rows.append((clip_dir.name, changed, out.get("原样"), out.get("换成真值颜色")))
+        rows.append((clip_dir.name, changed, out.get("原样"), out.get(label)))
         print(f"  {clip_dir.name}: 换了 {changed} 个物体的颜色，"
-              f"相似度 {out.get('原样')} -> {out.get('换成真值颜色')}", flush=True)
+              f"相似度 {out.get('原样')} -> {out.get(label)}", flush=True)
 
     usable = [(b, s) for _, _, b, s in rows if isinstance(b, (int, float)) and isinstance(s, (int, float))]
     if usable:
