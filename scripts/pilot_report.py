@@ -87,7 +87,8 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--rebuild-arg", action="append", default=[],
-                    help="透传给 rebuild_with_assets 的额外参数")
+                    help="透传给 rebuild_with_assets 的额外参数。值本身以 - 开头时要用等号写，"
+                         "比如 --rebuild-arg=--no-settle，分开写 argparse 会当成另一个选项")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     clips = sorted(p for p in Path(a.rendered).iterdir() if (p / "clip.mp4").is_file())[:a.limit]
