@@ -71,6 +71,10 @@ def evaluate(rows: list[dict], min_rotation: float, min_consistency: float,
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows", required=True)
+    ap.add_argument("--require-agreement", action="store_true",
+                    help="只认关节推断和运动分类同时指向同一类约束的")
+    ap.add_argument("--max-hinge-fit", type=float, default=None,
+                    help="铰链重建残差比的上限；越小越像真关节")
     a = ap.parse_args()
     rows = json.loads(Path(a.rows).read_text(encoding="utf-8"))
     fired = [r for r in rows if r.get("fired")]
@@ -84,8 +88,11 @@ def main() -> int:
             (25.0, 0.95, 0.15, 0.95, 0.05),
             (40.0, 0.95, 0.25, 0.97, 0.05),
             (60.0, 0.97, 0.35, 0.98, 0.03)]
+    gates = {"require_agreement": a.require_agreement, "max_hinge_fit": a.max_hinge_fit}
+    if any(gates.values()):
+        print(f"（命令行指定的门同时作用在下面这张阈值表上：{gates}）")
     for rot, cons, travel, straight, residual in grid:
-        m = evaluate(rows, rot, cons, travel, straight, residual)
+        m = evaluate(rows, rot, cons, travel, straight, residual, **gates)
         print(f"{rot:>6.0f}{cons:>8.2f}{travel:>7.2f}{straight:>8.2f}{residual:>7.2f}"
               f"{m['reported']:>6}{str(m['precision']):>7}{str(m['recall']):>7}"
               f"{str(m['kind_correct']):>8}{str(m['useful']):>8}")

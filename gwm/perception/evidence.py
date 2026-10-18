@@ -146,6 +146,42 @@ def obb_from_points(P: np.ndarray) -> dict | None:
     quat = R.from_euler("y", -yaw).as_quat()  # rotation about y that maps local x axis to principal axis
     return {"center": [float(center_xz[0]), float((ylo + yhi) / 2), float(center_xz[1])], "quat": [float(q) for q in quat], "size": [float(s) for s in size], "n": int(len(P))}
 
+def continuous_footprint_yaw(quats: np.ndarray, aspect_ratio: float,
+                             square_below: float = 1.6) -> np.ndarray:
+    """把足迹主轴的朝向序列接成连续的，再交给运动估计。
+
+    `obb_from_points` 的 yaw 来自 xz 点云 PCA 的主轴，它带两重**规范自由度**：
+
+      特征向量的符号（180 度）—— 在任何形状上都是任意的，`eigh` 给哪个方向没有意义；
+      长短轴互换（90 度）—— 足迹接近正方形时两个特征值几乎相等，谁是主轴也是任意的。
+
+    两者都会在帧之间跳，而下游把跳变直接读成转动。实测（真值感知、真值静止的物体）：
+    底面长短边比 1.2–1.5 的那一档，yaw 的 5–95 分位跨度中位 **73.5 度**；
+    比值 2.5 以上的只有 5.1 度；log(比值) 与 log(跨度) 的相关系数 **−0.906**。
+    #63 里一个真值**静止**的物体被报出 76.5 度转角、一个**纯平移**的被报出 38.1 度，
+    都是这个。
+
+    做法是逐帧在等价的候选里挑离上一帧最近的那个——消掉的是规范自由度，不是信号。
+    180 度一直允许。90 度只在足迹比低于 `square_below` 时允许：细长物体的直角转动
+    是真的，允许 90 度会把它抹掉。
+
+    一条原理上的限制：足迹主轴的朝向**只定义到 180 度**，长方形转过半圈和没转是
+    同一个足迹。所以转超过半圈的 spin 类物体，靠足迹 yaw 读不出来，这不是实现问题，
+    要换信号（点云本身的朝向，或者纹理）才能解决。
+    """
+    q = np.atleast_2d(np.asarray(quats, float))
+    if len(q) < 2:
+        return np.asarray(quats, float)
+    # scipy 1.17 起，单轴序列要求角度数组的最后一维等于轴数，所以这里一律用 (N, 1)
+    ang = R.from_quat(q).as_euler("yxz")[:, 0]
+    step = (np.pi / 2) if aspect_ratio < square_below else np.pi
+    out = [float(ang[0])]
+    for a in ang[1:]:
+        k = round((out[-1] - a) / step)
+        out.append(float(a + k * step))
+    return R.from_euler("y", np.asarray(out)[:, None]).as_quat()
+
+
 def smooth_series(x: np.ndarray, win: int) -> np.ndarray:
     if len(x) < 3 or win <= 1: return x
     win = min(win | 1, len(x) if len(x) % 2 else len(x) - 1); k = np.ones(win) / win
@@ -251,6 +287,14 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         for i, ob in enumerate(obbs): ob["center"] = [float(v) for v in cs[i]]; ob["size"] = [float(v) for v in sz[i]]
         median_size = np.median(sz, axis=0)
         footprint_ratio = max(median_size[0], median_size[2]) / max(min(median_size[0], median_size[2]), 1e-6)
+        # 朝向序列先消掉主轴的规范自由度（符号和长短轴互换），再往下传。不做这一步，
+        # 跳变会被运动估计读成转动。阈值可配，默认 1.6 —— 实测足迹比 1.5–2.5 这一档
+        # 噪声中位仍有 34 度，但真会转的物体也挤在这个带里，所以 90 度那条只在更方的
+        # 形状上放开（见 #7 里「抬门槛会挡掉十四个真转动里的九个」那张表）。
+        q_a = continuous_footprint_yaw(
+            q_a, footprint_ratio,
+            float(cfg["perception"]["motion"].get("yaw_square_below", 1.6)))
+        for i, ob in enumerate(obbs): ob["quat"] = [float(v) for v in q_a[i]]
         # 喂给运动估计的位置换成跨帧配准的结果。包围盒中心是可见点在各轴上的分位中点，
         # 可见面一变它就跟着动；配准只解帧与帧之间的变换，不依赖单帧算出一个稳定的量。
         # 实测相对第一帧的位移误差 0.253 -> 0.188 m（见 scripts/probe_motion_signal.py）。
