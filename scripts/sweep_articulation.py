@@ -16,8 +16,15 @@ import json
 from pathlib import Path
 
 
+# 运动分类器的类型和关节推断的类型怎么算「同意」。两边都在描述同一件事：
+# 绕轴转 → hinge，沿直线平移 → slide。往复与否不影响这个对应。
+AGREE = {"hinge": {"revolute", "periodic_rotate", "spin"},
+         "slide": {"prismatic", "periodic_translate"}}
+
+
 def evaluate(rows: list[dict], min_rotation: float, min_consistency: float,
-             min_travel: float, min_straightness: float, max_residual: float) -> dict:
+             min_travel: float, min_straightness: float, max_residual: float,
+             require_agreement: bool = False, max_hinge_fit: float | None = None) -> dict:
     """按一组阈值重新判一遍，算查准查全。
 
     rows 里记的是**按原阈值**判出来的结果，所以这里只能在原来就触发过的样本上收紧，
@@ -35,6 +42,15 @@ def evaluate(rows: list[dict], min_rotation: float, min_consistency: float,
             keep = (row["travel_m"] >= min_travel
                     and (row.get("straightness") or 0) >= min_straightness
                     and row["residual"] <= max_residual)
+        # #63 的第一条路：关节推断和运动分类是两条独立的估计（前者解配准逐步变换里的
+        # 轴和支点，后者拟合整条轨迹的形状）。两个都指向同一类约束时才认。
+        if keep and require_agreement:
+            keep = row.get("motion_type") in AGREE.get(fired, set())
+        # 第二条路：按「它真是一个绕轴的铰链」重建轨迹，看残差比自由刚体模型小多少。
+        # 比值越小越像真关节；这是比阈值更直接对应「写进程序之后像不像」的判据。
+        if keep and max_hinge_fit is not None:
+            ratio = row.get("hinge_fit_ratio")
+            keep = ratio is not None and ratio <= max_hinge_fit
         if row["is_joint"]:
             if keep:
                 tp += 1
@@ -55,6 +71,10 @@ def evaluate(rows: list[dict], min_rotation: float, min_consistency: float,
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows", required=True)
+    ap.add_argument("--require-agreement", action="store_true",
+                    help="只认关节推断和运动分类同时指向同一类约束的")
+    ap.add_argument("--max-hinge-fit", type=float, default=None,
+                    help="铰链重建残差比的上限；越小越像真关节")
     a = ap.parse_args()
     rows = json.loads(Path(a.rows).read_text(encoding="utf-8"))
     fired = [r for r in rows if r.get("fired")]
@@ -68,13 +88,35 @@ def main() -> int:
             (25.0, 0.95, 0.15, 0.95, 0.05),
             (40.0, 0.95, 0.25, 0.97, 0.05),
             (60.0, 0.97, 0.35, 0.98, 0.03)]
+    gates = {"require_agreement": a.require_agreement, "max_hinge_fit": a.max_hinge_fit}
+    if any(gates.values()):
+        print(f"（命令行指定的门同时作用在下面这张阈值表上：{gates}）")
     for rot, cons, travel, straight, residual in grid:
-        m = evaluate(rows, rot, cons, travel, straight, residual)
+        m = evaluate(rows, rot, cons, travel, straight, residual, **gates)
         print(f"{rot:>6.0f}{cons:>8.2f}{travel:>7.2f}{straight:>8.2f}{residual:>7.2f}"
               f"{m['reported']:>6}{str(m['precision']):>7}{str(m['recall']):>7}"
               f"{str(m['kind_correct']):>8}{str(m['useful']):>8}")
     print("\n可用率 = 报出来的关节里「既是真关节、类型也判对」的比例。"
           "\n这是决定要不要默认开启的那个数：它低于一半，就不该写进程序。")
+
+    # 收紧阈值这条路如果到不了 0.5，再试 #63 提的另外两条。它们不是调参，是加门。
+    print("\n两条换判据的路（都在现行阈值上加门，不再收紧阈值）：")
+    print(f"{'门':>26}{'报出':>6}{'查准':>7}{'查全':>7}{'类型对':>8}{'可用率':>8}")
+    base = (8.0, 0.85, 0.05, 0.90, 9.9)
+    variants = [("只要现行阈值（对照）", {}),
+                ("加：运动分类也同意", {"require_agreement": True})]
+    ratios = sorted({r["hinge_fit_ratio"] for r in rows
+                     if isinstance(r.get("hinge_fit_ratio"), (int, float))})
+    for thr in (0.2, 0.35, 0.5):
+        if ratios and min(ratios) <= thr:
+            variants.append((f"加：铰链重建残差比 ≤ {thr}", {"max_hinge_fit": thr}))
+    variants.append(("两个门都加", {"require_agreement": True, "max_hinge_fit": 0.5}))
+    for label, kw in variants:
+        m = evaluate(rows, *base, **kw)
+        print(f"{label:>26}{m['reported']:>6}{str(m['precision']):>7}"
+              f"{str(m['recall']):>7}{str(m['kind_correct']):>8}{str(m['useful']):>8}")
+    if not ratios:
+        print("  （没有一行带 hinge_fit_ratio，铰链重建那条路需要重跑 probe）")
     return 0
 
 

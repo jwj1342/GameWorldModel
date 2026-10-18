@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -373,6 +374,230 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
     return out
 
 
+def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
+    """把 ICP 这一步单独拎出来：解出来的转角和真值转角差多少。
+
+    为什么要单独量它。#7 那边量到的链条是：
+
+        点云 → track_rigid 逐帧配准 → 累积旋转 → 角度序列 → 正弦拟合 → periodic_rotate
+
+    而在**真值感知**上（真值深度 + 真值掩码渲出来的点云），真会周期性转动的物体，
+    正弦拟合的 r2 中位只有 0.124、最大 0.316；真值**静止**的物体反而能到 0.679。
+    分布是反的——噪声比真信号更像正弦。往下调闸只会放进更多假的（排除清单第十三条）。
+
+    所以问题在角度序列本身。这个模式不经过分类、不经过配对、不经过阈值，直接把
+    `track_rigid` 解出的逐帧转角和 `gt_states.jsonl` 里记的真值四元数比。差在这里，
+    就是 ICP 的问题；不差在这里，就得往上游找。
+    """
+    from gwm.perception.masks import resize_mask
+    gt_quat = _gt_quaternions(run)
+    poses = _gt_poses(run)
+    if not gt_quat:
+        return {}
+    geom = load_geometry(run / "geometry.npz")
+    masks = load_masks(run)
+    frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    out: dict[str, list] = {}
+    skipped: dict[str, int] = {}
+    for oid, per_frame in masks.items():
+        kind = kinds.get(oid)
+        series = gt_quat.get(oid)
+        if kind is None or not series:
+            skipped["no_truth_for_object"] = skipped.get("no_truth_for_object", 0) + 1
+            continue
+        clouds, frames = [], []
+        for fi, mask in sorted(per_frame.items()):
+            k = frame_of.get(fi)
+            if k is None:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           _fix(geom.cam_to_world[k]))
+            if len(pts) >= 30:
+                clouds.append(pts); frames.append(int(fi))
+        if len(clouds) < 6:
+            continue
+        tracked = track_rigid(clouds)
+        orientations = tracked.get("orientations") or []
+        if len(orientations) != len(clouds):
+            skipped["orientations_length_mismatch"] = skipped.get("orientations_length_mismatch", 0) + 1
+            continue
+        # 第二条路：用**完整模型**当模板，而不是让局部点云互相配。
+        # 合成实验里这条路把假转动压小五倍而真转动不丢（#7），但那是完美的长方体模板。
+        # 这里用真值位姿把各帧点云摆回物体自身坐标系、并起来当模型——它是个**预言机
+        # 上界**（真实链路拿不到真值位姿），用来回答「完整性这个论点在真实数据上
+        # 还成不成立」，再决定要不要去啃资产网格那条路。
+        template_deg = _template_rotation_deg(clouds, frames, poses.get(oid) or {})
+        # 第三条路，也是唯一能落地的一条：模板来自**检索到的资产网格**。
+        # 前两条都不干净——局部点云互配的两边都随视角扫动；用真值位姿拼的「完整模型」
+        # 本身是各帧图像格采样并起来的，格子的痕迹还在，而且第一版还把查询点云
+        # 逐字喂进了模型（同义反复，已更正）。资产网格是从三角面上采的，和相机无关，
+        # 也和观测完全独立。
+        asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
+        truth_q = [series.get(f) for f in frames]
+        if any(q is None for q in truth_q):
+            skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
+            continue
+        base = R.from_quat(truth_q[0]).inv()
+        true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
+        solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
+                                 for m in orientations])
+        out.setdefault(f"{kind}/true_range_deg", []).append(float(np.ptp(true_deg)))
+        out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
+        out.setdefault(f"{kind}/angle_rmse_deg", []).append(
+            float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
+        if len(template_deg) == len(true_deg):
+            out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
+            out.setdefault(f"{kind}/template_rmse_deg", []).append(
+                float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        if len(asset_deg) == len(true_deg):
+            out.setdefault(f"{kind}/asset_range_deg", []).append(float(np.ptp(asset_deg)))
+            out.setdefault(f"{kind}/asset_rmse_deg", []).append(
+                float(np.sqrt(np.mean((asset_deg - true_deg) ** 2))))
+        if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
+            out.setdefault(f"{kind}/corr", []).append(
+                float(np.corrcoef(solved_deg, true_deg)[0, 1]))
+    # 一个样本都没有的时候要说清楚卡在哪，别只打印「没有可比对的样本」
+    if not out and skipped:
+        print(f"  icp: 一个都没留下，原因 {skipped}", flush=True)
+    return out
+
+
+# 片段目录只有 main 知道，而 icp 模式要从里面读 gt_states.jsonl 里的逐帧朝向。
+# 改 gt_series 的返回会动到另外四个模式，所以这里用一个模块级变量，main 每轮设一次。
+CURRENT_CLIP_DIR: Path | None = None
+
+
+def _template_rotation_deg(clouds: list, frames: list, poses: dict) -> np.ndarray:
+    """用真值位姿拼出完整模型，再把每一帧配回去。预言机上界，不是可落地的做法。
+
+    拼模型**必须用真值位置**，不能用每一帧点云自己的质心：局部视角下可见点的质心
+    随视角移动（看正面和看侧面，可见点的质心不在同一处），按它归零拼出来的模型是
+    糊的，配进去的每一帧还带一个和姿态相关的平移偏差，ICP 得拿旋转去吸收。
+    第一版就是按质心拼的，于是 spin 从 114° 被压到 38°，而那是拼法的错不是方法的。
+    不转的物体不受影响（姿态不变，质心偏差是常数，不产生旋转），所以当时假转动
+    那一半的结论是稳的。
+
+    配准这一步**不用真值**：每一帧的原始点云直接配到模型上，ICP 自己解平移和旋转，
+    上一帧的解当这一帧的初值（暖启动，`track_rigid` 在另一条路上也是这么做的）。
+    """
+    from gwm.perception.registration import icp
+    pieces = []
+    for cloud, f in zip(clouds, frames):
+        pose = poses.get(f)
+        if pose is None:
+            return np.array([])
+        pos, quat = pose
+        pieces.append((cloud - np.asarray(pos, float)) @ R.from_quat(quat).inv().as_matrix().T)
+    model = np.vstack(pieces)
+    if len(model) > 20000:                       # 配准前先抽稀，否则 KD 树太慢
+        model = model[np.linspace(0, len(model) - 1, 20000).astype(int)]
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out)
+
+
+def _class_of(oid: str, evidence: dict) -> str:
+    for o in evidence.get("objects", []):
+        if o.get("id") == oid:
+            return str(o.get("class_guess") or "")
+    return ""
+
+
+_ASSET_CACHE: dict = {}
+
+
+def _asset_points(query: str) -> np.ndarray | None:
+    """按类名检索资产，把网格表面采成点云。检索不到或读不动就返回 None。"""
+    if not query:
+        return None
+    if query in _ASSET_CACHE:
+        return _ASSET_CACHE[query]
+    from gwm.assets.library import library_root, load_catalog
+    from gwm.assets.mesh import load_points
+    from gwm.assets.retrieve import retrieve
+
+    root = library_root()
+    if root is None:
+        _ASSET_CACHE[query] = None; return None
+    catalog = _ASSET_CACHE.setdefault("__catalog__", load_catalog(root))
+    hits = retrieve(query, catalog, k=1)
+    pts = load_points(Path(root) / hits[0][0].path, samples=3000) if hits else None
+    _ASSET_CACHE[query] = pts
+    return pts
+
+
+def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
+    """拿检索到的资产网格当模板，逐帧把观测配上去。
+
+    资产的尺度和物体未必一致（检索只保证类别像），所以配准前先按两边的包围盒
+    对角线把模板缩到同一尺度——ICP 解的是刚体变换，尺度不对会被旋转和平移吸收。
+    """
+    from gwm.perception.registration import icp
+    template = _asset_points(cls)
+    if template is None or not clouds:
+        return np.array([])
+    span = np.vstack(clouds)
+    obs_diag = float(np.linalg.norm(span.max(0) - span.min(0)))
+    tpl_diag = float(np.linalg.norm(template.max(0) - template.min(0)))
+    if tpl_diag <= 1e-9 or obs_diag <= 1e-9:
+        return np.array([])
+    model = (template - template.mean(0)) * (obs_diag / tpl_diag)
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out)
+
+
+def _gt_poses(_run: Path) -> dict:
+    """逐帧真值位姿（位置 + 朝向），按物体 id 再按帧序号索引。"""
+    if CURRENT_CLIP_DIR is None:
+        return {}
+    states = CURRENT_CLIP_DIR / "gt_states.jsonl"
+    if not states.is_file():
+        return {}
+    out: dict = {}
+    for line in states.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        state = json.loads(line)
+        for obj in state.get("objects", []):
+            out.setdefault(obj["id"], {})[int(state["i"])] = (list(obj["pos"]), list(obj["quat"]))
+    return out
+
+
+def _gt_quaternions(_run: Path) -> dict:
+    """逐帧真值朝向，按物体 id 再按帧序号索引。"""
+    if CURRENT_CLIP_DIR is None:
+        print("  icp: 没拿到片段目录", flush=True)
+        return {}
+    states = CURRENT_CLIP_DIR / "gt_states.jsonl"
+    if not states.is_file():
+        print(f"  icp: {states} 不在", flush=True)
+        return {}
+    out: dict = {}
+    for line in states.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        state = json.loads(line)
+        for obj in state.get("objects", []):
+            out.setdefault(obj["id"], {})[int(state["i"])] = list(obj["quat"])
+    return out
+
+
 def mode_common(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     """拿背景估公共漂移，再从物体轨迹里减掉。
 
@@ -455,7 +680,7 @@ def mode_common(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     return out
 
 
-MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal, "common": mode_common,
+MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal, "common": mode_common, "icp": mode_icp,
          "register": mode_register, "articulation": mode_articulation}
 
 
@@ -476,6 +701,7 @@ def main() -> int:
             print(f"{clip_dir.name}: 失败 {type(error).__name__}: {error}"[:200], flush=True)
             continue
         truth, kinds = gt_series(clip_dir)
+        globals()["CURRENT_CLIP_DIR"] = clip_dir
         for key, values in MODES[a.mode](evidence, truth, kinds, work / clip_dir.name).items():
             merged.setdefault(key, []).extend(values)
     if not any(merged.values()):
