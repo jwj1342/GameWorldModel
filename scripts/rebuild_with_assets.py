@@ -32,6 +32,7 @@ from gwm.assets.embed import AssetIndex, Embedder               # noqa: E402
 from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
+from gwm.feedback.colour import colour_residual                 # noqa: E402
 from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
@@ -79,6 +80,9 @@ def main() -> int:
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
     ap.add_argument("--probe-interaction", action="store_true",
                     help="真的去抓一遍、拖一遍，量出可交互程度（而不是只数程序声明了什么）")
+    ap.add_argument("--colour-residual", action="store_true",
+                    help="样式那一半的验收指标：渲出来的颜色和视频里量到的差多少。"
+                         "重渲染相似度看不见颜色（色相全改错只动 0.007），这一项不能靠它代替")
     ap.add_argument("--style-swap", action="store_true",
                     help="顺带量样式-行为解耦：换一套外形网格，轨迹应该一丝不差")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
@@ -270,6 +274,25 @@ def main() -> int:
                   f"范围 {like['min']}~{like['max']}）{scale}", flush=True)
         else:
             print(f"重渲染相似度: 没算成（{like.get('reason')}）", flush=True)
+    if a.colour_residual:
+        # 样式那一半。重渲染相似度几乎看不见颜色，所以这一项必须单独量，
+        # 否则「样式恢复得准不准」没有数——#52 要的正是这个。
+        frames_file = out / "perception" / "frames" / "frames.json"
+        times = []
+        if frames_file.is_file():
+            times = [fr["t"] for fr in
+                     json.loads(frames_file.read_text(encoding="utf-8"))["frames"]][:6]
+        if times:
+            residual = colour_residual(Path(result["game_dir"]), program, evidence,
+                                       out / "colour", times)
+            completeness["colour"] = residual
+            if residual.get("ok"):
+                print(f"颜色残差: 每通道 {residual['channel_error_median']}/255，"
+                      f"亮度比 {residual['luma_ratio_median']}"
+                      f"（{residual['objects']} 个物体）", flush=True)
+            else:
+                print(f"颜色残差: 没算成（{residual.get('reason')}）", flush=True)
+
     print(format_table(completeness), flush=True)
     resolved = sum(1 for r in result["assets"]["requests"] if r["resolved"].startswith("library"))
     summary = {"clip": a.clip, "objects": len(program.get("objects", [])),
