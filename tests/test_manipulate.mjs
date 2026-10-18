@@ -94,6 +94,29 @@ test('拖动是推过去的，会把挡路的物体撞开', () => {
     `挡路的物体应该被推开，x 从 ${before.toFixed(2)} 变成 ${other.group.position.x.toFixed(2)}`);
 });
 
+test('挡在前面的东西要真的挡住，看不见的不算', () => {
+  // 相机在 +z 看向原点，挡板横在物体前面
+  const { scene, registry } = buildScene({
+    static: [{ id: 'ground', class: 'ground',
+               geom: { kind: 'primitive', shape: 'box', extent: [20, 0.4, 20] }, pose: { pos: [0, -0.2, 0] } }],
+    objects: [{ id: 'cup', class: 'cup', geom: { kind: 'primitive', shape: 'box', extent: [0.4, 0.4, 0.4] },
+                pose: { pos: [0, 0.2, 0] }, motion: { type: 'static' } },
+              { id: 'panel', class: 'panel', geom: { kind: 'primitive', shape: 'box', extent: [4, 4, 0.1] },
+                pose: { pos: [0, 0.2, 2.0] }, motion: { type: 'static' }, interaction: { grab: false } }] });
+  const physics = new Physics(DT);
+  registry.forEach(e => physics.addEntry(e));
+  physics.createPlayer(new THREE.Vector3(100, 100, 100));
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(0, 0.2, 5); camera.lookAt(0, 0.2, 0); camera.updateMatrixWorld(true);
+  const manipulator = new Manipulator({ camera, registry, physics, scene, dt: DT });
+  const panel = registry.find(e => e.id === 'panel');
+
+  assert.equal(manipulator.pick(0, 0), null, '隔着挡板不该能抓到后面的杯子');
+  panel.group.visible = false;
+  const hit = manipulator.pick(0, 0);
+  assert.equal(hit?.entry?.id, 'cup', '挡板看不见了就不该再挡着');
+});
+
 test('抓取记录写下了谁被抓、放到哪', () => {
   const w = world();
   w.manipulator.grab(w.cup, w.cup.group.position.clone());

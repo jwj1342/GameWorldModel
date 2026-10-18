@@ -44,6 +44,12 @@ export function canGrab(entry) {
   return PICK_LAYERS.includes(entry.kind);
 }
 
+/** 这个节点以及它所有祖先都可见吗。 */
+function isVisible(object) {
+  for (let node = object; node; node = node.parent) if (node.visible === false) return false;
+  return true;
+}
+
 function clamp(value, limit) {
   if (!limit) return value;
   return Math.min(Math.max(value, Math.min(limit[0], limit[1])), Math.max(limit[0], limit[1]));
@@ -62,14 +68,22 @@ export class Manipulator {
 
   /** 屏幕归一化坐标 (-1..1) 打一条射线，返回命中的 entry 和世界坐标交点。 */
   pick(ndcX, ndcY) {
+    // 先把世界矩阵刷新一遍。射线检测读的是 matrixWorld，而它只在渲染的时候才会被
+    // 更新——浏览器里每帧都渲染所以看不出问题，无头跑的时候没人更新，射线就按
+    // 「所有东西都还在原点」算，于是点中的是另一个物体。这一下只在点击时发生。
+    this.scene.updateMatrixWorld();
+    this.camera.updateMatrixWorld();
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
     // 挡在前面的东西要真的挡住。原来这里是「抓不动就跳过、接着往后找」，于是隔着墙、
     // 隔着桌面也能把后面的杯子抓出来——鼠标能穿墙，不是可交互，是穿帮。
     // 取第一个属于某个节点的命中：它抓得动就抓，抓不动就说明被挡住了。
+    //
+    // 看不见的东西不算挡住，也不能被抓。three 的射线检测**不**看 visible，而模板会
+    // 把收集掉的物品隐藏起来；不滤掉的话，一枚吃掉的金币会一直挡着它后面的东西。
     for (const hit of hits) {
       const entry = hit.object?.userData?.entry;
-      if (!entry) continue;
+      if (!entry || !isVisible(hit.object)) continue;
       return canGrab(entry) ? { entry, point: hit.point.clone() } : null;
     }
     return null;
