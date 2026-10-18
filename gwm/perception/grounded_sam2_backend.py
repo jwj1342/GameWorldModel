@@ -15,20 +15,82 @@ class GroundingDinoDetectionProvider:
     def __init__(self, model_dir: str | Path):
         self.model_dir = Path(model_dir)
 
+    def _detect_joined(self, image, phrases, proc, model, device, pc):
+        """原来的做法：所有短语拼成一串问一次。"""
+        text = ". ".join(p.strip().rstrip(".").lower() for p in phrases) + "."
+        inputs = proc(images=image, text=text, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out = model(**inputs)
+        try:
+            res = proc.post_process_grounded_object_detection(
+                out, inputs.input_ids, threshold=pc["grounding_box_threshold"],
+                text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
+        except TypeError:
+            res = proc.post_process_grounded_object_detection(
+                out, inputs.input_ids, box_threshold=pc["grounding_box_threshold"],
+                text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
+        labels = res.get("text_labels", res.get("labels"))
+        return [(float(s), [float(v) for v in b], str(l))
+                for s, b, l in zip(res["scores"].tolist(), res["boxes"].tolist(), labels)]
+
+    @staticmethod
+    def _iou(a, b) -> float:
+        ax0, ay0, ax1, ay1 = a; bx0, by0, bx1, by1 = b
+        ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+        ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+        inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+        if inter <= 0:
+            return 0.0
+        area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+        area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+        return inter / max(area_a + area_b - inter, 1e-9)
+
+    def _detect_per_phrase(self, image, phrases, proc, model, device, pc) -> list[DetectionRecord]:
+        """每个短语单独问一遍，再按框的重叠合并。
+
+        合并是必要的：同一个物体可能被好几个短语找到（「crate」和「box」），不合并就
+        变成重复检出。保留得分最高的那个，口径和 gwm/synthesis/dedup.py 一致——
+        先按得分排序，后来的和已保留的重叠超过阈值就丢掉。
+        """
+        iou_cut = float(pc.get("detect_per_phrase_iou", 0.6))
+        found: list[tuple[float, list[float], str]] = []
+        for phrase in phrases:
+            text = phrase.strip().rstrip(".").lower() + "."
+            inputs = proc(images=image, text=text, return_tensors="pt").to(device)
+            with torch.no_grad():
+                out = model(**inputs)
+            try:
+                res = proc.post_process_grounded_object_detection(
+                    out, inputs.input_ids, threshold=pc["grounding_box_threshold"],
+                    text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
+            except TypeError:
+                res = proc.post_process_grounded_object_detection(
+                    out, inputs.input_ids, box_threshold=pc["grounding_box_threshold"],
+                    text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
+            for score, box in zip(res["scores"].tolist(), res["boxes"].tolist()):
+                found.append((float(score), [float(v) for v in box], phrase.strip().lower()))
+        found.sort(key=lambda row: -row[0])
+        # 跨短语的合并只在这里做一次：同一个物体可能被好几个短语找到（crate 和 box）。
+        # 后面公共那段还会按 0.7 再去一次重，这里用的阈值更松，专门对付跨短语的重复。
+        kept: list[tuple[float, list[float], str]] = []
+        for score, box, label in found:
+            if any(self._iou(box, other[1]) >= iou_cut for other in kept):
+                continue
+            kept.append((score, box, label))
+        return kept
+
     def detect(self, image: Image.Image, frame_index: int, phrases: list[str], cfg: dict) -> list[DetectionRecord]:
         from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
         device = "cuda" if torch.cuda.is_available() else "cpu"
         pc = cfg["perception"]
         proc = AutoProcessor.from_pretrained(str(self.model_dir)); model = AutoModelForZeroShotObjectDetection.from_pretrained(str(self.model_dir)).to(device).eval()
-        text = ". ".join(p.strip().rstrip(".").lower() for p in phrases) + "."
-        inputs = proc(images=image, text=text, return_tensors="pt").to(device)
-        with torch.no_grad(): out = model(**inputs)
-        try:
-            res = proc.post_process_grounded_object_detection(out, inputs.input_ids, threshold=pc["grounding_box_threshold"], text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
-        except TypeError:
-            res = proc.post_process_grounded_object_detection(out, inputs.input_ids, box_threshold=pc["grounding_box_threshold"], text_threshold=pc["grounding_text_threshold"], target_sizes=[image.size[::-1]])[0]
-        labels = res.get("text_labels", res.get("labels"))
-        raw = [(float(s), [float(v) for v in b], str(l)) for s, b, l in zip(res["scores"].tolist(), res["boxes"].tolist(), labels)]
+        if pc.get("detect_per_phrase", False):
+            # 逐短语分别问，而不是把所有类名拼成一串。拼串的问题是一个框落在多个短语的
+            # 词上时返回的是拼接（#67 修的那些词片碎屑就是这么来的），而且短语之间会
+            # 互相争夺同一个框。代价是每帧多跑 N 次前向，模型只加载一次所以是线性的。
+            raw = self._detect_per_phrase(image, phrases, proc, model, device, pc)
+        else:
+            raw = self._detect_joined(image, phrases, proc, model, device, pc)
         raw.sort(key=lambda detection: (-detection[0], detection[2], detection[1]))
         keep = []
         width, height = image.size
