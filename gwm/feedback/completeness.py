@@ -75,6 +75,16 @@ def fidelity(program: dict, evidence: dict | None = None,
             errors.sort()
             out["size_log_error_median"] = round(errors[len(errors) // 2], 3)
 
+    # 同一条片段里同类物体的尺寸差多少。判据准但覆盖小，所以**只报不改**：
+    # 三倍门槛下标出来的六个全是假阳性（一个真物体都没误伤），但只占一百二十个里的
+    # 六个，丢掉它们精确率只从 0.133 到 0.140。接进链路去删物体不值得多一道会误伤
+    # 的闸，当诊断却有用——一条片段里出现三倍以上的同类尺寸差，基本可以断定某个环节
+    # 出了问题，适合挑出来人工看。见 #64。
+    outliers = size_outliers(objects)
+    if outliers:
+        out["size_outliers"] = len(outliers)
+        out["size_outlier_ids"] = [row["id"] for row in outliers[:8]]
+
     # 画面被解释了多少。这一项是前面几项的必要补充：只看 object_recall 的话，
     # 一个塞满东西的房间只检出九个物体、九个全都重建了出来，也会得到满分，
     # 而那恰恰是「重建出来不像」最主要的来源。
@@ -97,6 +107,41 @@ def fidelity(program: dict, evidence: dict | None = None,
             out["evidence_pixel_coverage_best"] = round(fractions[-1], 3)
             out["covered_frames"] = len(fractions)
     return out
+
+
+def size_outliers(objects: list[dict], ratio: float = 3.0,
+                  min_peers: int = 3) -> list[dict]:
+    """同类里尺寸离谱的那些。只报不改。
+
+    参照的是**同一条片段里同类其它实例的尺寸中位数**，不是外部先验——后者是
+    `synthesis.size_regularisation` 做的事，它默认关着，因为缩物体却不改相机距离
+    会让取景整个变样（见 configs/default.yaml 的注释）。这里只问「这一个和它的同类
+    比是不是离谱」，不引入「这类东西一般多大」。
+
+    至少要 `min_peers` 个同类实例中位数才稳：只有两个实例且其中一个是错的时候，
+    中位数落在两者中间，倍数判据会把好的那个一起冤枉。
+    """
+    import statistics
+    from collections import defaultdict
+    by_class: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for node in objects:
+        longest = _longest(node)
+        if longest:
+            by_class[str(node.get("class", "")).lower()].append((node.get("id", ""), longest))
+    found: list[dict] = []
+    for cls, items in by_class.items():
+        if len(items) < min_peers:
+            continue
+        median = statistics.median(size for _, size in items)
+        if median <= 1e-9:
+            continue
+        for oid, size in items:
+            factor = size / median
+            if factor >= ratio or factor <= 1.0 / ratio:
+                found.append({"id": oid, "class": cls, "longest_m": round(size, 3),
+                              "class_median_m": round(median, 3), "ratio": round(factor, 2)})
+    found.sort(key=lambda row: -abs(math.log(row["ratio"])))
+    return found
 
 
 def interactivity(program: dict) -> dict:

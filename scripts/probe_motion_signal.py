@@ -305,9 +305,51 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
         # 原始判据一并记下来：这样扫阈值不用重跑感知，一次测量能回答「阈值定多少」
         total_rot = float(np.degrees(np.arccos(np.clip(
             (np.trace(np.asarray(tracked.get("total_rotation") or np.eye(3), float)) - 1.0) / 2.0, -1.0, 1.0))))
+        # #63 的第二条建议：不用阈值，比两个模型的拟合优度。把轨迹按「绕固定轴的
+        # 铰链」重建一遍，看位置残差比观测到的轨迹高多少。真铰链应该几乎一样好
+        # （约束没有损失解释力），假的会明显更差。比值本身是连续的，不用定阈值就能看
+        # 它有没有判别力。
+        hinge_ratio = None
+        positions = np.asarray(tracked.get("positions") or [], float)
+        if len(positions) >= 4:
+            # 轴直接从累积旋转矩阵估，**不经过关节推断那道阈值闸**。只在已触发的子集上
+            # 算，等于在一个被筛过的分布上看判别力，而这条建议本来的意思是用拟合优度
+            # 替代阈值，不是在阈值之后再加一层。第一版就是那么写的，结论因此不作数。
+            if spec and spec.get("axis"):
+                axis = np.asarray(spec["axis"], float)
+                pivot = np.asarray(spec.get("pivot") or positions[0], float)
+            else:
+                rot = np.asarray(tracked.get("total_rotation") or np.eye(3), float)
+                # 旋转矩阵的轴是它对应特征值 1 的特征向量；反对称部分给出方向
+                skew = np.array([rot[2, 1] - rot[1, 2], rot[0, 2] - rot[2, 0],
+                                 rot[1, 0] - rot[0, 1]], float)
+                axis = skew if np.linalg.norm(skew) > 1e-9 else np.array([0.0, 1.0, 0.0])
+                pivot = positions.mean(axis=0)
+            norm = float(np.linalg.norm(axis))
+            if norm > 1e-9:
+                axis = axis / norm
+                rel = positions - pivot
+                along = rel @ axis                      # 沿轴的分量，铰链下应当不变
+                flat = rel - np.outer(along, axis)      # 垂直于轴的分量，应当等半径旋转
+                radius = np.linalg.norm(flat, axis=1)
+                # 约束模型的自由度只剩「转过多少角度」：半径和沿轴位置都该是常数。
+                # 残差就取它们相对第一帧的偏离。
+                constrained = float(np.sqrt(np.mean(
+                    (radius - radius[0]) ** 2 + (along - along[0]) ** 2)))
+                # 自由模型的尺度：轨迹自身的位移幅度。两者同量纲才可比。
+                free = float(np.sqrt(np.mean(np.sum((positions - positions[0]) ** 2, axis=1))))
+                hinge_ratio = round(constrained / max(free, 1e-9), 3)
+
+        # 运动分类器对同一个物体的判断。#63 的第一条建议是「两个估计器同时同意时
+        # 置信度更高」，要验它就得把两边放在同一行里——它们是独立的两条路：
+        # 关节推断解的是配准逐步变换里的轴和支点，运动分类拟合的是整条轨迹的形状。
+        guess = next((o.get("motion_guess") or {} for o in evidence.get("objects", [])
+                      if o.get("id") == oid), {})
         out.setdefault("rows", []).append({
             "id": oid, "gt_kind": kind, "is_joint": kind in joint_types,
             "fired": spec["grab"] if spec else None,
+            "motion_type": str(guess.get("type", "unknown")),
+            "hinge_fit_ratio": hinge_ratio,
             "total_rotation_deg": round(total_rot, 3),
             "axis_consistency": round(float((spec.get("evidence") or {}).get("axis_consistency", 0.0)), 3) if spec else None,
             "straightness": round(float((spec.get("evidence") or {}).get("straightness", 0.0)), 3) if spec else None,

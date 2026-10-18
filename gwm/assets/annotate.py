@@ -134,6 +134,15 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         hits = retrieve(query, catalog, k=top_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0)
         record["candidates"] = [{"asset_id": a.id, "score": s} for a, s in hits]
+        # 图像那一路的最高分记进**决策记录**，不进程序。程序是一份受校验的契约：
+        # schema 里 assetGeom 的 additionalProperties 是 false，往 geom 里塞一个
+        # ref_image_score 会让每个资产节点都校验失败——试过，十二条片段只剩两条能跑完，
+        # 资产覆盖率掉到 0。诊断信息归 manifest，不归程序。
+        if image_scores is not None:
+            try:
+                record["image_score_best"] = round(float(max(image_scores.values())), 4)
+            except (AttributeError, ValueError, TypeError):
+                pass
         if hits and hits[0][1] >= min_score:
             geom["ref"] = hits[0][0].id
             record.update(chosen=hits[0][0].id, score=hits[0][1])

@@ -1,0 +1,205 @@
+"""样式那一半的验收指标：渲出来的颜色和视频里量到的颜色差多少。
+
+为什么需要它。重渲染相似度（`likeness.py`，DINOv2 嵌入）**几乎看不见颜色**——实测把
+场景里每个物体的色相旋转半圈，六条片段的相似度中位数只从 0.5635 变到 0.5568，其中
+两条反而涨了，幅度和片段间噪声同量级。所以样式那一半目前没有能验收的数：#52 要的
+「样式恢复得准不准」答不上来，#55 的渲染反馈闭环做出来也说不出它起没起作用。
+
+这里补的就是那个数。口径是闭环的：**两边用同一种方法量**——掩码内像素逐通道取中位数。
+观测侧的掩码来自分割，渲染侧的掩码来自内核的 ID 通道，两者都是「这个物体占的像素」。
+
+量的是残差而不是绝对正确性，这是有意的：真实视频里没有材质真值，唯一能自洽闭合的
+问题是「按这份程序渲出来，和输入视频里看到的一样吗」。合成数据上另有真值可比，
+那是 `probe_colour_headroom.py` 的事。
+"""
+from __future__ import annotations
+
+import statistics
+from pathlib import Path
+
+import numpy as np
+
+from ..compiler.ids import decode_id_png, registry_order
+from .render import render
+
+
+def _hex_to_rgb(value: str) -> tuple[int, int, int] | None:
+    text = str(value or "").strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _median_colour(rgb: np.ndarray, mask: np.ndarray, min_pixels: int) -> tuple[int, int, int] | None:
+    """掩码内逐通道取中位数。和感知侧 observe_colors 的口径一致。"""
+    if mask.shape != rgb.shape[:2] or int(mask.sum()) < min_pixels:
+        return None
+    pixels = rgb[mask]
+    return tuple(int(np.median(pixels[:, c])) for c in range(3))
+
+
+def colour_residual(game_dir: Path, program: dict, evidence: dict, out_dir: Path,
+                    times: list[float], width: int = 640, height: int = 360,
+                    min_pixels: int = 16) -> dict:
+    """渲几帧，逐物体比「渲出来的颜色」和「视频里量到的颜色」。
+
+    返回每通道绝对误差的中位数（0 到 255）、亮度比值的中位数，以及参与比较的物体数。
+    亮度比值小于 1 说明渲出来比视频暗——那是把像素值当反照率用的典型症状：像素是
+    反照率乘光照，再渲一次等于又乘了一遍。
+    """
+    from ..taxonomy import slug
+    observed: dict[str, tuple[int, int, int]] = {}
+    for obj in evidence.get("objects", []):
+        rgb = _hex_to_rgb(((obj.get("appearance") or {}).get("base_color")))
+        if rgb:
+            observed[slug(obj["id"])] = rgb
+    if not observed:
+        return {"ok": False, "reason": "证据里没有观测颜色"}
+
+    try:
+        index = render(game_dir, times, out_dir, width, height, passes=("rgb", "id"))
+    except (RuntimeError, OSError, ValueError) as error:
+        return {"ok": False, "reason": f"{type(error).__name__}: {error}"[:200]}
+
+    reg = registry_order(program)
+    errors: list[float] = []
+    ratios: list[float] = []
+    per_object: dict[str, dict] = {}
+    for frame in index.get("frames", []):
+        files = frame.get("files") or {}
+        if "rgb" not in files or "id" not in files:
+            continue
+        from PIL import Image
+        rgb = np.asarray(Image.open(Path(out_dir) / files["rgb"]).convert("RGB"))
+        masks = decode_id_png(Path(out_dir) / files["id"], reg)
+        for node_id, mask in masks.items():
+            want = observed.get(node_id)
+            if want is None:
+                continue
+            got = _median_colour(rgb, mask, min_pixels)
+            if got is None:
+                continue
+            error = float(np.mean([abs(a - b) for a, b in zip(got, want)]))
+            want_luma = max(sum(want) / 3.0, 1e-6)
+            ratio = (sum(got) / 3.0) / want_luma
+            errors.append(error)
+            ratios.append(ratio)
+            row = per_object.setdefault(node_id, {"errors": [], "ratios": []})
+            row["errors"].append(error)
+            row["ratios"].append(ratio)
+    if not errors:
+        return {"ok": False, "reason": "没有一个物体在渲染里量得到颜色"}
+    return {
+        "ok": True,
+        "objects": len(per_object),
+        "samples": len(errors),
+        # 每通道绝对误差，0 到 255。感知侧往返测过一次是 63/255，约 25%
+        "channel_error_median": round(statistics.median(errors), 2),
+        # 渲出来的亮度除以视频里量到的亮度。小于 1 = 渲得偏暗
+        "luma_ratio_median": round(statistics.median(ratios), 3),
+        "per_object": {k: {"channel_error": round(statistics.median(v["errors"]), 2),
+                           "luma_ratio": round(statistics.median(v["ratios"]), 3)}
+                       for k, v in sorted(per_object.items())},
+    }
+
+
+def fit_colours(program: dict, residual: dict, damping: float = 1.0,
+                max_gain: float = 4.0) -> list[dict]:
+    """按闭环残差把材质颜色往上调一轮，就地修改程序，返回每个物体的调整记录。
+
+    这是 #55 说的第三步。渲出来比视频暗（实测亮度比 0.627 到 0.833），因为我们把像素
+    中位数当反照率写进材质，而渲染时又乘了一遍光照。补偿的办法是把材质颜色乘上
+    「观测 ÷ 渲染」这个比值——下一次渲染乘完光照之后，就落在观测值附近。
+
+    `damping` 小于 1 时只走一部分，留给多轮迭代；一轮到位容易过冲，因为增益本身是
+    从一次带噪声的测量里估出来的。`max_gain` 挡住离谱的修正：某个物体在渲染里只占
+    几个像素时，比值可能毫无意义。
+
+    刻意不碰粗糙度、金属度和光照参数——那是下一步的问题，这里只动颜色。
+    """
+    if not residual.get("ok"):
+        return []
+    per_object = residual.get("per_object") or {}
+    applied: list[dict] = []
+    for node in program.get("objects") or []:
+        row = per_object.get(node.get("id"))
+        if not row:
+            continue
+        ratio = row.get("luma_ratio")
+        if not isinstance(ratio, (int, float)) or ratio <= 1e-6:
+            continue
+        gain = 1.0 / ratio
+        gain = 1.0 + damping * (gain - 1.0)
+        gain = max(1.0 / max_gain, min(max_gain, gain))
+        before = _current_material_colour(node)
+        raw = tuple(c * gain for c in before)
+        after = tuple(max(0, min(255, int(round(c)))) for c in raw)
+        _set_material_colour(node, after)
+        # 增益被 255 截断了多少。实测亮场景里反照率的余量会用尽：一条真实视频上
+        # 十四个物体有三个撞顶、最亮通道均值 184/255，于是亮度比卡在 0.924 不动——
+        # 增益算出来仍大于 1，乘完被截断，下一轮残差一模一样。那时候唯一还能动的
+        # 自由度是光照强度，见 fit_lighting。
+        want = max(raw) / 255.0 if max(raw) > 255.0 else 1.0
+        applied.append({"id": node.get("id"), "gain": round(gain, 3),
+                        "clipped_by": round(want, 3),
+                        "before": "#%02x%02x%02x" % before,
+                        "after": "#%02x%02x%02x" % after})
+    return applied
+
+
+def fit_lighting(program: dict, applied: list[dict], max_step: float = 1.5,
+                 luma_ratio: float | None = None) -> dict | None:
+    """反照率余量用尽的时候，抬光照。
+
+    只拟合颜色有一个结构性上限：材质颜色撞到 255 之后，增益再大也没用，残差卡成平台。
+    那时剩下的自由度是光照强度，而它是场景级的——样本量大、噪声小，比逐物体的颜色
+    更好估。
+
+    `luma_ratio` 是这一轮量到的整体亮度比。**只有它还小于 1 的时候才抬光照**——
+    第一版漏了这道闸，结果是：整体已经偏亮了，但场景里还剩一两个物体撞顶，于是光照
+    继续涨，和颜色那一路打起来。实测一条真实视频第二轮冲到 1.021、误差 3.17，之后
+    光照又抬了三轮，亮度比爬到 1.122、误差反涨到 15.33。机制对，控制律错。
+    """
+    if luma_ratio is not None and luma_ratio >= 0.99:
+        return None
+    clipped = [row["clipped_by"] for row in applied
+               if isinstance(row.get("clipped_by"), (int, float)) and row["clipped_by"] > 1.01]
+    if not clipped:
+        return None
+    clipped.sort()
+    factor = min(max_step, clipped[len(clipped) // 2])
+    lighting = program.setdefault("style", {}).setdefault("lighting", {})
+    before = {}
+    for key, field, default in (("key", "intensity", 1.6), ("ambient", "intensity", 1.1)):
+        block = lighting.setdefault(key, {})
+        current = float(block.get(field, default))
+        before[key] = round(current, 3)
+        block[field] = round(current * factor, 4)
+    return {"factor": round(factor, 3), "clipped_objects": len(clipped), "before": before}
+
+
+
+def _current_material_colour(node: dict) -> tuple[int, int, int]:
+    material = node.get("material")
+    if isinstance(material, dict):
+        rgb = _hex_to_rgb(material.get("base_color"))
+        if rgb:
+            return rgb
+    if isinstance(material, str):
+        rgb = _hex_to_rgb(material)
+        if rgb:
+            return rgb
+    return (154, 154, 154)          # 和内核 MATERIALS.default 的灰一致
+
+
+def _set_material_colour(node: dict, rgb: tuple[int, int, int]) -> None:
+    """写回去的时候保留材质对象里别的字段，只换颜色。"""
+    value = "#%02x%02x%02x" % rgb
+    material = node.get("material")
+    if isinstance(material, dict):
+        material["base_color"] = value
+    else:
+        node["material"] = value
