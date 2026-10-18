@@ -287,6 +287,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     registered = np.asarray(tracked["positions"], float)
                     # 配准给的是相对锚点的轨迹，锚点落在可见表面上。平移到第一帧的包围盒
                     # 中心，保住绝对位置，用它的形状。
+                    # 配准的每步噪声是物体尺寸的 17%，而真实运动是平滑的。包围盒中心
+                    # 那条路本来就过一道时间平滑，配准这条之前漏了。实测加上之后：
+                    # 轨迹误差 0.173 -> 0.140，静止物体漂移 0.231 -> 0.084——后者原本是
+                    # 配准相对包围盒中心唯一的退步，平滑之后反超（包围盒中心是 0.170）。
+                    window = int(cfg["perception"]["motion"].get("registration_smooth_window", 15))
+                    registered = smooth_series(registered, window)
                     motion_positions = registered - registered[0] + c_a[0]
                     if len(tracked.get("orientations") or []) == len(q_a):
                         motion_quaternions = _registered_quats(q_a[0])
