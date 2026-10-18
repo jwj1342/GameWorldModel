@@ -119,7 +119,14 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             if _confidence(o.get("confidence")) is not None: static_node["confidence"] = _confidence(o["confidence"])
             program["static"].append(static_node)
             continue
-        first = o["obb"][0]; size = [float(max(s, 0.05)) for s in first["size"]]
+        # 位置和朝向取第一帧——`motion` 描述的轨迹就是从这一帧的位姿出发的，换一帧
+        # 会和运动对不上。但**尺寸**不随时间变，没有理由只信一帧：实测 300 个物体里
+        # 51 个（17%）的首帧最长边和逐帧中位差了四分之一以上，最狠的 test_00000
+        # 的 spool_6 首帧量出 4.34 m、中位只有 0.93 m，差 4.68 倍。那一个物体会被
+        # 按 4.34 m 拉伸，挡住半个场景还拖不动（#64）。
+        # 同一个文件上面十几行，结构件走的就是逐帧中位，这里只是把两边拉齐。
+        first = o["obb"][0]
+        size = [float(max(s, 0.05)) for s in np.median(np.asarray([b["size"] for b in o["obb"]], float), 0)]
         node = {"id": slug(o["id"]), "class": o["class_guess"][:40],
                 "geom": {"kind": "asset", "query": o["class_guess"][:80], "extent": size}, "pose": {"pos": [float(v) for v in first["center"]], "quat": [float(v) for v in first["quat"]]},
                 "material": material_from_evidence(o), "notes": o["motion_guess"].get("notes", "")[:200]}
