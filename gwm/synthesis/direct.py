@@ -67,6 +67,40 @@ def motion_from_guess(mg: dict, obbs: list[dict]) -> dict | None:
     idx = np.unique(np.round(np.linspace(0, len(obbs) - 1, min(12, len(obbs)))).astype(int))
     return {"type": "trajectory", "interp": "linear", "keyframes": [{"t": float(ts[i]), "pos": [float(v) for v in cs[i]]} for i in idx]}
 
+def observed_trajectory(obbs: list[dict], min_span_frac: float) -> dict | None:
+    """判不出运动模型，但看得出它动了——那就把**观测到的轨迹**直接写进去。
+
+    这就是可交互性第一档「观测运动」：不需要知道它是 spin 还是 periodic_rotate，
+    只需要让它在场景里按视频里走过的路再走一遍。
+
+    判据是**位移相对物体自身对角线**，不是绝对米数。实测（十条真值感知片段、
+    moves=True 的 57 个物体）：
+
+      真会动的   整段最大位移中位 0.402 m，合自身对角线的 **1.71 倍**
+      误报的     0.055 m，合 **0.23 倍**
+
+    四分位几乎不重叠。按对角线比例扫阈值：
+
+      0.00 倍  留下 57  命中率 0.649  查全 0.902
+      0.40 倍  留下 38  命中率 0.868  查全 0.805   <- 默认
+      1.00 倍  留下 21  命中率 0.952  查全 0.488
+
+    用相对量不用绝对米数，是因为绝对阈值不是尺度不变的——这个坑这个项目踩过两次
+    （`max_dist_m`、`static_pos_thresh_m`），不想再踩第三次。
+    """
+    if len(obbs) < 3:
+        return None
+    centres = np.asarray([o["center"] for o in obbs], float)
+    span = float(np.linalg.norm(centres - centres[0], axis=1).max())
+    diag = float(np.linalg.norm(np.median([o["size"] for o in obbs], axis=0)))
+    if diag <= 1e-6 or span < min_span_frac * diag:
+        return None
+    ts = [o["t"] for o in obbs]
+    idx = np.unique(np.round(np.linspace(0, len(obbs) - 1, min(12, len(obbs)))).astype(int))
+    return {"type": "trajectory", "interp": "linear",
+            "keyframes": [{"t": float(ts[i]), "pos": [float(v) for v in centres[i]]} for i in idx]}
+
+
 def recentre_periodic(node: dict, obb: list[dict]) -> None:
     """periodic_* 的 pose.pos 必须是振荡中心（见 prompts/common_dsl.md）。模型常给成首帧位置，
     那样整条轨迹会偏掉最多一个振幅，这里按观测中心改回来。"""
@@ -142,13 +176,21 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             if base: node["pose"]["pos"] = base
             node["motion"] = m
         elif o["motion_guess"].get("moves") is True:
-            # 运动模型判不出来，但「它在动」这件事是判得出来的，而且判得挺准：
-            # 真值感知上会动的查全 0.929（见 #7）。原来这两件事绑在一起——七分类
-            # 过不了闸，连「它会动」也一起丢掉，节点默默变成一个静止的盒子。
-            # 这里先只记进 notes：往程序里写一个猜的运动模型会穿帮，但把观测到的
-            # 事实记下来不会。要让它真的影响渲染和交互，得先给 schema 加字段。
-            node["notes"] = (f"观测到它在动，但运动模型判不出来"
-                             f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
+            # 运动模型判不出来，但「它在动」这件事判得出来，而且判得挺准（查全 0.925）。
+            # 原来这两件事绑在一起——七分类过不了闸，连「它会动」也一起丢掉，节点默默
+            # 变成一个静止的盒子。
+            #
+            # 不写一个**猜的**参数化模型（那会穿帮，也正是那两道闸存在的理由），
+            # 而是把**观测到的轨迹**原样写进去：第一档要的就是「在场景里把视频里走过
+            # 的路再走一遍」，它不需要知道这是 spin 还是 periodic_rotate。
+            frac = float((cfg or {}).get("synthesis", {}).get("observed_motion_min_span_frac", 0.4))
+            observed = observed_trajectory(o["obb"], frac)
+            if observed:
+                node["motion"] = observed
+                node["notes"] = "运动模型判不出来，按观测到的轨迹回放"
+            else:
+                node["notes"] = (f"观测到它在动，但位移太小、模型也判不出来"
+                                 f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
         if any(c["with_id"] == "ground" for c in o.get("contacts", [])) and g: node["support"] = "ground"
         program["objects"].append(node)
     return program

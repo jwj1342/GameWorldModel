@@ -64,6 +64,38 @@ def test_位置仍然取第一帧而不是中位():
     assert abs(node["pose"]["pos"][0] - 2.0) > 1e-6, "位置被误改成了逐帧中位"
 
 
+def test_判不出模型但动得够多时按观测轨迹回放():
+    """这就是可交互性第一档「观测运动」：不需要知道它是 spin 还是 periodic_rotate，
+    只需要让它在场景里把视频里走过的路再走一遍。
+
+    之前这一档是零：七分类过不了闸 -> unknown -> 不写 motion -> 节点变成静止的盒子。
+    """
+    n = 10
+    sizes = [[0.4, 0.4, 0.4]] * n
+    centres = [[i * 0.3, 0.5, 0.0] for i in range(n)]      # 走 2.7 米，远超自身对角线
+    ev = evidence_with_sizes(sizes, centres)
+    ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": True}
+    node = only_object(evidence_to_program(ev, "c", {}))
+    assert node.get("motion", {}).get("type") == "trajectory", f"没写轨迹：{node.get('motion')}"
+    keys = node["motion"]["keyframes"]
+    assert len(keys) >= 3
+    走过 = max(abs(k["pos"][0] - keys[0]["pos"][0]) for k in keys)
+    assert 走过 > 2.0, f"轨迹没把位移带上：{走过}"
+
+
+def test_位移小于自身对角线的那一档不写运动():
+    """误报主要落在位移很小的那些：实测真会动的位移合自身对角线 1.71 倍，
+    误报只有 0.23 倍。不设这道闸，命中率只有 0.649。"""
+    n = 10
+    sizes = [[0.4, 0.4, 0.4]] * n
+    centres = [[i * 0.005, 0.5, 0.0] for i in range(n)]    # 一共才动 4.5 厘米
+    ev = evidence_with_sizes(sizes, centres)
+    ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": True}
+    node = only_object(evidence_to_program(ev, "c", {}))
+    assert "motion" not in node, "位移这么小不该写运动，那是误报的主力"
+    assert "位移太小" in node.get("notes", "")
+
+
 def test_判不出运动模型但判得出它在动时要记下来():
     """「它会动」和「它怎么动」是两件信息量差很远的事，不该绑在一起丢掉。
 
@@ -79,7 +111,7 @@ def test_判不出运动模型但判得出它在动时要记下来():
     ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown",
                                         "moves": True, "notes": "候选分不开"}
     node = only_object(evidence_to_program(ev, "c", {}))
-    assert "motion" not in node, "判不出模型就不该写 motion，写了会穿帮"
+    assert "motion" not in node, "判不出模型、又没动多少，就不该写 motion"
     assert "在动" in node.get("notes", ""), f"没记下来：{node.get('notes')!r}"
 
 
