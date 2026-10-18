@@ -30,3 +30,12 @@ def test_旧的判定文件没有这一项时不动它():
     v = discount_untrusted({"reached_goal": True, "playable": True})
     assert v["playable"] is True
     assert "playable_rule" not in v
+
+
+def test_取不到来源的时候不改判定():
+    # 老的 game 目录打包的是加这个接口之前的内核，binding 取不到，trustworthy 是 None。
+    # 这种情况下不敢说它可信，也不该把它判死——保持原样，由汇总那一步决定。
+    v = discount_untrusted({"reached_goal": True, "playable": True,
+                            "trustworthy": None, "binding": None})
+    assert v["playable"] is True
+    assert "playable_rule" not in v
