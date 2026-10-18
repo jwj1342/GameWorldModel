@@ -117,18 +117,65 @@ def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     return np.column_stack([np.interp(times, track["t"], track["pos"][:, k]) for k in range(3)])
 
 
+def _rms_radius(pts: np.ndarray) -> float:
+    return float(np.sqrt(((pts - pts.mean(0)) ** 2).sum(1).mean())) if len(pts) >= 2 else 0.0
+
+
 def gauge_scale_hint(gt_pts: np.ndarray, pred_pts: np.ndarray) -> float:
     """不靠任何对应关系估一个整体尺度：两边点集相对各自质心的均方半径之比。
 
     粗对齐那一步还没有任何配对，而尺度差上三倍的时候，按绝对米制阈值投票一对都投
     不出来——阈值不是尺度不变的。均方半径只用到点集自身的铺开程度，不需要知道谁对
-    应谁，正好拿来给粗对齐垫一脚。
+    应谁。
+
+    **但拿物体质心来算是不行的，实测过。** 这个链路的过检很重（112 个预测物体里
+    只有 21.4% 配上真值），预测那一边的点集大部分是噪声，它的铺开程度跟真实场景
+    没什么关系。用它去估尺度，解出来的倍数是 1.00、2.03、2.27、8.26、20.15 这种
+    数，比不估还差：配对 24 掉到 19，召回 0.464 掉到 0.226。
+    所以这个函数只是兜底，优先用 `camera_scale_hint`。
     """
-    if len(gt_pts) < 2 or len(pred_pts) < 2:
-        return 1.0
-    g = float(np.sqrt(((gt_pts - gt_pts.mean(0)) ** 2).sum(1).mean()))
-    q = float(np.sqrt(((pred_pts - pred_pts.mean(0)) ** 2).sum(1).mean()))
-    return g / q if q > 1e-9 else 1.0
+    g, q = _rms_radius(gt_pts), _rms_radius(pred_pts)
+    return g / q if q > 1e-9 and g > 0 else 1.0
+
+
+def camera_scale_hint(gt_states: list[dict], pred_states: list[dict],
+                      gt_pts: np.ndarray | None = None,
+                      pred_pts: np.ndarray | None = None) -> tuple[float, dict]:
+    """用**相机轨迹**估尺度，返回 (倍数, 诊断)。
+
+    相机是这条链路上唯一天然一一对应的东西：真值和预测各只有一条相机轨迹，不存在
+    检错、漏检、配错的问题。而物体那一边七成八是噪声，用它估尺度只会把噪声放大
+    （见 `gauge_scale_hint` 的注释）。
+
+    用均方半径之比而不是路径长度：路径长度对逐帧抖动敏感，重建出来的相机轨迹抖动
+    比真值大得多，会把尺度系统性地估大。
+
+    **相机不怎么动的时候这个估计不成立**，必须退回去。判据是无量纲的：相机轨迹的
+    均方半径要和物体点云的铺开程度可比，低于十分之一就认为相机基本是钉住的，这时
+    返回 1.0 并在诊断里说明——宁可不估，也不要用一个噪声主导的倍数去缩放整个场景。
+    """
+    def cam(states):
+        out = []
+        for s in states:
+            c = (s.get("camera") or {}).get("pos") if isinstance(s, dict) else None
+            if isinstance(c, (list, tuple)) and len(c) == 3 and np.isfinite(np.asarray(c, float)).all():
+                out.append([float(v) for v in c])
+        return np.asarray(out, float).reshape(-1, 3)
+
+    g_cam, p_cam = cam(gt_states), cam(pred_states)
+    info = {"gt_frames": len(g_cam), "pred_frames": len(p_cam)}
+    if len(g_cam) < 2 or len(p_cam) < 2:
+        return 1.0, {**info, "used": "none", "why": "相机轨迹点不够"}
+    g_r, p_r = _rms_radius(g_cam), _rms_radius(p_cam)
+    info.update({"gt_radius": round(g_r, 4), "pred_radius": round(p_r, 4)})
+    for pts, radius, side in ((gt_pts, g_r, "gt"), (pred_pts, p_r, "pred")):
+        spread = _rms_radius(pts) if pts is not None and len(pts) else 0.0
+        if spread > 0 and radius < 0.1 * spread:
+            return 1.0, {**info, "used": "none",
+                         "why": f"{side} 相机基本没动（轨迹半径 {radius:.3f} 不到场景铺开 {spread:.3f} 的十分之一）"}
+    if p_r <= 1e-9 or g_r <= 0:
+        return 1.0, {**info, "used": "none", "why": "轨迹半径退化"}
+    return g_r / p_r, {**info, "used": "camera", "scale": round(g_r / p_r, 4)}
 
 
 def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray,
@@ -196,7 +243,8 @@ def _rot_y(deg: float) -> np.ndarray:
 
 
 def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float,
-                 with_scale: bool = False) -> tuple[np.ndarray, np.ndarray, float, dict]:
+                 with_scale: bool = False,
+                 scale_hint: float | None = None) -> tuple[np.ndarray, np.ndarray, float, dict]:
     """粗对齐：枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取对上最多的那个。
 
     拿两边质心之差做粗对齐有两个毛病。一是多一个假物体、或者少检出一个真物体，
@@ -214,7 +262,12 @@ def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float,
         return best_R, best_t, 1.0, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
     # 阈值不是尺度不变的：尺度差上三倍，按绝对米制投票一对都投不出来，后面估偏航
     # 那步根本启动不了。所以开了尺度之后先用不需要对应关系的均方半径之比垫一脚。
-    s0 = gauge_scale_hint(gt_pts, pred_pts) if with_scale else 1.0
+    if not with_scale:
+        s0 = 1.0
+    elif scale_hint is not None and np.isfinite(scale_hint) and scale_hint > 0:
+        s0 = float(scale_hint)
+    else:
+        s0 = gauge_scale_hint(gt_pts, pred_pts)
     pred_pts = pred_pts * s0
     for yaw in _AXIS_YAWS_DEG:
         R = _rot_y(yaw)
@@ -329,7 +382,11 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             return _sample(track, ts).mean(0) if len(ts) else track["pos"].mean(0)
         gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
         pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
-        R0, t0v, s0, coarse = coarse_gauge(gt_c, pred_c, max_dist_m, with_scale)
+        hint, hint_info = ((None, {"used": "off"}) if not with_scale else
+                           camera_scale_hint(gt_states, pred_states, gt_c, pred_c))
+        R0, t0v, s0, coarse = coarse_gauge(gt_c, pred_c, max_dist_m, with_scale,
+                                           hint if hint and hint != 1.0 else None)
+        coarse["scale_source"] = hint_info
         rough = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in observed_pred.items()}
         gp, pp = [], []
         for g, q, _ in match_objects(observed_gt, rough, obs_times, max_dist_m):
@@ -338,7 +395,12 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             if len(ts):
                 gp.append(_sample(observed_gt[g], ts)); pp.append(_sample(observed_pred[q], ts))
         if gp:
-            R0, t0v, s0 = align_gauge(np.vstack(gp), np.vstack(pp), with_scale)
+            # 精对齐**不再自由解尺度**：配对集是在 s0 这个尺度下筛出来的（容差 0.45 米
+            # 是绝对量），在它上面再解一次尺度就是用结论挑样本再在样本上算结论。
+            # s0 由相机轨迹定下来之后就冻住，这和平移、偏航冻在观察段是同一个道理。
+            # 注意要喂**已经乘过 s0 的**预测点：最终应用的是 s0*(p@R.T)+t，
+            # 在未缩放的点上解 R、t 会和它差一个 s0。
+            R0, t0v, _s = align_gauge(np.vstack(gp), s0 * np.vstack(pp), with_scale=False)
     aligned = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in pred_tr.items()}
 
     # 配对判据。默认 "mean"（观察窗内逐时刻距离的平均）是历史口径，但它**把被评测的量
@@ -445,6 +507,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             "gauge_alignment": {"yaw_deg": round(float(np.degrees(np.arctan2(R0[0, 2], R0[0, 0]))), 2),
                                 "translation_xz_m": [round(float(t0v[0]), 3), round(float(t0v[2]), 3)],
                                 "mode": gauge, "scale": round(float(s0), 4),
+                                "scale_source": coarse.get("scale_source", {"used": "off"}),
                                 "fitted_on_s": [round(t_start, 3), round(cut, 3)], "coarse": coarse,
                                 "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，"
                                         "否则是在罚一个确定不了的量。变换与身份对应都在观察段定死后冻住，"

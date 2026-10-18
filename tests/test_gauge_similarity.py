@@ -97,3 +97,54 @@ def test_评测入口认这个参数并记下来():
 
     with pytest.raises(ValueError):
         evaluate(gt_prog, pred_prog, states(gt_prog), states(pred_prog), gauge="affine")
+
+
+def _states(positions_per_t, cam_per_t):
+    out = []
+    for t, (objs, cam) in enumerate(zip(positions_per_t, cam_per_t)):
+        out.append({"t": float(t) * 0.5, "camera": {"pos": list(cam)},
+                    "objects": [{"id": f"o{i}", "name": f"o{i}", "kind": "object",
+                                 "pos": list(p)} for i, p in enumerate(objs)]})
+    return out
+
+
+def test_相机轨迹估尺度_不受过检影响():
+    """物体那一边七成八是噪声，用它估尺度只会放大噪声；相机是天然一一对应的。"""
+    from gwm.feedback.gt_metrics import camera_scale_hint
+    gt_cam = [(0, 1.1, 0), (2.0, 1.1, 0), (4.0, 1.1, 0)]
+    pred_cam = [(0, 0.3, 0), (0.5, 0.3, 0), (1.0, 0.3, 0)]      # 整体小四倍
+    objs = [[(0, 0, 0), (5, 0, 0)]] * 3
+    gt_s = _states(objs, gt_cam)
+    pred_s = _states([[(0, 0, 0)] + [(j, 0, j) for j in range(9)]] * 3, pred_cam)
+    s, info = camera_scale_hint(gt_s, pred_s)
+    assert s == pytest.approx(4.0, rel=1e-6), "预测那边多出九个幻觉物体也不该影响它"
+    assert info["used"] == "camera"
+
+
+def test_相机不动就不估_宁可不估也别用噪声():
+    from gwm.feedback.gt_metrics import camera_scale_hint
+    still = [(0, 1.1, 0), (0, 1.1, 0), (0, 1.1, 0)]
+    gt_s = _states([[(0, 0, 0), (5, 0, 0)]] * 3, still)
+    pred_s = _states([[(0, 0, 0), (5, 0, 0)]] * 3, still)
+    spread = np.asarray([[0, 0, 0], [5.0, 0, 0]])
+    s, info = camera_scale_hint(gt_s, pred_s, spread, spread)
+    assert s == 1.0 and info["used"] == "none"
+    assert "没动" in info["why"]
+
+
+def test_物体质心估尺度是兜底_注释里记着它实测更差():
+    """保留这条是为了钉住事实：`gauge_scale_hint` 在真数据上解出 1.00/2.03/2.27/
+    8.26/20.15，配对 24 掉到 19、召回 0.464 掉到 0.226。它只在相机估不出来时兜底。"""
+    gt = ring()
+    assert gauge_scale_hint(gt, gt * 0.25) == pytest.approx(4.0, rel=1e-6)
+    assert gauge_scale_hint(gt, np.zeros((5, 3))) == 1.0      # 退化就别猜
+
+
+def test_尺度在配对之前就冻住():
+    """配对集是在某个尺度下按 0.45 米容差筛出来的，再在它上面解一次尺度就是
+    用结论挑样本再在样本上算结论——#68 里记过同一个坑。"""
+    import inspect
+    from gwm.feedback import gt_metrics
+    src = inspect.getsource(gt_metrics.evaluate)
+    assert "align_gauge(np.vstack(gp), s0 * np.vstack(pp), with_scale=False)" in src, \
+        "精对齐那一步不许再自由解尺度"
