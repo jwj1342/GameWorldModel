@@ -67,6 +67,8 @@ def main() -> int:
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--likeness", action="store_true",
                     help="把重建的场景按输入相机轨迹重渲染，和原视频比相似度")
+    ap.add_argument("--no-scale", action="store_true",
+                    help="跳过度量尺度与尺寸回收，用于消融")
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
     ap.add_argument("--no-image-retrieval", action="store_true",
@@ -125,7 +127,8 @@ def main() -> int:
                     vlm_sizes[str(item["phrase"]).lower()] = item["size_m"]
         except (OSError, ValueError):
             pass
-    factor, scale_report = estimate_metric_scale(program, vlm_sizes)
+    factor, scale_report = ((1.0, {"factor": 1.0, "samples": [], "source": "skipped"})
+                            if a.no_scale else estimate_metric_scale(program, vlm_sizes))
     if abs(factor - 1.0) > 1e-6:
         program = scale_program(program, factor)
         program.setdefault("meta", {})["metric_scale"] = round(factor, 4)
@@ -137,7 +140,7 @@ def main() -> int:
 
     # 全局尺度之后再单独处理个别离谱的物体：小物体的包围盒被深度噪声撑大，
     # 实测同一段视频里玩具火车会被量成一米一，而桌子只差百分之十几。
-    resized = regularize_object_sizes(program, vlm_sizes)
+    resized = [] if a.no_scale else regularize_object_sizes(program, vlm_sizes)
     if resized:
         print(f"尺寸回收: {len(resized)} 个物体 "
               f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
