@@ -380,6 +380,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     """
     from gwm.perception.masks import resize_mask
     gt_quat = _gt_quaternions(run)
+    poses = _gt_poses(run)
     if not gt_quat:
         return {}
     geom = load_geometry(run / "geometry.npz")
@@ -417,7 +418,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 这里用真值位姿把各帧点云摆回物体自身坐标系、并起来当模型——它是个**预言机
         # 上界**（真实链路拿不到真值位姿），用来回答「完整性这个论点在真实数据上
         # 还成不成立」，再决定要不要去啃资产网格那条路。
-        template_deg = _template_rotation_deg(clouds, frames, series)
+        template_deg = _template_rotation_deg(clouds, frames, poses.get(oid) or {})
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -448,27 +449,56 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
 CURRENT_CLIP_DIR: Path | None = None
 
 
-def _template_rotation_deg(clouds: list, frames: list, series: dict) -> np.ndarray:
-    """用真值位姿拼出完整模型，再把每一帧配回去。预言机上界，不是可落地的做法。"""
+def _template_rotation_deg(clouds: list, frames: list, poses: dict) -> np.ndarray:
+    """用真值位姿拼出完整模型，再把每一帧配回去。预言机上界，不是可落地的做法。
+
+    拼模型**必须用真值位置**，不能用每一帧点云自己的质心：局部视角下可见点的质心
+    随视角移动（看正面和看侧面，可见点的质心不在同一处），按它归零拼出来的模型是
+    糊的，配进去的每一帧还带一个和姿态相关的平移偏差，ICP 得拿旋转去吸收。
+    第一版就是按质心拼的，于是 spin 从 114° 被压到 38°，而那是拼法的错不是方法的。
+    不转的物体不受影响（姿态不变，质心偏差是常数，不产生旋转），所以当时假转动
+    那一半的结论是稳的。
+
+    配准这一步**不用真值**：每一帧的原始点云直接配到模型上，ICP 自己解平移和旋转，
+    上一帧的解当这一帧的初值（暖启动，`track_rigid` 在另一条路上也是这么做的）。
+    """
     from gwm.perception.registration import icp
     pieces = []
     for cloud, f in zip(clouds, frames):
-        q = series.get(f)
-        if q is None:
+        pose = poses.get(f)
+        if pose is None:
             return np.array([])
-        inv = R.from_quat(q).inv()
-        pieces.append((cloud - cloud.mean(0)) @ inv.as_matrix().T)
+        pos, quat = pose
+        pieces.append((cloud - np.asarray(pos, float)) @ R.from_quat(quat).inv().as_matrix().T)
     model = np.vstack(pieces)
     if len(model) > 20000:                       # 配准前先抽稀，否则 KD 树太慢
         model = model[np.linspace(0, len(model) - 1, 20000).astype(int)]
-    warm = np.eye(3)
+    warm_R, warm_t = np.eye(3), np.zeros(3)
     out = []
     for cloud in clouds:
-        centred = (cloud - cloud.mean(0)) @ warm.T
-        step = icp(centred, model)
-        warm = np.asarray(step["rotation"], float) @ warm
-        out.append(float(np.degrees(R.from_matrix(warm).magnitude())))
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _gt_poses(_run: Path) -> dict:
+    """逐帧真值位姿（位置 + 朝向），按物体 id 再按帧序号索引。"""
+    if CURRENT_CLIP_DIR is None:
+        return {}
+    states = CURRENT_CLIP_DIR / "gt_states.jsonl"
+    if not states.is_file():
+        return {}
+    out: dict = {}
+    for line in states.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        state = json.loads(line)
+        for obj in state.get("objects", []):
+            out.setdefault(obj["id"], {})[int(state["i"])] = (list(obj["pos"]), list(obj["quat"]))
+    return out
 
 
 def _gt_quaternions(_run: Path) -> dict:
