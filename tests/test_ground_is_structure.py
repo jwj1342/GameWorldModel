@@ -55,3 +55,12 @@ def test_名字里带地面的普通物体不受影响():
     # 只在类别**完全等于**地面词时才强制，不然「playground slide」这种会被误伤
     program = evidence_to_program(evidence([obj("slide_1", "playground slide", 0.05)]), "c", {})
     assert "slide_1" in ids(program["objects"])
+
+
+def test_分离时长有配置缺省值():
+    """默认开着 1.5 秒。扫参在两批数据上都是 1.5 最好，所以它该是缺省行为而不是一个
+    要记得加的命令行参数——忘了加的话这一项就白做了。"""
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
+    assert cfg["synthesis"]["separate_seconds"] == 1.5

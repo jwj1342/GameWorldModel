@@ -81,8 +81,9 @@ def main() -> int:
     ap.add_argument("--style-swap", action="store_true",
                     help="顺带量样式-行为解耦：换一套外形网格，轨迹应该一丝不差")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
-    ap.add_argument("--separate-seconds", type=float, default=0.0,
-                    help="重力稳定之前先跑多久的纯分离（不开重力，只把互相插着的顶开）")
+    ap.add_argument("--separate-seconds", type=float, default=None,
+                    help="重力稳定之前先跑多久的纯分离（不开重力，只把互相插着的顶开）。"
+                         "不给就用配置里的 synthesis.separate_seconds")
     ap.add_argument("--no-image-retrieval", action="store_true",
                     help="只用文字检索，用来和带图像检索的结果做对照")
     a = ap.parse_args()
@@ -184,7 +185,9 @@ def main() -> int:
     if result["ok"] and not a.no_settle:
         # 编译一次先把场景放进物理里稳一稳，再把采纳的位姿写回去重编译。
         # 感知给的是按可见表面拟合的包围盒中心，物体常常半悬空或互相穿插。
-        settled = _settle(Path(result["game_dir"]), out, a.settle_seconds, a.separate_seconds)
+        separate = (a.separate_seconds if a.separate_seconds is not None
+                    else float((cfg.get("synthesis") or {}).get("separate_seconds", 0.0)))
+        settled = _settle(Path(result["game_dir"]), out, a.settle_seconds, separate)
         rows = apply_settled(program, settled)
         taken = [r for r in rows if r["applied"]]
         timings["stabilised"] = len(taken)
