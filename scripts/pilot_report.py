@@ -47,6 +47,11 @@ def run_one(clip_dir: Path, out_dir: Path, extra: list[str]) -> dict:
     if report.is_file():
         info = json.loads(report.read_text(encoding="utf-8"))
         fidelity = info["completeness"]["fidelity"]
+        inter = info["completeness"].get("interactivity") or {}
+        # 实测可交互性只有带 --probe-interaction 跑的时候才有。没有就留空，不要拿
+        # 声明值顶上——这两个数差多少正是这一项存在的理由。
+        row["measured_interactive"] = inter.get("measured_success_fraction")
+        row["style_swap_deviation"] = inter.get("style_swap_max_deviation")
         row.update(objects=info["objects"], assets_resolved=info["assets_resolved"],
                    asset_coverage=fidelity.get("asset_coverage"),
                    pixel_coverage=fidelity.get("evidence_pixel_coverage"),
@@ -70,6 +75,7 @@ def summarise(rows: list[dict]) -> dict:
             "median_asset_coverage": med("asset_coverage"),
             "median_pixel_coverage": med("pixel_coverage"),
             "median_size_log_error": med("size_log_error"),
+            "median_measured_interactive": med("measured_interactive"),
             "median_metric_scale": med("metric_scale"),
             "median_seconds": med("seconds"),
             "total_hours": round(sum(r["seconds"] for r in rows) / 3600, 2)}
@@ -92,6 +98,7 @@ def main() -> int:
         print(f"[{i}/{len(clips)}] {row['clip']:<16} {row['seconds']:>6}s "
               f"物体 {row.get('objects', '-'):>3}/{row['gt_objects']:<3} "
               f"资产 {row.get('asset_coverage', '-')} 画面 {row.get('pixel_coverage', '-')}"
+              f"{' 能拖 ' + str(row['measured_interactive']) if row.get('measured_interactive') is not None else ''}"
               f"{'' if row['ok'] else '  失败'}", flush=True)
         (out / "pilot.json").write_text(json.dumps({"rows": rows}, ensure_ascii=False, indent=1),
                                         encoding="utf-8")
