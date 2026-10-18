@@ -227,6 +227,16 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         gt_rel = gt - gt[0]
         reg_rel = registered - registered[0]
         out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        # 模型吸收多少帧：转过半圈的物体，后半段看到的面可能根本不在模型里
+        for frames_in_model, tag in ((12, "m12"), (len(clouds), "mall")):
+            variant = track_rigid(clouds, model_frames=frames_in_model)
+            if variant["ok"] and len(variant["positions"]) == len(gt):
+                v = np.array(variant["positions"], float)
+                out.setdefault(f"step/{tag}", []).extend(
+                    np.linalg.norm((v - v[0]) - gt_rel, axis=1).tolist())
+                if is_static:
+                    out.setdefault(f"drift_static/{tag}", []).append(
+                        float(np.linalg.norm(v.max(0) - v.min(0))))
         plane = track_rigid(clouds, point_to_plane=True)
         if plane["ok"] and len(plane["positions"]) == len(gt):
             p_pos = np.array(plane["positions"], float)
