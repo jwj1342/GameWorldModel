@@ -48,7 +48,8 @@ def render_at(game_dir: Path, times: list[float], out_dir: Path, harness: str,
 def likeness(game_dir: Path, frames: list[dict], out_dir: Path, harness: str,
              weights_dir: str | Path, count: int = 8,
              width: int = 640, height: int = 360,
-             unrelated_frames: list[str] | None = None) -> dict:
+             unrelated_frames: list[str] | None = None,
+             unrelated_game: Path | None = None) -> dict:
     """返回重建场景和原视频的相似度，**连同两条标尺**。
 
     光报一个 0.19 没有意义：DINOv2 在两张毫不相干的图之间也有 0.1 上下的相似度。
@@ -56,8 +57,12 @@ def likeness(game_dir: Path, frames: list[dict], out_dir: Path, harness: str,
 
     * `reference_self`：原视频不同时刻的两帧互相比。这是「同一个场景、不同视角」的
       相似度，也就是我们能指望的上限——重建得再好，视角和光照的差异也还在。
-    * `reference_unrelated`：原帧和**另一段视频**的帧比。这是下限，相当于「完全没
-      重建对」时这个数会是多少。
+    * `reference_unrelated`：原帧和**另一段视频**的帧比。这条只能当粗略参照——
+      真实视频之间共享「这是照片」这类低层统计，低多边形渲染没有，所以它同时
+      混进了领域差异，比真正的下限偏高。
+    * `reference_other_render`：**另一条片段重建出来的场景**渲染图，和本片段的原帧比。
+      这才是干净的下限：同样是低多边形渲染、同样的领域，唯一的区别是场景不对。
+      归一化用的是这一条。
 
     重建的分落在这两条之间的什么位置，才是真正能读的东西。
 
@@ -107,8 +112,29 @@ def likeness(game_dir: Path, frames: list[dict], out_dir: Path, harness: str,
             others = [dino.embed(f) for f in unrelated_frames[:len(embeddings)]]
             cross = [float(a @ b) for a in embeddings for b in others]
             out["reference_unrelated"] = round(float(np.median(cross)), 4)
-            span = out["reference_self"] - out["reference_unrelated"]
+        # 干净的下限：另一条片段的重建场景渲染图，对本片段的原帧
+        floor = None
+        if unrelated_game is not None:
+            other_dir = out_dir / "other_render"
+            other = render_at(Path(unrelated_game), times, other_dir, harness, width, height)
+            if other["ok"]:
+                cross = []
+                for entry in other["index"].get("frames", []):
+                    rgb = entry.get("files", {}).get("rgb")
+                    if not rgb:
+                        continue
+                    vector = dino.embed(other_dir / rgb)
+                    cross.extend(float(vector @ e) for e in embeddings)
+                if cross:
+                    floor = float(np.median(cross))
+                    out["reference_other_render"] = round(floor, 4)
+        if floor is None:
+            floor = out.get("reference_unrelated")
+        if floor is not None:
+            span = out["reference_self"] - floor
             if span > 1e-6:
-                # 重建的分落在下限和上限之间的什么位置，0 是完全没重建对，1 是追平了
-                out["normalised"] = round((out["median"] - out["reference_unrelated"]) / span, 3)
+                # 重建的分落在下限和上限之间的什么位置，0 是场景完全没对上，1 是追平上限
+                out["normalised"] = round((out["median"] - floor) / span, 3)
+                out["normalised_against"] = ("other_render" if "reference_other_render" in out
+                                             else "unrelated_video")
     return out

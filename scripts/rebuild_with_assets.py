@@ -206,17 +206,22 @@ def main() -> int:
             others = [r["file"] for r in rows[::max(1, len(rows) // 8)] if r.get("file")][:8]
             if others:
                 break
+        # 干净的下限：另一条片段重建出来的场景。同样是低多边形渲染，唯一的区别是场景不对。
+        other_game = next((g for g in sorted(out.parent.glob("*/game"))
+                           if g.parts[-2] != out.name and (g / "program.json").is_file()), None)
         like = likeness(Path(result["game_dir"]), frames_list, out / "likeness",
                         str(REPO / "scripts/node_harness.sh"),
                         Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"],
-                        unrelated_frames=others)
+                        unrelated_frames=others, unrelated_game=other_game)
         completeness["likeness"] = like
         if like.get("ok"):
             scale = ""
             if like.get("reference_self") is not None:
                 scale = f"；标尺 上限 {like['reference_self']}"
-                if like.get("reference_unrelated") is not None:
-                    scale += (f" 下限 {like['reference_unrelated']}"
+                floor_key = ("reference_other_render" if "reference_other_render" in like
+                             else "reference_unrelated")
+                if like.get(floor_key) is not None:
+                    scale += (f" 下限 {like[floor_key]}（{like.get('normalised_against')}）"
                               f"，归一化 {like.get('normalised')}")
             print(f"重渲染相似度: 中位数 {like['median']}（{like['n']} 帧，"
                   f"范围 {like['min']}~{like['max']}）{scale}", flush=True)
