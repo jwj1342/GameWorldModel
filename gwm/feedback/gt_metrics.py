@@ -117,8 +117,36 @@ def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     return np.column_stack([np.interp(times, track["t"], track["pos"][:, k]) for k in range(3)])
 
 
-def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """估计把预测对齐到真值的水平平移加绕 y 轴旋转，返回 (R, t)。
+def gauge_scale_hint(gt_pts: np.ndarray, pred_pts: np.ndarray) -> float:
+    """不靠任何对应关系估一个整体尺度：两边点集相对各自质心的均方半径之比。
+
+    粗对齐那一步还没有任何配对，而尺度差上三倍的时候，按绝对米制阈值投票一对都投
+    不出来——阈值不是尺度不变的。均方半径只用到点集自身的铺开程度，不需要知道谁对
+    应谁，正好拿来给粗对齐垫一脚。
+    """
+    if len(gt_pts) < 2 or len(pred_pts) < 2:
+        return 1.0
+    g = float(np.sqrt(((gt_pts - gt_pts.mean(0)) ** 2).sum(1).mean()))
+    q = float(np.sqrt(((pred_pts - pred_pts.mean(0)) ** 2).sum(1).mean()))
+    return g / q if q > 1e-9 else 1.0
+
+
+def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray,
+                with_scale: bool = False) -> tuple[np.ndarray, np.ndarray, float]:
+    """估计把预测对齐到真值的水平平移加绕 y 轴旋转，返回 (R, t, s)。
+
+    `with_scale=False`（默认）时 s 恒为 1.0，行为和以前完全一样。开了之后多估一个
+    各向同性的整体尺度，也就是从刚性变换换成相似变换。
+
+    **为什么要有这个开关。** 尺度本来不算规范自由度：它由 `assumed_camera_height_m`
+    定死，所以是可观测的、该被罚的。但实测发现这个假设是个常数而取景不是——ab015
+    这一批真值相机高度从 0.62 米到 3.89 米，41.7% 的片段在两米以上，而假设恒为
+    1.2 米，于是俯拍那批被压小三到八倍（#68）。配对容差是 0.45 米的绝对值，在这个
+    尺度下它们根本配不上，于是「尺度错了」被记成了「检测不出来」，其它所有指标都
+    跟着不可解释。
+    
+    开了尺度之后报出来的数**不是**更好的成绩，是另一个问题的答案：「把尺度这一条
+    刨掉之后，还剩多少误差」。两者要并排看，刚性那一列仍然是主口径。
 
     单目视频确定不了世界原点的水平位置，也确定不了整体朝向——那是规范自由度，
     任何一个选择都同样合法。感知那边 align_world 只把地面压到 y=0，
@@ -133,7 +161,8 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
     尺度也不对齐：那由假设的相机高度定死，算可观测。
     """
     if len(gt_pts) < 2:
-        return np.eye(3), (gt_pts.mean(0) - pred_pts.mean(0)) * [1, 0, 1] if len(gt_pts) else np.zeros(3)
+        t = (gt_pts.mean(0) - pred_pts.mean(0)) * [1, 0, 1] if len(gt_pts) else np.zeros(3)
+        return np.eye(3), t, 1.0
     gc, pc = gt_pts.mean(0), pred_pts.mean(0)
     g, q = gt_pts - gc, pred_pts - pc
     # 只在水平面上求最佳偏航，用 Kabsch 的二维特例
@@ -142,9 +171,20 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
     d = np.sign(np.linalg.det(Vt.T @ U.T))
     R2 = Vt.T @ np.diag([1.0, d]) @ U.T
     R = np.eye(3); R[0, 0], R[0, 2], R[2, 0], R[2, 2] = R2[0, 0], R2[0, 1], R2[1, 0], R2[1, 1]
-    t = gc - R @ pc
-    t[1] = 0.0                      # 高度不动，它是可观测的
-    return R, t
+    # 尺度和旋转一起解（Umeyama）：先把旋转定下来，再取「对齐后的内积」比「预测的
+    # 平方和」。注意高度也参与——尺度是各向同性的，只在水平面上估会和 y 方向打架。
+    s = 1.0
+    if with_scale:
+        denom = float((q ** 2).sum())
+        if denom > 1e-12:
+            s = float((g * (q @ R.T)).sum() / denom)
+        if not np.isfinite(s) or s <= 1e-6:
+            s = 1.0
+    t = gc - s * (R @ pc)
+    # 高度不参与对齐，开不开尺度都一样：两边的地面都已经在 y=0，预测整体乘上 s
+    # 之后地面还在 y=0，不需要再平移。放开 t[1] 会把真实的高度误差吸收掉。
+    t[1] = 0.0
+    return R, t, s
 
 
 _AXIS_YAWS_DEG = (0.0, 90.0, 180.0, 270.0)
@@ -155,7 +195,8 @@ def _rot_y(deg: float) -> np.ndarray:
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
 
 
-def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) -> tuple[np.ndarray, np.ndarray, dict]:
+def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float,
+                 with_scale: bool = False) -> tuple[np.ndarray, np.ndarray, float, dict]:
     """粗对齐：枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取对上最多的那个。
 
     拿两边质心之差做粗对齐有两个毛病。一是多一个假物体、或者少检出一个真物体，
@@ -170,7 +211,11 @@ def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) ->
     """
     best_R, best_t, best_in, best_cost = np.eye(3), np.zeros(3), -1, np.inf
     if not len(gt_pts) or not len(pred_pts):
-        return best_R, best_t, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
+        return best_R, best_t, 1.0, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
+    # 阈值不是尺度不变的：尺度差上三倍，按绝对米制投票一对都投不出来，后面估偏航
+    # 那步根本启动不了。所以开了尺度之后先用不需要对应关系的均方半径之比垫一脚。
+    s0 = gauge_scale_hint(gt_pts, pred_pts) if with_scale else 1.0
+    pred_pts = pred_pts * s0
     for yaw in _AXIS_YAWS_DEG:
         R = _rot_y(yaw)
         rotated = pred_pts @ R.T
@@ -184,8 +229,9 @@ def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) ->
                 cost = float(nearest[inside].sum()) if inliers else np.inf
                 if (inliers, -cost) > (best_in, -best_cost):
                     best_R, best_t, best_in, best_cost = R, t.copy(), inliers, cost
-    return best_R, best_t, {"yaw_deg": round(float(np.degrees(np.arctan2(best_R[0, 2], best_R[0, 0]))), 2),
-                            "inliers": best_in, "candidates": len(_AXIS_YAWS_DEG) * len(gt_pts) * len(pred_pts)}
+    return best_R, best_t, s0, {"yaw_deg": round(float(np.degrees(np.arctan2(best_R[0, 2], best_R[0, 0]))), 2),
+                                "inliers": best_in, "scale_hint": round(float(s0), 4),
+                                "candidates": len(_AXIS_YAWS_DEG) * len(gt_pts) * len(pred_pts)}
 
 
 def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray, max_dist_m: float) -> list[tuple]:
@@ -221,7 +267,7 @@ def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray,
 
 def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_states: list[dict],
              holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120,
-             match_on: str = "mean",
+             match_on: str = "mean", gauge: str = "rigid",
              min_time_coverage: float | None = None) -> dict:
     """Keep existing metric keys, using a GT window and frozen prefix identities."""
     if min_time_coverage is None:
@@ -229,6 +275,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     if (isinstance(min_time_coverage, bool) or not isinstance(min_time_coverage, (int, float))
             or not np.isfinite(min_time_coverage) or not 0 <= min_time_coverage <= 1):
         raise ValueError("min_time_coverage must be finite and within [0, 1]")
+    if gauge not in ("rigid", "similarity"):
+        raise ValueError('gauge must be "rigid" or "similarity"')
     if match_on not in ("mean", "start"):
         raise ValueError("match_on must be 'mean' or 'start'")
     if not 0 < holdout_frac < 1 or n_samples < 2 or not np.isfinite(max_dist_m) or max_dist_m < 0:
@@ -272,15 +320,17 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     # 规范自由度，不先对齐掉，整体差着 8 米时一对都配不上；而配对已经冻在观察段，
     # 对齐就不能再留在 window() 里按窗口各算各的——那样留出段会重新拟合，
     # 把末段的共同偏移当成规范差异吸收掉。
-    R0, t0v, coarse = np.eye(3), np.zeros(3), {"inliers": 0, "candidates": 0, "yaw_deg": 0.0}
+    R0, t0v, s0 = np.eye(3), np.zeros(3), 1.0
+    coarse = {"inliers": 0, "candidates": 0, "yaw_deg": 0.0}
+    with_scale = gauge == "similarity"
     if observed_pred:
         def centroid(track):
             ts = _supported(obs_times, track)
             return _sample(track, ts).mean(0) if len(ts) else track["pos"].mean(0)
         gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
         pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
-        R0, t0v, coarse = coarse_gauge(gt_c, pred_c, max_dist_m)
-        rough = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in observed_pred.items()}
+        R0, t0v, s0, coarse = coarse_gauge(gt_c, pred_c, max_dist_m, with_scale)
+        rough = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in observed_pred.items()}
         gp, pp = [], []
         for g, q, _ in match_objects(observed_gt, rough, obs_times, max_dist_m):
             if q is None: continue
@@ -288,8 +338,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             if len(ts):
                 gp.append(_sample(observed_gt[g], ts)); pp.append(_sample(observed_pred[q], ts))
         if gp:
-            R0, t0v = align_gauge(np.vstack(gp), np.vstack(pp))
-    aligned = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
+            R0, t0v, s0 = align_gauge(np.vstack(gp), np.vstack(pp), with_scale)
+    aligned = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in pred_tr.items()}
 
     # 配对判据。默认 "mean"（观察窗内逐时刻距离的平均）是历史口径，但它**把被评测的量
     # 写进了配对条件**：一个真值里走了几米的物体，如果我们把它的运动写成 static，
@@ -394,6 +444,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         return {
             "gauge_alignment": {"yaw_deg": round(float(np.degrees(np.arctan2(R0[0, 2], R0[0, 0]))), 2),
                                 "translation_xz_m": [round(float(t0v[0]), 3), round(float(t0v[2]), 3)],
+                                "mode": gauge, "scale": round(float(s0), 4),
                                 "fitted_on_s": [round(t_start, 3), round(cut, 3)], "coarse": coarse,
                                 "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，"
                                         "否则是在罚一个确定不了的量。变换与身份对应都在观察段定死后冻住，"

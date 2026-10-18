@@ -322,20 +322,20 @@ def test_gauge_alignment_absorbs_unobservable_but_not_real_errors():
     gt = np.array([[0.0, 0, 0], [4.0, 0, 0], [0.0, 0, 3.0], [4.0, 1, 3.0]])
 
     # 整体平移：观测不到，对齐之后残差应当接近 0
-    R, t = align_gauge(gt, gt + np.array([8.3, 0, -5.0]))
+    R, t, _s = align_gauge(gt, gt + np.array([8.3, 0, -5.0]))
     assert np.abs((gt + np.array([8.3, 0, -5.0])) @ R.T + t - gt).max() < 1e-6
 
     # 整体偏航：同样观测不到
     a = np.radians(37.0)
     Ry = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
-    R, t = align_gauge(gt, gt @ Ry.T)
+    R, t, _s = align_gauge(gt, gt @ Ry.T)
     assert np.abs((gt @ Ry.T) @ R.T + t - gt).max() < 1e-6
 
     # 相对结构错了：只挪动其中一个物体，对齐吃不掉，残差必须留下来
     broken = gt.copy(); broken[1] += np.array([2.0, 0, 0])
-    R, t = align_gauge(gt, broken)
+    R, t, _s = align_gauge(gt, broken)
     assert np.abs(broken @ R.T + t - gt).max() > 0.5
 
     # 高度不对齐，y 方向是可观测的（地面已经压到 y=0）
-    R, t = align_gauge(gt, gt + np.array([0, 1.5, 0]))
+    R, t, _s = align_gauge(gt, gt + np.array([0, 1.5, 0]))
     assert abs(t[1]) < 1e-9
