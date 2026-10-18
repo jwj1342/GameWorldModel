@@ -7,7 +7,11 @@
 //
 // 注意内核只在非 headless 模式下才 attach 指针事件，所以这里开的是交互模式。
 //
-// 用法: node_harness.sh drag_check.mjs --game <目录> [--out <json>] [--pixels 120]
+// 用法: node_harness.sh drag_check.mjs --game <目录> [--out <json>] [--pixels 120] [--shots <目录>]
+//      --shots 会存三张截图：按下前、拖住时、松手后。给文档配图用。
+//      --mode replay 用视频自己的视角而不是第三人称游玩视角。这也是对「切模式时
+//      操纵器的相机要跟着换」的检查——不换的话看到的是视频视角、射线却从玩家那台
+//      相机出发，点哪儿都打偏。
 import fs from 'node:fs';
 import path from 'node:path';
 import { openGame, parseArgs } from './common.mjs';
@@ -15,12 +19,14 @@ import { openGame, parseArgs } from './common.mjs';
 const args = parseArgs(process.argv.slice(2));
 const W = Number(args.w ?? 640), H = Number(args.h ?? 360);
 const pixels = Number(args.pixels ?? 120);
+const mode = args.mode === 'replay' ? 'replay' : 'play';
 const g = await openGame(args.game, { width: W, height: H, interactive: true,
                                       logFile: args.out ? path.join(path.dirname(args.out), 'drag.log') : null });
 
 // 先让场景稳一秒再取坐标。开场那几百毫秒里玩家胶囊在下落、第三人称相机跟着动，
 // 这时候算出来的屏幕坐标到按下鼠标的时候已经不对了——第一版就是这么写的，
 // 结果鼠标按在了空处，一个事件都没触发。
+await g.page.evaluate((m) => window.__game.mode(m), mode);
 await g.page.waitForTimeout(1000);
 
 // 挑一个在画面里、而且射线真能打中的物体。靠近画面中心的优先：边上的容易被视锥裁掉。
@@ -52,7 +58,14 @@ if (!target) {
   process.exit(0);
 }
 
+const shot = async (name) => {
+  if (!args.shots) return;
+  fs.mkdirSync(args.shots, { recursive: true });
+  await g.page.screenshot({ path: path.join(args.shots, `${name}.png`) });
+};
+
 const [x, y] = target.px;
+await shot('1_before');
 // 按下之前在同一个像素上复核一次。相机仍然可能在动，这一下能把「鼠标按在空处」
 // 和「按对了但拖不动」区分开——两者的现象都是物体没动。
 const recheck = await g.page.evaluate(([px, py, w, h]) => {
@@ -65,10 +78,12 @@ await g.page.mouse.move(x, y);
 await g.page.mouse.down();
 await g.page.mouse.move(x + pixels, y - pixels, { steps: 24 });
 await g.page.waitForTimeout(400);                        // 让物理跟上来
+await shot('2_held');
 const whileHeld = await g.page.evaluate((id) =>
   window.__game.registry.find(e => e.id === id).group.position.toArray(), target.id);
 await g.page.mouse.up();
 await g.page.waitForTimeout(600);                        // 松手之后落稳
+await shot('3_released');
 const after = await g.page.evaluate((id) =>
   window.__game.registry.find(e => e.id === id).group.position.toArray(), target.id);
 const log = await g.page.evaluate(() => window.__game.grabLog());
@@ -95,7 +110,7 @@ if (args.out) {
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, JSON.stringify(report, null, 1));
 }
-console.log(`鼠标拖 ${report.id}：按下在 (${report.screen_px})，移动 ${pixels} 像素，`
+console.log(`[${mode}] 鼠标拖 ${report.id}：按下在 (${report.screen_px})，移动 ${pixels} 像素，`
   + `物体位移 ${report.moved_while_held} m，事件 ${report.events.join('->')}`);
 if (report.dragged) console.log('真实鼠标这条路通的');
 else if (recheck !== target.id) console.log(`按下那一刻光标底下是 ${recheck}，不是 ${target.id}——取坐标和按下之间画面动了`);

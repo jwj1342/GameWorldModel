@@ -72,7 +72,10 @@ async function boot() {
     dragNdc: (x, y) => manipulator.dragTo(x, y),
     release: () => manipulator.release()?.id ?? null,
     grabLog: () => manipulator.log,
-    mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); return game.modeName; },
+    // 切模式时要把操纵器的相机也换过去：画面用 activeCamera() 渲染，而鼠标拾取是
+    // 从操纵器自己那台相机打射线的。两者不一致的话，在回放视角下点哪儿都打偏——
+    // 看到的是视频的视角，射线却从玩家那台相机出发。
+    mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); manipulator.camera = activeCamera(); return game.modeName; },
     step(dt = DT) {
       if (!Number.isFinite(dt) || dt <= 0) throw new Error('step needs a positive finite dt');
       if (hasSimulated && Math.abs(dt - DT) > 1e-12) throw new Error('dynamic step requires the fixed dt (1/60 s); use seek for sampling');
