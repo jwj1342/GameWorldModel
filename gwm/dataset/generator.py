@@ -14,6 +14,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from .framing import scale_program
 from .behavior import (BINDING_CLASSES, TEST_FAMILIES, TRAIN_FAMILIES,
                        sample_layout, sample_objects)
 from .style import sample_material, sample_style
@@ -33,6 +34,10 @@ class SceneSpec:
     fps: int = 30
     objects: int = 0                      # 0 = 按家族随机抽 1..8
     camera_track: str = ""                # 空 = 按 camera_seed 抽
+    stage_scale: float = 1.0              # 整体相似缩放。1.0 = 关卡尺度（原样）；
+                                          # 0.15 左右把场景缩到房间/桌面尺度，相机高度
+                                          # 随之落进手持的范围，和链路的标定假设对上。
+                                          # 见 gwm/dataset/framing.py 和 #68
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
 
@@ -148,7 +153,12 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
         "static": statics,
         "objects": objects,
     }
-    return program, {"camera_track": track, "family": spec.family, "profile": spec.profile}
+    # 整体相似缩放放在最后一步：生成逻辑一点不用改，缩放只动带长度量纲的字段。
+    # 场景内部的相对结构不变，变的只是它和「一米二高的手持相机」之间的比例。
+    if spec.stage_scale != 1.0:
+        program = scale_program(program, spec.stage_scale)
+    return program, {"camera_track": track, "family": spec.family, "profile": spec.profile,
+                     "stage_scale": spec.stage_scale}
 
 
 def generate(spec: SceneSpec) -> dict:

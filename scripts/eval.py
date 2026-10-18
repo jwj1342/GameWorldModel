@@ -182,7 +182,7 @@ def work_dir(work: Path, tag: str, identity: str) -> Path:
     return work / f"{tag}_{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
 
 
-def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None) -> dict:
+def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None, max_dist_m: float | None = None) -> dict:
     manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
     clip = manifest.get("clip", run.parent.name)
     configs = (manifest.get("args") or {}).get("config") or []
@@ -210,7 +210,13 @@ def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | No
                           duration, harness)
     pred_states = states_of(run / "program.json",
                             work_dir(work, f"{run.name}_pred", row["run"]), duration, harness)
-    row["metrics"] = evaluate(gt, json.loads(pred_bytes), gt_states, pred_states)
+    # 配对容差默认 3 米，是绝对量。场景尺度变了它就不再等价——在一个 3 米见方的场景里
+    # 3 米等于「什么都能配上」，在 21 米的场景里又很紧。跨尺度比较必须把它按场景一起缩，
+    # 否则比出来的是口径差异不是方法差异。不给就沿用原来的默认值。
+    extra = {} if max_dist_m is None else {"max_dist_m": float(max_dist_m)}
+    row["metrics"] = evaluate(gt, json.loads(pred_bytes), gt_states, pred_states, **extra)
+    if max_dist_m is not None:
+        row["max_dist_m"] = float(max_dist_m)
     return row
 
 
@@ -241,6 +247,9 @@ def main(argv: list[str]) -> int:
                     help="额外的真值根目录，可给多次。合成数据集产在 $SCRATCH 上，不在仓库里，"
                          "所以要从外面指进来；不从 run.json 读，那是这次运行自己用过的东西")
     ap.add_argument("--out", default="docs/results/eval_table.json")
+    ap.add_argument("--max-dist", type=float, default=None,
+                    help="物体配对的距离容差（米），默认 3.0。它是绝对量，所以跨尺度"
+                         "比较时必须按场景尺度一起缩，否则小场景里等于「什么都能配上」。")
     a = ap.parse_args(argv)
 
     given = [Path(r) for r in a.run]
@@ -258,7 +267,10 @@ def main(argv: list[str]) -> int:
     rows, skipped, failed = [], [], []
     for r in runs:
         try:
-            row = eval_one(r, work, a.harness, a.gt_root)
+            # 只在真的给了容差时才往下传：测试里有用三到四个位置参数替换 eval_one 的，
+            # 无条件多传一个会把它们打断，而那些测试盯的是入口行为不是签名
+            tol = {} if a.max_dist is None else {"max_dist_m": a.max_dist}
+            row = eval_one(r, work, a.harness, a.gt_root, **tol)
         except Exception as e:
             failed.append({"run": str(r), "error": repr(e)[:300]}); continue
         if "skipped" in row:
