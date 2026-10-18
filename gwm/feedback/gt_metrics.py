@@ -69,6 +69,47 @@ def class_names(program: dict) -> dict[str, str]:
     return {o["id"]: str(o.get("class", "")).strip().lower() for o in program.get("objects", [])}
 
 
+def node_extent(node: dict) -> np.ndarray | None:
+    """节点的长宽高，不管它是基本体还是资产。
+
+    真值程序用的是基本体（sphere/box/cylinder/cone），我们产出的是带 extent 的
+    资产节点，两边的形状描述方式不一样，所以统一折成三个边长再比。
+    """
+    g = node.get("geom") or {}
+    shape = g.get("shape")
+    if shape == "sphere":
+        d = 2.0 * float(g.get("radius", 0.0))
+        return np.array([d, d, d]) if d > 0 else None
+    if shape in ("cylinder", "cone"):
+        d = 2.0 * float(g.get("radius", 0.0))
+        h = float(g.get("height", d))
+        return np.array([d, h, d]) if d > 0 and h > 0 else None
+    ext = g.get("extent")
+    if isinstance(ext, list) and len(ext) == 3:
+        e = np.asarray(ext, float)
+        return e if np.all(e > 0) else None
+    return None
+
+
+def shape_scale_agreement(gt_node: dict, pred_node: dict) -> tuple[float, float] | None:
+    """(形状差, 尺度比)。形状差 0 是完美，尺度比 1 是完美。
+
+    形状差 = 把两边的边长各自归一化成「占最长边的比例」再算平均绝对差。这样它
+    **对整体缩放不敏感**，只问长宽高的比例对不对——一个细长的东西被重建成细长的，
+    哪怕大小差一倍，形状这一项也是对的。尺度单独报。
+
+    为什么不比类名：这个合成数据集的类名和形状是**脱钩的**（生成器从词表挑名字、
+    再独立配一个基本体，`girder` 是个球、`coin` 是个盒子、`crate` 用过三种形状）。
+    所以类名准确率在这里量的是一个原理上测不出来的量，而形状和尺寸是有视觉意义的。
+    """
+    a, b = node_extent(gt_node), node_extent(pred_node)
+    if a is None or b is None:
+        return None
+    ga = np.sort(a)[::-1] / a.max()
+    pa = np.sort(b)[::-1] / b.max()
+    return float(np.abs(ga - pa).mean()), float(b.max() / a.max())
+
+
 def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     """Interpolate within measured support only; never clamp outside endpoints."""
     if not len(times) or times.min() < track["t"][0] or times.max() > track["t"][-1]:
@@ -300,6 +341,15 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
 
     class_correct = sum(1 for g, q, _ in matched if same_class(g, q))
 
+    gt_nodes = {o["id"]: o for o in gt_program.get("objects", [])}
+    pred_nodes = {o["id"]: o for o in pred_program.get("objects", [])}
+    shape_errs, scale_ratios = [], []
+    for g, q, _ in matched:
+        pair = (shape_scale_agreement(gt_nodes[g], pred_nodes[q])
+                if g in gt_nodes and q in pred_nodes else None)
+        if pair:
+            shape_errs.append(pair[0]); scale_ratios.append(pair[1])
+
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
         for g, p, _ in pairs:
@@ -366,6 +416,17 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                         # 而类名准确率是 0（见 #56）。
                         "class_correct": class_correct,
                         "class_accuracy": (class_correct / len(matched)) if matched else None,
+                        # 形状和尺度才是「复原得像不像」该报的数。类名在当前这个
+                        # 合成数据集上和形状脱钩（生成器从词表挑名字、再独立配一个
+                        # 基本体），所以 class_accuracy 在这里恒等于噪声，别拿它
+                        # 当成绩也别拿它调参——换成类名有语义的数据集时它才有意义。
+                        "shape_error": (float(np.median(shape_errs)) if shape_errs else None),
+                        "shape_ok_frac": (float(np.mean(np.asarray(shape_errs) <= 0.2))
+                                          if shape_errs else None),
+                        "scale_ratio": (float(np.median(scale_ratios)) if scale_ratios else None),
+                        "scale_ok_frac": (float(np.mean((np.asarray(scale_ratios) >= 0.8)
+                                                        & (np.asarray(scale_ratios) <= 1.25)))
+                                          if scale_ratios else None),
                         "match_criterion": match_criterion},
             "window_s": [round(t0, 3), round(t1, 3)],
         }

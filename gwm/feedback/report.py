@@ -33,6 +33,7 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     """runs 里每一项是 {clip, config, metrics}，metrics 是 gt_metrics.evaluate 的输出。"""
     traj = _pool_objects(runs, window, "trajectory")
     accs, recalls, precs, class_hits, confusion = [], [], [], [], Counter()
+    shape_hits, scale_hits, scale_ratios = [], [], []
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
@@ -54,6 +55,16 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         # 配对只看位置不看类名，所以召回和精确率量的是**定位**不是**识别**。
         # 类名决定检索哪个资产，资产决定场景长什么样——这一列不报，
         # 「场景复原得像不像」就没在量（见 #56）。按**物体**汇总，和准确率一致。
+        # 形状和尺度：按**物体**汇总，和准确率一致。这两列才是「复原得像不像」
+        # 该报的数——类名在当前合成数据集上和形状脱钩，恒等于噪声（见 #56）。
+        if ob.get("shape_ok_frac") is not None and ob.get("matched"):
+            k = round(float(ob["shape_ok_frac"]) * ob["matched"])
+            shape_hits.extend([1.0] * k + [0.0] * (ob["matched"] - k))
+        if ob.get("scale_ok_frac") is not None and ob.get("matched"):
+            k = round(float(ob["scale_ok_frac"]) * ob["matched"])
+            scale_hits.extend([1.0] * k + [0.0] * (ob["matched"] - k))
+        if ob.get("scale_ratio") is not None:
+            scale_ratios.append(float(ob["scale_ratio"]))
         if isinstance(ob.get("class_correct"), int) and ob.get("matched"):
             class_hits.extend([1.0] * ob["class_correct"])
             class_hits.extend([0.0] * (ob["matched"] - ob["class_correct"]))
@@ -80,6 +91,9 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
         "class_accuracy": stat(class_hits),
+        "shape_ok": stat(shape_hits),
+        "scale_ok": stat(scale_hits),
+        "scale_ratio": stat(scale_ratios),
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},
         # 按整段平均距离配对，会把运动判错的物体一并算成没检出。这两个数说明那个偏差
         # 有多大：start_position_only 是「位置对上了、但运动没对上所以被判成未检出」的
@@ -112,8 +126,8 @@ def as_markdown(table: dict) -> str:
     但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
     仍报中位数。
     """
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 类名准确率 |",
-            "|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 形状对 | 尺度中位 |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
         acc = a["motion_type_accuracy"]
@@ -121,11 +135,14 @@ def as_markdown(table: dict) -> str:
         acc_n = "—" if not acc else acc["n"]
         base = a.get("always_static_accuracy")
         base_txt = "—" if base is None else format(base, ".3f")
-        cls = a.get("class_accuracy")
-        cls_txt = "—" if not cls else format(cls["mean"], ".3f")
+        # 类名那一列**不进表**：当前合成数据集上它和形状脱钩，恒等于噪声，
+        # 放进主表只会误导。它仍然算在 JSON 里，换数据集时再拿出来。
+        shp, scl = a.get("shape_ok"), a.get("scale_ratio")
+        shp_txt = "—" if not shp else format(shp["mean"], ".3f")
+        scl_txt = "—" if not scl else format(scl["median"], ".2f")
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
                     f"{acc_txt} | {base_txt} | {acc_n} | "
-                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | {cls_txt} |")
+                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | {shp_txt} | {scl_txt} |")
     return "\n".join(rows)
 
 
