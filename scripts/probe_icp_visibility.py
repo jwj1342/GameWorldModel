@@ -146,7 +146,8 @@ def make_clouds(motion: str, visibility: str, n_frames: int = 24) -> list[np.nda
     return clouds
 
 
-def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24) -> float:
+def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24,
+                                     warm_start: bool = False) -> float:
     """把**完整模板**配到每一帧的局部观测上，而不是让局部观测互相配。
 
     受控实验里「完整点云」那一行是全对的（静止 0.3°、转 90° 解出 89.9°），而所有出错
@@ -163,16 +164,26 @@ def solved_rotation_against_template(motion: str, visibility: str, n_frames: int
     template, _ = box_surface()
     clouds = make_clouds(motion, visibility, n_frames)
     angles = []
+    warm_R, warm_t = np.eye(3), np.zeros(3)      # 上一帧解出的位姿，当这一帧的初值
     for cloud in clouds:
         if len(cloud) < 30:
             continue
+        if warm_start:
+            cloud = cloud @ warm_R.T + warm_t
         # **方向很要紧**：source 必须是局部观测、target 必须是完整模板。
         # 反过来配（模板当 source）的话，模板上一多半的点在局部观测里根本没有对应，
         # 而 `icp` 的剔除阈值是按对应距离的中位数定的，被这批没有对应的点带偏，
         # 整个模板会被拽进一个错的位姿。第一版就是反的，静止物体解出 78.3°。
         step = icp(cloud, template)
-        angles.append(float(np.degrees(R.from_matrix(
-            np.asarray(step["rotation"], float)).magnitude())))
+        rot = np.asarray(step["rotation"], float)
+        trans = np.asarray(step["translation"], float)
+        if warm_start:
+            # 把这一帧解出的增量并进累计位姿，下一帧就从这里起手。
+            # `track_rigid` 在局部互配那条路上本来就是这么做的。
+            warm_R, warm_t = rot @ warm_R, rot @ warm_t + trans
+            angles.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+        else:
+            angles.append(float(np.degrees(R.from_matrix(rot).magnitude())))
     return float(np.ptp(angles)) if len(angles) > 1 else float("nan")
 
 
@@ -268,10 +279,11 @@ def main() -> int:
     print("     最后一行是候选修法：体素格钉在世界里不随相机动，看能不能把假转动压回去。")
     print()
     print("—— 换一种配法：完整模板 → 每一帧的局部观测 ——")
-    print(f"{'运动':<16}{'真值转角':>9}{'模板配局部解出':>15}")
+    print(f"{'运动':<16}{'真值转角':>9}{'每帧从单位阵起手':>17}{'用上一帧暖启动':>16}")
     for motion, mlabel in motions:
-        got = solved_rotation_against_template(motion, "orbit_grid", n)
-        print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{got:>14.1f}°")
+        cold = solved_rotation_against_template(motion, "orbit_grid", n)
+        warm = solved_rotation_against_template(motion, "orbit_grid", n, warm_start=True)
+        print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{cold:>16.1f}°{warm:>15.1f}°")
     print("  （被配准的两边只要有一边是钉死的完整形状，采样就不再跟着相机跑。")
     print("   我们已经有这个形状——#60 的资产检索给每个物体都配了网格。）")
     print()
