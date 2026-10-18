@@ -80,7 +80,7 @@ def main() -> int:
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
     ap.add_argument("--probe-interaction", action="store_true",
                     help="真的去抓一遍、拖一遍，量出可交互程度（而不是只数程序声明了什么）")
-    ap.add_argument("--fit-colours", type=int, default=0, metavar="N",
+    ap.add_argument("--fit-colours", type=int, default=None, metavar="N",
                     help="按闭环残差把材质颜色调 N 轮（#55）。渲出来比视频暗，因为把像素"
                          "当反照率用、渲染时又乘了一遍光照。两轮实测：合成片段每通道误差"
                          "16.8 -> 5.3、亮度比 0.833 -> 0.972；真实视频 27.9 -> 6.2、"
@@ -279,14 +279,16 @@ def main() -> int:
                   f"范围 {like['min']}~{like['max']}）{scale}", flush=True)
         else:
             print(f"重渲染相似度: 没算成（{like.get('reason')}）", flush=True)
-    if a.fit_colours > 0:
+    fit_rounds = (a.fit_colours if a.fit_colours is not None
+                  else int((cfg.get("synthesis") or {}).get("colour_fit_rounds", 0)))
+    if fit_rounds > 0:
         # #55 的闭环：量残差、按残差调颜色、重编译、再量。阻尼 0.7 不一轮到位——
         # 增益是从一次带噪声的测量估出来的，到位容易过冲。
         frames_file = out / "perception" / "frames" / "frames.json"
         times = ([fr["t"] for fr in
                   json.loads(frames_file.read_text(encoding="utf-8"))["frames"]][:6]
                  if frames_file.is_file() else [])
-        for round_index in range(a.fit_colours):
+        for round_index in range(fit_rounds):
             if not times:
                 break
             residual = colour_residual(Path(result["game_dir"]), program, evidence,
