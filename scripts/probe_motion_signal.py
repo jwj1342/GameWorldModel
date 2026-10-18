@@ -300,10 +300,21 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
         # 它有没有判别力。
         hinge_ratio = None
         positions = np.asarray(tracked.get("positions") or [], float)
-        if spec and len(positions) >= 4:
-            axis = np.asarray(spec.get("axis") or [0, 1, 0], float)
+        if len(positions) >= 4:
+            # 轴直接从累积旋转矩阵估，**不经过关节推断那道阈值闸**。只在已触发的子集上
+            # 算，等于在一个被筛过的分布上看判别力，而这条建议本来的意思是用拟合优度
+            # 替代阈值，不是在阈值之后再加一层。第一版就是那么写的，结论因此不作数。
+            if spec and spec.get("axis"):
+                axis = np.asarray(spec["axis"], float)
+                pivot = np.asarray(spec.get("pivot") or positions[0], float)
+            else:
+                rot = np.asarray(tracked.get("total_rotation") or np.eye(3), float)
+                # 旋转矩阵的轴是它对应特征值 1 的特征向量；反对称部分给出方向
+                skew = np.array([rot[2, 1] - rot[1, 2], rot[0, 2] - rot[2, 0],
+                                 rot[1, 0] - rot[0, 1]], float)
+                axis = skew if np.linalg.norm(skew) > 1e-9 else np.array([0.0, 1.0, 0.0])
+                pivot = positions.mean(axis=0)
             norm = float(np.linalg.norm(axis))
-            pivot = np.asarray(spec.get("pivot") or positions[0], float)
             if norm > 1e-9:
                 axis = axis / norm
                 rel = positions - pivot
