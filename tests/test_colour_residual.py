@@ -45,3 +45,55 @@ def test_证据里没有观测颜色时如实说明(tmp_path):
                           tmp_path / "r", [0.0])
     assert out["ok"] is False
     assert "观测颜色" in out["reason"]
+
+
+# ---- 按残差调颜色（#55 的第三步）----
+
+def _program():
+    return {"objects": [{"id": "a", "class": "box", "material": "#404040"},
+                        {"id": "b", "class": "box",
+                         "material": {"base_color": "#808080", "roughness": 0.3}}]}
+
+
+def _residual(**ratios):
+    return {"ok": True, "per_object": {k: {"luma_ratio": v, "channel_error": 10.0}
+                                       for k, v in ratios.items()}}
+
+
+def test_渲得暗就把材质调亮():
+    from gwm.feedback.colour import fit_colours
+    program = _program()
+    rows = fit_colours(program, _residual(a=0.5))
+    assert len(rows) == 1 and rows[0]["id"] == "a"
+    assert rows[0]["gain"] == 2.0
+    assert program["objects"][0]["material"] == "#808080"
+
+
+def test_材质是对象时只换颜色不碰别的字段():
+    from gwm.feedback.colour import fit_colours
+    program = _program()
+    fit_colours(program, _residual(b=0.5))
+    material = program["objects"][1]["material"]
+    assert material["base_color"] == "#ffffff"
+    assert material["roughness"] == 0.3, "别的表面参数不能被覆盖掉"
+
+
+def test_阻尼让它只走一部分():
+    from gwm.feedback.colour import fit_colours
+    program = _program()
+    rows = fit_colours(program, _residual(a=0.5), damping=0.5)
+    assert rows[0]["gain"] == 1.5, "一轮到位容易过冲，增益本身是从带噪声的测量估来的"
+
+
+def test_离谱的增益被挡住():
+    from gwm.feedback.colour import fit_colours
+    program = _program()
+    rows = fit_colours(program, _residual(a=0.001))
+    assert rows[0]["gain"] == 4.0, "渲染里只占几个像素的物体，比值可能毫无意义"
+
+
+def test_没算成的残差不动任何东西():
+    from gwm.feedback.colour import fit_colours
+    program = _program()
+    assert fit_colours(program, {"ok": False}) == []
+    assert program["objects"][0]["material"] == "#404040"

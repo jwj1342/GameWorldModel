@@ -104,3 +104,63 @@ def colour_residual(game_dir: Path, program: dict, evidence: dict, out_dir: Path
                            "luma_ratio": round(statistics.median(v["ratios"]), 3)}
                        for k, v in sorted(per_object.items())},
     }
+
+
+def fit_colours(program: dict, residual: dict, damping: float = 1.0,
+                max_gain: float = 4.0) -> list[dict]:
+    """按闭环残差把材质颜色往上调一轮，就地修改程序，返回每个物体的调整记录。
+
+    这是 #55 说的第三步。渲出来比视频暗（实测亮度比 0.627 到 0.833），因为我们把像素
+    中位数当反照率写进材质，而渲染时又乘了一遍光照。补偿的办法是把材质颜色乘上
+    「观测 ÷ 渲染」这个比值——下一次渲染乘完光照之后，就落在观测值附近。
+
+    `damping` 小于 1 时只走一部分，留给多轮迭代；一轮到位容易过冲，因为增益本身是
+    从一次带噪声的测量里估出来的。`max_gain` 挡住离谱的修正：某个物体在渲染里只占
+    几个像素时，比值可能毫无意义。
+
+    刻意不碰粗糙度、金属度和光照参数——那是下一步的问题，这里只动颜色。
+    """
+    if not residual.get("ok"):
+        return []
+    per_object = residual.get("per_object") or {}
+    applied: list[dict] = []
+    for node in program.get("objects") or []:
+        row = per_object.get(node.get("id"))
+        if not row:
+            continue
+        ratio = row.get("luma_ratio")
+        if not isinstance(ratio, (int, float)) or ratio <= 1e-6:
+            continue
+        gain = 1.0 / ratio
+        gain = 1.0 + damping * (gain - 1.0)
+        gain = max(1.0 / max_gain, min(max_gain, gain))
+        before = _current_material_colour(node)
+        after = tuple(max(0, min(255, int(round(c * gain)))) for c in before)
+        _set_material_colour(node, after)
+        applied.append({"id": node.get("id"), "gain": round(gain, 3),
+                        "before": "#%02x%02x%02x" % before,
+                        "after": "#%02x%02x%02x" % after})
+    return applied
+
+
+def _current_material_colour(node: dict) -> tuple[int, int, int]:
+    material = node.get("material")
+    if isinstance(material, dict):
+        rgb = _hex_to_rgb(material.get("base_color"))
+        if rgb:
+            return rgb
+    if isinstance(material, str):
+        rgb = _hex_to_rgb(material)
+        if rgb:
+            return rgb
+    return (154, 154, 154)          # 和内核 MATERIALS.default 的灰一致
+
+
+def _set_material_colour(node: dict, rgb: tuple[int, int, int]) -> None:
+    """写回去的时候保留材质对象里别的字段，只换颜色。"""
+    value = "#%02x%02x%02x" % rgb
+    material = node.get("material")
+    if isinstance(material, dict):
+        material["base_color"] = value
+    else:
+        node["material"] = value
