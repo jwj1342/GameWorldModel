@@ -86,15 +86,20 @@ def main() -> int:
     ap.add_argument("--rendered", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--probe-interaction", action="store_true",
+                    help="每条片段都真抓真拖量一遍可交互性（透传给 rebuild_with_assets）")
     ap.add_argument("--rebuild-arg", action="append", default=[],
                     help="透传给 rebuild_with_assets 的额外参数。值本身以 - 开头时要用等号写，"
                          "比如 --rebuild-arg=--no-settle，分开写 argparse 会当成另一个选项")
     a = ap.parse_args()
+    extra = list(a.rebuild_arg)
+    if a.probe_interaction and "--probe-interaction" not in extra:
+        extra.append("--probe-interaction")
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     clips = sorted(p for p in Path(a.rendered).iterdir() if (p / "clip.mp4").is_file())[:a.limit]
     rows = []
     for i, clip_dir in enumerate(clips, 1):
-        row = run_one(clip_dir, out, a.rebuild_arg)
+        row = run_one(clip_dir, out, extra)
         rows.append(row)
         print(f"[{i}/{len(clips)}] {row['clip']:<16} {row['seconds']:>6}s "
               f"物体 {row.get('objects', '-'):>3}/{row['gt_objects']:<3} "
