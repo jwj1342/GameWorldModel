@@ -95,13 +95,23 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
     for o in ev["objects"]:
         if not o["obb"]: continue
         cls = o["class_guess"].lower()
-        if o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg):
+        # 占画面太大的检测几乎一定是地面或墙，不是可以拿起来的东西。实测一条合成片段上
+        # 检出一个占画面 67% 的「slab」和一个占 61% 的「ground」，而真值里最大的物体
+        # 只占 2.1%。这种东西进了 objects 列表，既压低物体精确率，又会变成一块能用鼠标
+        # 拖动的、和整个场景一样大的板子。按结构件处理，不是丢掉——大而平的东西通常
+        # 确实是结构。
+        area_cap = float((cfg or {}).get("synthesis", {}).get("max_object_area_frac", 0.35))
+        too_large = float(o.get("mask_area_frac") or 0.0) >= area_cap
+        if too_large or (o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg)):
             # fixed structure: median OBB as a static box
             cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
             sz = [float(max(v, 0.05)) for v in sz]
             if any(k in cls for k in ("floor", "ground", "lawn", "grass", "carpet", "mat", "road")): sz[1] = min(sz[1], 0.3); cs[1] = -sz[1] / 2 + 0.0  # thin slab flush with the ground plane
             static_node = {"id": slug(o["id"]), "class": cls[:40], "geom": {"kind": "primitive", "shape": "box", "extent": sz}, "pose": {"pos": [float(v) for v in cs], "quat": [float(v) for v in o["obb"][0]["quat"]]},
-                           "material": material_from_evidence(o), "notes": "static structure from evidence"}
+                           "material": material_from_evidence(o),
+                           "notes": ("structure by area: mask covers "
+                                     f"{float(o.get('mask_area_frac') or 0):.0%} of the frame"
+                                     if too_large else "static structure from evidence")}
             if _confidence(o.get("confidence")) is not None: static_node["confidence"] = _confidence(o["confidence"])
             program["static"].append(static_node)
             continue

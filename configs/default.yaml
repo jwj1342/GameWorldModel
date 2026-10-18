@@ -131,6 +131,10 @@ assets:
   image_weight: 0.6          # 图像分数在融合里的权重；只有文字时退回纯文字
   candidates: 3            # 清单里记几个候选，便于复核检索质量
   enabled: true
+synthesis:
+  max_object_area_frac: 0.35   # 掩码占画面超过这个比例的检测按结构件处理，不进 objects。
+                               # 实测检出过占画面 67% 的「slab」，而真值里最大的物体只占
+                               # 2.1%——那种东西会变成一块和场景一样大的可拖动板子。
 feedback:
   rounds: 2
   max_rounds: 3
