@@ -76,11 +76,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", required=True)
     ap.add_argument("--eval", required=True)
+    ap.add_argument("--gt-root", default=None,
+                    help="给了就逐对比预测和真值的边长，分清「撑厚」和「切短」")
     a = ap.parse_args(argv)
 
     rows = json.loads(Path(a.eval).read_text(encoding="utf-8")).get("rows", [])
     buckets: dict[str, list[float]] = {"真值是结构件": [], "真值是可动物体": [], "没配上": []}
     heights: dict[str, list[float]] = {k: [] for k in buckets}
+    dims: list[tuple[float, float]] = []       # (y 边之比, 水平最长边之比)，只对结构件
 
     for r in rows:
         scene = ((r.get("metrics") or {}).get("full") or {}).get("scene") or {}
@@ -89,6 +92,13 @@ def main(argv=None) -> int:
         if not prog_path.is_file():
             continue
         prog = json.loads(prog_path.read_text(encoding="utf-8"))
+        gt_nodes: dict[str, dict] = {}
+        if a.gt_root:
+            gtp = Path(a.gt_root) / r["clip"] / "program.json"
+            if gtp.is_file():
+                g = json.loads(gtp.read_text(encoding="utf-8"))
+                gt_nodes = {f"static::{n['id']}": n for n in (g.get("static") or [])}
+                gt_nodes.update({n["id"]: n for n in (g.get("objects") or [])})
         nodes = {n["id"]: n for n in (prog.get("objects") or [])}
         nodes.update({f"static::{n['id']}": n for n in (prog.get("static") or [])})
         claimed = set()
@@ -103,6 +113,12 @@ def main(argv=None) -> int:
             pos = (nodes[pred_key].get("pose") or {}).get("pos")
             if isinstance(pos, list) and len(pos) == 3:
                 heights[bucket].append(float(pos[1]))
+            if bucket == "真值是结构件" and gt_key in gt_nodes:
+                pe, ge = node_extent(nodes[pred_key]), node_extent(gt_nodes[gt_key])
+                if pe is not None and ge is not None and len(pe) == 3 and len(ge) == 3:
+                    gh, ph = float(max(ge[0], ge[2])), float(max(pe[0], pe[2]))
+                    if ge[1] > 1e-6 and gh > 1e-6:
+                        dims.append((float(pe[1]) / float(ge[1]), ph / gh))
         for key, node in nodes.items():
             if key in claimed:
                 continue
@@ -114,6 +130,17 @@ def main(argv=None) -> int:
                 heights["没配上"].append(float(pos[1]))
 
     print("我们自己拟合出来的包围盒，按它配上的真值类别分组\n")
+    if dims:
+        print("先分清一件事：扁平度变大，可能是**薄的一维被撑厚**，也可能是")
+        print("**长的一维被切短**（掩码只盖住了结构件的一段）。两者该做的事完全不同。")
+        print("下面按配上的真值节点逐对比，分母是真值自己的边长。\n")
+        for label, idx in (("薄的那一维（y 边）", 0), ("水平最长边", 1)):
+            vals = [d[idx] for d in dims if np.isfinite(d[idx])]
+            if vals:
+                a = np.sort(np.asarray(vals))
+                print(f"  {label:<18} n={len(a):<4} 预测/真值 中位 {np.median(a):.2f}  "
+                      f"四分位 {np.percentile(a,25):.2f} / {np.percentile(a,75):.2f}")
+        print("  中位大于 1 就是我们做大了，小于 1 就是做小了。\n")
     print("扁平度 = y 边 / 水平最长边（真值上 static 0.156、object 0.591，几乎不重叠）")
     for k in buckets:
         print(describe(k, buckets[k]))
