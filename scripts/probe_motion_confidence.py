@@ -58,6 +58,7 @@ def main() -> int:
     confs: list[float] = []
     margins: list[float] = []
     by_truth: dict[str, Counter] = {}
+    angles: dict[str, list] = {}
     for clip_dir in clips:
         gt_file = Path(a.gt_root) / clip_dir.name / "program.json"
         if not gt_file.is_file():
@@ -69,6 +70,23 @@ def main() -> int:
             continue
         truth = {n["id"]: str((n.get("motion") or {}).get("type", "static"))
                  for n in json.loads(gt_file.read_text(encoding="utf-8")).get("objects", [])}
+        # 相机的平均朝向：拿首尾两帧相机位置之差不行（相机可能绕着转），
+        # 用每帧的朝向向量求平均
+        view = None
+        poses = ((evidence.get("camera") or {}).get("poses")) or []
+        if poses:
+            dirs = []
+            for p in poses:
+                q = p.get("quat")
+                if not q or len(q) != 4:
+                    continue
+                x, y, z, w = (float(v) for v in q)
+                # 相机看向局部 -z，把它转到世界
+                dirs.append([-2 * (x * z + w * y), -2 * (y * z - w * x), -(1 - 2 * (x * x + y * y))])
+            if dirs:
+                m = np.mean(np.array(dirs), axis=0)
+                if np.linalg.norm(m) > 1e-9:
+                    view = m / np.linalg.norm(m)
         for obj in evidence.get("objects", []):
             want = truth.get(obj["id"])
             if want is None:
@@ -81,6 +99,16 @@ def main() -> int:
             by_truth.setdefault(want, Counter())[got] += 1
             if got == "unknown":
                 reasons[str(mg.get("notes") or "没写原因")] += 1
+            # 判成沿轴滑动的，量一下那根轴和相机视线的夹角。配准的漂移多半沿视线方向
+            # （深度最不可观测的那个方向），真的滑动没有理由和视线对齐。如果两者分得开，
+            # 就有一个判别子能把「静止物体被判成在滑」挑出来。
+            axis = mg.get("axis") or (mg.get("parameters") or {}).get("axis")
+            if got in ("prismatic", "periodic_translate", "trajectory") and axis and view is not None:
+                v = np.array([float(x) for x in axis], float)
+                n = np.linalg.norm(v)
+                if n > 1e-9:
+                    cos = abs(float(np.dot(v / n, view)))
+                    angles.setdefault(want, []).append(np.degrees(np.arccos(min(1.0, cos))))
             details = mg.get("candidate_details") or []
             if details and isinstance(details[0].get("confidence"), (int, float)):
                 confs.append(float(details[0]["confidence"]))
@@ -103,6 +131,13 @@ def main() -> int:
     print("\n  按真值类型看判成了什么：")
     for want, got in sorted(by_truth.items()):
         print(f"    {want:<20} {got.most_common(4)}")
+    if angles:
+        print("\n  判成「沿某根轴移动」的那些，轴和相机视线的夹角（度，0 = 完全沿视线）：")
+        for want, vals in sorted(angles.items()):
+            vals = sorted(vals)
+            print(f"    真值 {want:<20} n={len(vals):<3} 中位数 {vals[len(vals)//2]:.1f}  "
+                  f"范围 {vals[0]:.1f}~{vals[-1]:.1f}")
+        print("    真值静止那一行如果明显更小，说明漂移沿视线，可以拿夹角当判别子。")
     print("\n置信度如果在这里能上到门槛，问题在感知；如果仍然上不去，"
           "分类器的置信度定义本身要重做——它在一条好轨迹上也给不出把握。")
     return 0
