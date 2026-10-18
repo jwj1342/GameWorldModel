@@ -134,9 +134,19 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         hits = retrieve(query, catalog, k=top_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0)
         record["candidates"] = [{"asset_id": a.id, "score": s} for a, s in hits]
+        # 图像那一路的最高分单独记下来。它和文字分是两回事：文字分决定收不收，
+        # 图像分决定选哪个。记它有两个用处——事后能看出「这个物体为什么选了这个资产」，
+        # 以及它本身是一个连续信号：背景碎片和库里任何东西都不像，分应该明显低。
+        if image_scores is not None:
+            try:
+                record["image_score_best"] = round(float(max(image_scores.values())), 4)
+            except (AttributeError, ValueError, TypeError):
+                pass
         if hits and hits[0][1] >= min_score:
             geom["ref"] = hits[0][0].id
             record.update(chosen=hits[0][0].id, score=hits[0][1])
+            if "image_score_best" in record:
+                geom["ref_image_score"] = record["image_score_best"]
         else:
             record["chosen"] = None
         decisions.append(record)
