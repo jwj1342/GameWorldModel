@@ -562,6 +562,10 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                       "precision": len(scene_matched) / n_scene_pred if n_scene_pred else None,
                       "gt_static": len(gt_static), "pred_static": len(pred_static),
                       "kind_confusion": kind_confusion,
+                      # 配上的对子本身也留下来：要查「我们凭什么该把这个节点判成
+                      # 结构件」，得能把预测节点的几何属性和它配上的真值类别连起来。
+                      # 键是真值节点，值是预测节点，static 的两边都带 "static::" 前缀。
+                      "pairs": {g: q for g, q, _ in scene_pairs},
                       "kind_note": "只在位置配上的对子里统计「结构件还是可动物体」判对了没有。"
                                    "键是「真值->预测」。位置都没配上就谈不上归错列表。",
                       "note": "object + static 一起算。objects 那一档的分母只有真值 objects，"
