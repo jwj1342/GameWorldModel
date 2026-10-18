@@ -126,7 +126,6 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         ground_node = {"id": "ground", "class": "ground", "geom": {"kind": "primitive", "shape": "box", "extent": [float(max(ext[0], 2)) * 1.4, 0.3, float(max(ext[2], 2)) * 1.4]}, "pose": {"pos": [float(c[0]), -0.15, float(c[2])]}, "material": "grass"}
         if _confidence(g.get("conf")) is not None: ground_node["confidence"] = _confidence(g["conf"])
         program["static"].append(ground_node)
-    dropped_sunk: list[dict] = []
     for o in ev["objects"]:
         if not o["obb"]: continue
         cls = o["class_guess"].lower()
@@ -137,22 +136,6 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         # 确实是结构。
         area_cap = float((cfg or {}).get("synthesis", {}).get("max_object_area_frac", 0.35))
         too_large = float(o.get("mask_area_frac") or 0.0) >= area_cap
-        # 陷在地面以下很深的，丢掉。一个底面在地平面下方好几倍自身高度的「物体」，
-        # 要么是深度把一片背景推到了地下，要么是掩码糊到了地面以外，两种都不是
-        # 可以拿起来的东西。
-        #
-        # 这是今天为过检量过的十七条信号里**唯一不花代价的一条**：实测 103 个预测
-        # 物体里砍掉 6 个，**全是假阳性，一个命中都没丢**，精确率 0.214 -> 0.227
-        # （见 #56）。反过来那一侧（悬空）要拿 22 个命中里的 5 个换 0.048 的精确率，
-        # 召回现在才 0.500，不划算，没做。
-        #
-        # 判据用**相对自身高度**不用绝对米数：绝对阈值不是尺度不变的，这项目踩过两次。
-        sunk_limit = float((cfg or {}).get("synthesis", {}).get("drop_sunk_below_height_mult", 2.0))
-        sizes = np.asarray([b["size"] for b in o["obb"]], float)
-        centres = np.asarray([b["center"] for b in o["obb"]], float)
-        height = float(np.median(sizes[:, 1]))
-        bottom = float(np.median(centres[:, 1]) - height / 2)
-        sunk = height > 1e-6 and bottom < -sunk_limit * height
         is_ground = is_ground_class(cls)
         # 类名像结构件（墙、地板、轨道、传送带）的，只要**没有证据表明它会动**，就按
         # 结构件处理。
@@ -168,10 +151,6 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         # 是我们唯一验证过有信息的运动信号。语义也更对——「没有信息」不该被当成
         # 「它会动」，对一个名字叫 rail/wall/floor 的东西尤其不该。
         looks_structural = is_static_class(cls, cfg) and o["motion_guess"].get("moves") is not True
-        if sunk:
-            dropped_sunk.append({"id": o["id"], "class": cls,
-                                 "bottom_over_height": round(bottom / max(height, 1e-6), 2)})
-            continue
         if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
@@ -236,10 +215,4 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
                                  f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
         if any(c["with_id"] == "ground" for c in o.get("contacts", [])) and g: node["support"] = "ground"
         program["objects"].append(node)
-    # 丢掉了什么要留痕，不能静默。放在 meta 里而不是顶层新开一个键——程序 schema 的
-    # 顶层是 `additionalProperties: false`，加顶层键会让整个程序编译不过。这个坑今天
-    # 踩过一次（往 geom 里塞 ref_image_score，十二条片段的资产覆盖率直接变成 0），
-    # meta 的 additionalProperties 是 true，所以放这里是安全的。
-    if dropped_sunk:
-        program.setdefault("meta", {})["dropped_sunk"] = dropped_sunk
     return program

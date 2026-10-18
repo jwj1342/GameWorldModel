@@ -89,7 +89,43 @@ def test_类名像结构件但有证据会动的_仍然是物体():
     assert "belt_1" in ids(program["objects"]), "有证据会动却被当成了固定结构"
 
 
-def test_陷在地面下太深的直接丢掉():
+def test_陷地丢弃跑在接触装配之后():
+    """**顺序是这条规则的全部要害。**
+
+    第一版我把它放在程序刚生成的时候（`direct.py`），离线估算说「砍掉 6 个、
+    全是假阳性、一个命中不丢、精确率 0.214 -> 0.227」，实际接进链路跑出来是
+    **砍掉 57 个、召回 0.500 -> 0.268**。
+
+    原因是接触装配本来就负责把陷在地里的物体抬上来，而我在它之前把那些物体丢掉了
+    ——丢的正是它要修的那一批。而离线估算用的是**最终程序**（装配已经跑过），
+    所以只看到还剩 6 个。拿「处理后的数据」估算「处理前的闸」，估的是另一个分布。
+    """
+    from gwm.synthesis.contact import drop_sunk
+
+    # 陷得很深的：底面在地平面下方三倍自身高度
+    program = {"objects": [
+        {"id": "ghost_1", "class": "crate", "geom": {"extent": [1.0, 1.0, 1.0]},
+         "pose": {"pos": [0.0, -3.0, 0.0]}},
+        {"id": "ok_1", "class": "crate", "geom": {"extent": [1.0, 1.0, 1.0]},
+         "pose": {"pos": [0.0, 0.5, 0.0]}},
+    ]}
+    dropped = drop_sunk(program)
+    assert [d["id"] for d in dropped] == ["ghost_1"]
+    assert [n["id"] for n in program["objects"]] == ["ok_1"]
+    assert program["meta"]["dropped_sunk"][0]["id"] == "ghost_1"   # 丢了什么要留痕
+
+
+def test_刚生成的程序不该直接丢陷地的():
+    """直译出来的位姿取自包围盒中心，地面估歪一点就会有物体陷进地里——那是接触装配
+    要修的，不是该丢的。所以 evidence_to_program 里不能有这道闸。"""
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "gwm" / "synthesis" / "direct.py").read_text(encoding="utf-8")
+    assert "dropped_sunk" not in src, "下陷闸又跑回 direct.py 了，它会丢掉接触装配要修的物体"
+
+
+def test_陷在地面下太深的直接丢掉_旧位置已移除():
     """底面在地平面下方好几倍自身高度的「物体」不是能拿起来的东西。
 
     实测（#56）：103 个预测物体里砍掉 6 个，**全是假阳性，一个命中都没丢**，
@@ -101,10 +137,8 @@ def test_陷在地面下太深的直接丢掉():
             "motion_guess": {"type": "unknown", "conf": "unknown"},
             "contacts": [], "mask_area_frac": 0.03}
     program = evidence_to_program(evidence([sunk]), "c", {})
-    assert "ghost_1" not in ids(program["objects"])
-    assert "ghost_1" not in ids(program["static"])
-    # 丢掉了什么要留痕
-    assert any(d["id"] == "ghost_1" for d in program["meta"]["dropped_sunk"])
+    # 这一步**不该**丢它——接触装配会把它抬上来。丢弃发生在装配之后。
+    assert "ghost_1" in ids(program["objects"])
 
 
 def test_正常坐在地面上的不受影响():

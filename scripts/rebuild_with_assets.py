@@ -37,7 +37,7 @@ from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
-from gwm.synthesis.contact import settle_on_ground              # noqa: E402
+from gwm.synthesis.contact import settle_on_ground, drop_sunk   # noqa: E402
 from gwm.synthesis.dedup import merge_duplicates, merge_fragment_chains   # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
 from gwm.synthesis.stabilise import apply_settled                # noqa: E402
@@ -214,6 +214,14 @@ def main() -> int:
     timings["deduped"] = len(duplicates)
 
     moves = settle_on_ground(program)
+    # 装配之后仍然陷在地里的才丢。**顺序是要害**：第一版放在程序刚生成的时候，
+    # 离线估算说砍掉 6 个、一个命中不丢，实际跑出来砍掉 57 个、召回 0.500 -> 0.268
+    # ——丢的正是接触装配要修的那一批（见 contact.drop_sunk 的注释）。
+    sunk = drop_sunk(program, float((cfg.get("synthesis") or {}).get("drop_sunk_below_height_mult", 2.0)))
+    if sunk:
+        print(f"陷地丢弃: {len(sunk)} 个 {[(d['id'], d['bottom_over_height']) for d in sunk[:5]]}",
+              flush=True)
+    timings["dropped_sunk"] = len(sunk)
     if moves:
         applied = [m for m in moves if m["applied"]]
         print(f"接触装配: 抬起 {len(applied)} 个物体，最大 {max((m['lift_m'] for m in applied), default=0):.3f} m"
