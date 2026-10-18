@@ -32,6 +32,7 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
+from gwm.perception.evidence import smooth_series                                  # noqa: E402
 from gwm.perception.registration import infer_articulation, looks_static, track_rigid  # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
@@ -227,6 +228,16 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         gt_rel = gt - gt[0]
         reg_rel = registered - registered[0]
         out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        # 包围盒中心那条路本来就过一道时间平滑，配准这条没有。每步噪声是物体尺寸的 17%，
+        # 而真实运动是平滑的——平滑应该能吃掉不少。窗口扫几个值看哪个合适。
+        for window in (5, 9, 15):
+            if len(registered) >= window:
+                smoothed = smooth_series(registered, window)
+                out.setdefault(f"step/smooth{window}", []).extend(
+                    np.linalg.norm((smoothed - smoothed[0]) - gt_rel, axis=1).tolist())
+                if is_static:
+                    out.setdefault(f"drift_static/smooth{window}", []).append(
+                        float(np.linalg.norm(smoothed.max(0) - smoothed.min(0))))
         # 模型吸收多少帧：转过半圈的物体，后半段看到的面可能根本不在模型里
         for frames_in_model, tag in ((12, "m12"), (len(clouds), "mall")):
             variant = track_rigid(clouds, model_frames=frames_in_model)
@@ -362,7 +373,89 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
     return out
 
 
-MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal,
+def mode_common(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
+    """拿背景估公共漂移，再从物体轨迹里减掉。
+
+    漂移很可能是共模的：相机位姿误差会让画面里所有东西一起飘。背景（所有不属于任何
+    检出物体的像素）按定义是不动的，所以逐帧配准背景量到的位移，就是公共漂移的直接
+    估计。减掉它不需要先知道哪个物体静止——那正是现在做不到的事。
+
+    只减平移分量。公共旋转也可能存在，但平移是漂移指标真正在量的东西，先看它够不够。
+    """
+    from gwm.perception.masks import resize_mask
+    geom = load_geometry(run / "geometry.npz")
+    masks = load_masks(run)
+    frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    times = {f["frame_index"]: round(float(f["t"]), 3) for f in evidence.get("frames", [])}
+    out: dict[str, list] = {"step/register": [], "step/common_removed": [],
+                            "drift_static/register": [], "drift_static/common_removed": [],
+                            "common_travel": []}
+
+    # 背景点云：把所有物体掩码并起来再取反
+    frames = sorted({fi for per in masks.values() for fi in per})
+    bg_clouds, bg_stamps = [], []
+    for fi in frames:
+        k, t = frame_of.get(fi), times.get(fi)
+        if k is None or t is None:
+            continue
+        shape = geom.depth[k].shape
+        union = np.zeros(shape, bool)
+        for per in masks.values():
+            m = per.get(fi)
+            if m is None:
+                continue
+            m = np.asarray(m).astype(bool)
+            if m.shape != shape:
+                m = resize_mask(m, (shape[1], shape[0]))
+            union |= m
+        pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], ~union, stride=8),
+                       _fix(geom.cam_to_world[k]))
+        if len(pts) >= 200:
+            bg_clouds.append(pts); bg_stamps.append(t)
+    if len(bg_clouds) < 6:
+        return out
+    bg = track_rigid(bg_clouds)
+    if not bg["ok"]:
+        return out
+    bg_pos = np.array(bg["positions"], float)
+    common = {t: bg_pos[i] - bg_pos[0] for i, t in enumerate(bg_stamps)}
+    out["common_travel"].append(float(np.linalg.norm(bg_pos.max(0) - bg_pos.min(0))))
+
+    for oid, per_frame in masks.items():
+        if oid not in truth:
+            continue
+        clouds, stamps = [], []
+        for fi, mask in sorted(per_frame.items()):
+            k, t = frame_of.get(fi), times.get(fi)
+            if k is None or t is None or t not in truth[oid] or t not in common:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           _fix(geom.cam_to_world[k]))
+            if len(pts) >= 30:
+                clouds.append(pts); stamps.append(t)
+        if len(clouds) < 6:
+            continue
+        tracked = track_rigid(clouds)
+        if not tracked["ok"]:
+            continue
+        registered = np.array(tracked["positions"], float)
+        gt = np.stack([truth[oid][t] for t in stamps])
+        gt_rel = gt - gt[0]
+        reg_rel = registered - registered[0]
+        corrected = reg_rel - np.stack([common[t] for t in stamps])
+        out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        out["step/common_removed"].extend(np.linalg.norm(corrected - gt_rel, axis=1).tolist())
+        if kinds.get(oid) == "static":
+            out["drift_static/register"].append(float(np.linalg.norm(reg_rel.max(0) - reg_rel.min(0))))
+            out["drift_static/common_removed"].append(
+                float(np.linalg.norm(corrected.max(0) - corrected.min(0))))
+    return out
+
+
+MODES = {"bias": mode_bias, "offset": mode_offset, "signal": mode_signal, "common": mode_common,
          "register": mode_register, "articulation": mode_articulation}
 
 

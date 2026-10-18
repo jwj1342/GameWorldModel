@@ -1,5 +1,6 @@
 """Detection-provider adapter plus optional multi-frame association and SAM 2.1 propagation."""
 from __future__ import annotations
+import re
 from pathlib import Path
 import numpy as np
 import torch
@@ -107,6 +108,24 @@ class GroundingDinoDetectionProvider:
                 for i, (score, bbox, label) in enumerate(keep)]
 
 
+def _normalise_label(text: str) -> str:
+    """把标签和查询短语放到同一个口径上再比。
+
+    检测器返回的是**词片**拼起来的字符串，不是我们问的那句话。两种实测到的走样：
+
+    * `##ool` —— BERT 的子词标记。"spool" 被切成 "sp" + "##ool"，框只落在后半片上，
+      于是标签里只剩一个带井号的尾巴。
+    * `cone _ marker` —— 下划线被当成独立 token，还原的时候两边各加了一个空格。
+
+    这两种在原样比较下都匹配不上任何短语，于是整串走样的文本被当成类名写进程序，
+    产出 `ool_1` 这样的物体。规范化只做三件事：去掉子词标记、把下划线当成空格、
+    把连续空白压成一个。不做词干还原之类的事——那会引入新的误匹配。
+    """
+    cleaned = re.sub(r"##", "", (text or "").strip().lower())
+    cleaned = cleaned.replace("_", " ")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def snap_label(label: str, phrases: list[str]) -> str:
     """把检测器返回的标签收敛到我们真正问过的某一个短语上。
 
@@ -115,21 +134,35 @@ def snap_label(label: str, phrases: list[str]) -> str:
     storage box drawer" 这种。这样的类名在库里查不到任何资产，而且写进程序之后
     也没法读。
 
-    规则是取**最长的那个**能在标签里原样找到的查询短语。拼接本身没有可靠的主次顺序，
-    所以不去猜哪个是主体；但一个具体的类名总比一串拼接有用，至少它能被检索和阅读。
-    一个都对不上就原样返回，不编。
+    三条规则，依次试：
+
+    1. 规范化之后正好等于某个短语。
+    2. 某个短语整体出现在标签里（拼接的情况），取**最长的**那个。拼接本身没有可靠的
+       主次顺序，所以不去猜哪个是主体；但一个具体的类名总比一串拼接有用。
+    3. 反过来，标签是某个短语的一段（词片丢了前半截的情况）。这条容易误伤，所以加两道
+       闸：片段至少三个字符，而且只能命中唯一一个短语——"ool" 只可能来自 "spool"，
+       但 "box" 可能来自好几个短语，那种情况宁可不认。
+
+    三条都不中就原样返回，不编。
     """
     text = (label or "").strip().lower()
     if not text:
         return label
-    candidates = [p.strip().lower() for p in phrases if p and p.strip()]
-    if text in candidates:
-        return text
-    contained = [c for c in candidates if c and c in text]
-    if not contained:
-        return label
-    contained.sort(key=lambda c: (-len(c), c))
-    return contained[0]
+    norm_text = _normalise_label(text)
+    pairs = [(p.strip().lower(), _normalise_label(p)) for p in phrases if p and p.strip()]
+    pairs = [(raw, norm) for raw, norm in pairs if norm]
+    for raw, norm in pairs:
+        if norm == norm_text:
+            return raw
+    contained = [raw for raw, norm in pairs if norm in norm_text]
+    if contained:
+        contained.sort(key=lambda c: (-len(c), c))
+        return contained[0]
+    if len(norm_text) >= 3:
+        fragment_of = [raw for raw, norm in pairs if norm_text in norm]
+        if len(set(fragment_of)) == 1:
+            return fragment_of[0]
+    return label
 
 class GroundedSAM2Backend:
     name = "grounded_sam2"
