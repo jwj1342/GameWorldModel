@@ -38,6 +38,10 @@ perception:
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
   motion:
+    infer_articulation: false  # 从配准的逐步变换里推铰链轴和滑轨行程。默认关着：
+                               # 四十条有真值的合成片段上扫过阈值，最好一档的可用率
+                               # （报出来的里既是真关节、类型也判对的比例）只有 0.333，
+                               # 再收紧就一个都报不出来。见 scripts/sweep_articulation.py
     use_registration: true   # 运动估计用跨帧配准的轨迹，而不是包围盒中心序列。
                              # 实测位移误差 0.253 -> 0.188 m；静止物体漂移目前反而略大，
                              # 所以留了开关。见 scripts/probe_motion_signal.py --mode register                         # 世界坐标多假设估计；证据、残差、置信度阈值

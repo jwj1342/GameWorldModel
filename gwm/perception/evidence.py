@@ -286,8 +286,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     if len(tracked.get("orientations") or []) == len(q_a):
                         motion_quaternions = _registered_quats(q_a[0])
                     motion_source = "cross_frame_registration"
-                    # 关节件的两种形态可以直接从逐步刚体变换里读出来，不用再手写
-                    articulation = infer_articulation(tracked)
+                    # 关节推断默认关着。在四十条有标准答案的合成片段上扫过阈值：
+                    # 最好的一档「可用率」（报出来的东西里既是真关节、类型也判对的比例）
+                    # 只有 0.333，再收紧就一个都报不出来。报一个假关节比不报更糟——
+                    # 用户拖一下就会发现。等运动信号再好一些再打开。
+                    if cfg["perception"]["motion"].get("infer_articulation", False):
+                        articulation = infer_articulation(tracked)
         motion_result = estimate_motion(ts_a, motion_positions, motion_quaternions, cfg, size=median_size, coordinate_space="world",
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
