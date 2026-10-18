@@ -32,7 +32,7 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
-from gwm.perception.registration import infer_articulation, track_rigid            # noqa: E402
+from gwm.perception.registration import infer_articulation, looks_static, track_rigid  # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
 
@@ -173,7 +173,12 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
              for o in evidence["objects"]}
     out: dict[str, list] = {"step/obb": [], "step/register": [],
                             "drift_static/obb": [], "drift_static/register": [],
-                            "rmse": []}
+                            "rmse": [],
+                            # looks_static 在真值静止 / 真值运动的物体上各自多久触发一次。
+                            # 它在运动物体上触发就是误判成静止，而「全判成静止」正是
+                            # 现在混淆矩阵的样子，所以必须单独量。
+                            "static_detector/on_static": [],
+                            "static_detector/on_moving": []}
     for oid, per_frame in masks.items():
         if oid not in truth:
             continue
@@ -196,6 +201,12 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             continue
         registered = np.array(tracked["positions"], float)
         out["rmse"].extend(r for r in tracked["residuals"] if r is not None)
+        sizes = [b["size"] for b in (next((o["obb"] for o in evidence["objects"]
+                                           if o["id"] == oid), []) or [])]
+        diag = float(np.linalg.norm(np.median(sizes, axis=0))) if sizes else 1.0
+        fired = 1.0 if looks_static(tracked, diag) else 0.0
+        key = "static_detector/on_static" if kinds.get(oid) == "static" else "static_detector/on_moving"
+        out[key].append(fired)
         gt = np.stack([truth[oid][t] for t in stamps])
         obb = np.stack([boxes.get(oid, {}).get(t, np.full(3, np.nan)) for t in stamps])
         gt_rel = gt - gt[0]
@@ -308,7 +319,8 @@ def main() -> int:
     for key, values in merged.items():
         if not values:
             continue
-        extra = f"  均值 {statistics.mean(values):>6.3f}" if key.endswith("fired") or key == "correct_kind" else ""
+        extra = (f"  均值 {statistics.mean(values):>6.3f}"
+                 if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
         print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
     return 0
 
