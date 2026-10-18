@@ -196,8 +196,9 @@ def main() -> int:
         chains = merge_fragment_chains(
             program,
             max_gap_diagonals=float(syn.get("fragment_max_gap_diagonals", 2.5)),
-            min_chain=int(syn.get("fragment_min_chain", 3)),
-            min_elongation=float(syn.get("fragment_min_elongation", 3.0)))
+            min_chain=int(syn.get("fragment_min_chain", 2)),
+            min_elongation=float(syn.get("fragment_min_elongation", 3.0)),
+            same_class_only=bool(syn.get("fragment_same_class_only", False)))
         if chains:
             print(f"碎片连链: 合掉 {sum(len(c['absorbed']) for c in chains)} 个，"
                   f"成链 {len(chains)} 条 "

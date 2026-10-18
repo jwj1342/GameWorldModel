@@ -94,7 +94,8 @@ def merge_duplicates(program: dict, max_relative_distance: float = 0.5,
 
 
 def merge_fragment_chains(program: dict, max_gap_diagonals: float = 2.5,
-                          min_chain: int = 3, min_elongation: float = 3.0) -> list[dict]:
+                          min_chain: int = 2, min_elongation: float = 3.0,
+                          same_class_only: bool = False) -> list[dict]:
     """把**排成一条线的同类小碎块**合成一个长条。
 
     为什么需要这一步（#56）：真值里一根轨道是 6.4 比 1 的长条，但掩码只覆盖它的
@@ -111,12 +112,26 @@ def merge_fragment_chains(program: dict, max_gap_diagonals: float = 2.5,
     （阈值 2.0 时 283 对里有 86 对会被合）。
 
     所以这里用一个碎片有、而真实物体没有的特征：**它们排成一条线**。一排小的、
-    同类的、共线的东西是一个长条；两个碰巧挨近的不同物体不会连成链，也不会细长。
-    三个判据缺一不可：
+    共线的东西是一个长条；两个碰巧挨近的不同物体不会连成链，也不会细长。
 
-      `max_gap_diagonals`  只连**相邻**的，不是凡是同类就连
-      `min_chain`          至少三个才算链——两个挨近的本来就该交给 merge_duplicates
-      `min_elongation`     合出来必须是**细长**的，不然就是一堆挤在一起的东西
+      `max_gap_diagonals`  只连**相邻**的
+      `min_elongation`     合出来必须是**细长**的——这是安全阀：三个堆叠的箱子也会
+                           连通，但合出来是方的不是长条，所以不合
+      `min_chain`          至少几块才算链
+
+    **两个前提我第一版设错了，量完才改：**
+
+    `same_class_only` 默认**关着**。第一版按类名分组，实测八组真碎片里只有 **3 组**
+    类名一致——同一根地面的 6 块碎片被贴了 `lava` 和 `pod` 两个名字。而这个数据集的
+    类名本来就无意义（生成器从词表挑名字再独立配基本体）。按类名分组等于用一个
+    已被证伪的信号去拆散正确的分组，端到端跑下来一条链都没合上。
+
+    `min_chain` 从 3 降到 2。实测八组里只有 **3 组**有三块以上，五组是两块。降到 2
+    不会抢 `merge_duplicates` 的活，因为 `min_elongation` 仍然守着：两块挨近且合起来
+    细长的是碎片，合起来方的是两个物体。
+
+    （实测的间距中位是 0.68 个对角线，所以 `max_gap_diagonals=2.5` 是宽松的，
+    22 个碎片里 17 个能连上，这一条不是瓶颈。）
 
     返回每次合并的记录。合不成链的一个都不动。
     """
@@ -133,7 +148,8 @@ def merge_fragment_chains(program: dict, max_gap_diagonals: float = 2.5,
             usable.append((node, np.asarray(centre, float), diag))
     by_class: dict[str, list] = {}
     for item in usable:
-        by_class.setdefault(str(item[0].get("class", "")).lower(), []).append(item)
+        key = str(item[0].get("class", "")).lower() if same_class_only else ""
+        by_class.setdefault(key, []).append(item)
 
     merged: list[dict] = []
     drop: set[int] = set()

@@ -70,3 +70,30 @@ def test_不同类别不合():
             node("c", [0.6, 0.05, 0.0], [0.2, 0.1, 0.1], "beacon")]
     program = {"objects": objs}
     assert merge_fragment_chains(program) == []
+
+
+def test_碎片类名不一致也要能合():
+    """实测八组真碎片里只有 3 组类名一致——同一根地面的 6 块被贴了 lava 和 pod
+    两个名字。而这个数据集的类名本来就无意义（生成器从词表挑名字再独立配基本体）。
+
+    按类名分组等于用一个已被证伪的信号去拆散正确的分组，端到端跑下来一条链都没合上。
+    """
+    objs = [node("a", [0.0, 0.05, 0.0], [0.2, 0.1, 0.1], "lava"),
+            node("b", [0.3, 0.05, 0.0], [0.2, 0.1, 0.1], "pod"),
+            node("c", [0.6, 0.05, 0.0], [0.2, 0.1, 0.1], "lava")]
+    program = {"objects": objs}
+    merged = merge_fragment_chains(program)
+    assert len(merged) == 1, f"类名不一致就不合了：{merged}"
+    assert len(program["objects"]) == 1
+
+
+def test_两块也能合但必须细长():
+    """min_chain 从 3 降到 2——实测八组里五组是两块。安全阀是细长那条，不是块数。"""
+    thin = {"objects": [node("a", [0.0, 0.05, 0.0], [0.3, 0.08, 0.08]),
+                        node("b", [0.4, 0.05, 0.0], [0.3, 0.08, 0.08])]}
+    assert len(merge_fragment_chains(thin)) == 1, "两块细长的该合"
+
+    fat = {"objects": [node("a", [0.0, 0.1, 0.0], [0.2, 0.2, 0.2], "crate"),
+                       node("b", [0.25, 0.1, 0.0], [0.2, 0.2, 0.2], "crate")]}
+    assert merge_fragment_chains(fat) == [], "两个挨近的方块不是碎片，是两个物体"
+    assert len(fat["objects"]) == 2
