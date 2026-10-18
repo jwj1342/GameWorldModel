@@ -32,6 +32,14 @@ export function inferSlots(program, registry, kernelCfg = null) {
 export class PlatformerTemplate {
   constructor({ program, scene, registry, physics, kernelCfg = null }) {
     this.program = program; this.scene = scene; this.registry = registry; this.physics = physics;
+    // 每个槽位是程序给的还是这里猜的，要记下来。走兜底猜出来的槽位几乎必然「一出生
+    // 就通关」——出生点和目标各放在同一块地面的两个角上，中间没有任何障碍。那种试玩
+    // 结果和一次真的走到目标的试玩，产出的 verdict.json 原来长得一模一样。
+    const given = program.binding?.slots ?? {};
+    this.slotSource = {};
+    for (const key of ['player_spawn', 'goal_volume', 'collectibles', 'hazards']) {
+      this.slotSource[key] = given[key] != null ? 'program' : 'inferred';
+    }
     this.slots = inferSlots(program, registry, kernelCfg);
     this.spawn = new THREE.Vector3(...this.slots.player_spawn);
     this.goal = { pos: new THREE.Vector3(...this.slots.goal_volume.pos), extent: new THREE.Vector3(...(this.slots.goal_volume.extent ?? [1.5, 2, 1.5])) };

@@ -6,12 +6,30 @@ from ..feedback.render import run_harness
 
 REPO = Path(__file__).resolve().parents[2]
 
+def discount_untrusted(verdict: dict) -> dict:
+    """槽位是模板猜出来的，这次判定就不算通过。
+
+    出生点和目标被兜底规则放在同一块地面的两个角上，中间没有任何障碍，于是几乎必然
+    「一出生就通关」。那种结果混进通过率，报出来的可玩性就是假的。
+
+    原始的规则判定保留在 `playable_rule` 里，不丢信息；默认那个 `playable` 改成
+    失败，因为「判不了」和「判过了」之间，默认应该偏向前者。
+    """
+    if verdict.get("trustworthy") is not False:
+        return verdict
+    verdict["playable_rule"] = verdict.get("playable")
+    verdict["playable"] = False
+    verdict.setdefault("untrustworthy_reason", "槽位由模板兜底猜出，这次试玩不计入通过率")
+    return verdict
+
+
 def playtest(game_dir: Path, out_dir: Path, cfg: dict, client=None, video_frame: str | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     cp = run_harness("playtest.mjs", ["--game", str(game_dir), "--out", str(out_dir), "--seconds", str(cfg["playtest"]["seconds"]), "--shot-every", str(cfg["playtest"]["shot_every_s"])], timeout=3600)
     (out_dir / "harness_stdout.txt").write_text(cp.stdout + "\n--- stderr ---\n" + cp.stderr)
     vpath = out_dir / "verdict.json"
     verdict = json.loads(vpath.read_text()) if vpath.exists() else {"reached_goal": False, "stuck": False, "playable": False, "error": cp.stderr[-800:]}
+    verdict = discount_untrusted(verdict)
     if client is not None and cfg["playtest"].get("vlm_review", True):
         frames = sorted((out_dir / "frames").glob("rgb_*.png"))
         pick = frames[:: max(1, len(frames) // 6)][:6]
