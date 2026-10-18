@@ -1,7 +1,7 @@
 // scene.js — 把 program.json 的 static[] 与 objects[] 变成 three.js 节点，并给每个物体分配 24 位 ID 颜色
 import * as THREE from 'three';
 import { makePose, isSimulated } from './motions.js';
-import { fitToExtent } from './assets.js';
+import { fitToExtent, tintToMeasured } from './assets.js';
 
 // 调色板是 DSL 契约的一部分：schema 的 $defs.materialName 列的就是这些词，
 // tests/test_style_kernel.mjs 盯着两边不许漂。名字写错了会悄悄变成灰色，
@@ -27,6 +27,10 @@ export const MATERIALS = {
   glass: { color: 0xbfe4ea, roughness: 0.1, transparent: true, opacity: 0.4 },
   cardboard: { color: 0xc49a6c, roughness: 0.9 },
 };
+
+// 实测颜色是否迁移到资产上。由 kernel_config 控制，缺省开启。
+let TINT_ASSETS = true;
+export function setTintAssets(on) { TINT_ASSETS = !!on; }
 
 const hex = (v, fallback) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? parseInt(v.slice(1), 16) : fallback);
 
@@ -102,9 +106,12 @@ export function buildNode(spec, assetScene = null) {
     : [{ part: resolved, collider: { shape: resolved.shape, extent: resolved.extent ?? resolved.scale, size: resolved.size, radius: resolved.radius, height: resolved.height, axis: resolved.axis, offset: [0, 0, 0] } }];
   for (const { collider } of parts) colliders.push(collider);
   if (assetScene) {
-    // 真网格只替换外观。材质跟着 GLB 自己带的走——库里的资产是美术做好的，
-    // 再套一层我们按类名猜出来的调色板词只会让它更不像。
-    group.add(fitToExtent(assetScene.clone(true), extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent));
+    // 真网格替换外观。材质原则上跟着 GLB 自己带的走——库里的资产是美术做好的，
+    // 套一层按类名猜出来的调色板词只会更不像。但**实测到的**颜色是另一回事：
+    // 它来自视频本身，所以按它把资产的平均色迁过去，同时保留资产的相对色彩变化。
+    const fitted = fitToExtent(assetScene.clone(true), extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent);
+    const measured = typeof spec.material === 'object' && spec.material ? spec.material.base_color : null;
+    group.add(measured && TINT_ASSETS ? tintToMeasured(fitted, measured) : fitted);
   } else if (resolved.kind === 'composite') {
     for (const { part } of parts) {
       const m = new THREE.Mesh(primitiveGeometry(part), part.material ? makeMaterial(part.material) : mat);

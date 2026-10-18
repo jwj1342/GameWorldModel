@@ -62,3 +62,53 @@ export async function loadAssets(baseUrl = '.') {
   if (failures.length) console.warn('[gwm] asset load failed:', failures);
   return { scenes, failures };
 }
+
+
+/** 把实测到的颜色迁移到资产上，保留资产自身的相对色彩变化。
+ *
+ * 挂了真网格之后，程序里那条 material 本来是不生效的——内核用 GLB 自带的材质。
+ * 消融测出来这件事有代价：牛顿摆那条昏暗的金属场景上，配上彩色低多边形道具之后
+ * 重渲染相似度反而掉了（0.033 -> 0.017）。问题不在资产这条路线，在库的风格。
+ *
+ * 做法不是把整个模型刷成一个颜色（那会把美术做好的多色细节抹平），而是算出资产
+ * 当前的平均色，再按「目标色 / 平均色」逐通道缩放。这样一辆红蓝相间的火车被迁到
+ * 深灰色时，红的部分仍然比蓝的部分亮，只是整体偏向深灰。倍率要夹住，否则遇到
+ * 接近黑色的资产会炸。
+ *
+ * 下限给到 0.05 而不是 0.25：three.js 会把 `#404040` 这样的 sRGB 十六进制转成线性
+ * （约 0.051），而库里的资产多半是明亮的游戏道具。要把一个亮资产迁到昏暗场景里，
+ * 倍率本来就得很小——而昏暗场景正是这件事最该起作用的地方（牛顿摆那条）。
+ */
+export function tintToMeasured(object, hexColour, { maxGain = 3.0, minGain = 0.05 } = {}) {
+  const target = new THREE.Color(hexColour);
+  const sum = new THREE.Color(0, 0, 0);
+  let count = 0;
+  object.traverse(node => {
+    if (!node.isMesh || !node.material) return;
+    for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+      if (material.color) { sum.add(material.color); count++; }
+    }
+  });
+  if (!count) return object;
+  const mean = sum.multiplyScalar(1 / count);
+  const gain = ['r', 'g', 'b'].map(c => {
+    const value = mean[c] > 1e-4 ? target[c] / mean[c] : 1.0;
+    return Math.min(maxGain, Math.max(minGain, value));
+  });
+  object.traverse(node => {
+    if (!node.isMesh || !node.material) return;
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    const tinted = materials.map(material => {
+      // 克隆：GLB 的材质在多个实例之间共享，直接改会把别的物体也改掉
+      const copy = material.clone();
+      if (copy.color) {
+        copy.color.setRGB(Math.min(1, copy.color.r * gain[0]),
+                          Math.min(1, copy.color.g * gain[1]),
+                          Math.min(1, copy.color.b * gain[2]));
+      }
+      return copy;
+    });
+    node.material = Array.isArray(node.material) ? tinted : tinted[0];
+  });
+  return object;
+}

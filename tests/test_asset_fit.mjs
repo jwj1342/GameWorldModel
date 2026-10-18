@@ -5,6 +5,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { fitToExtent } from '../kernel/assets.js';
 import { buildNode } from '../kernel/scene.js';
+import { tintToMeasured } from '../kernel/assets.js';
 
 function cube(size = 2, offset = [5, 5, 5]) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), new THREE.MeshBasicMaterial());
@@ -60,4 +61,42 @@ test('挂了资产之后碰撞体和没挂时一模一样', () => {
   const withAsset = buildNode(spec, cube(1, [0, 0, 0]));
   assert.deepEqual(withAsset.colliders, plain.colliders);
   assert.notEqual(withAsset.group.children.length, 0);
+});
+
+test('实测颜色迁到资产上，保留资产自身的相对色彩变化', () => {
+  const group = new THREE.Group();
+  // 一亮一暗两块，平均色是 0.5 灰
+  const bright = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(0.8, 0.8, 0.8) }));
+  const dark = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(0.2, 0.2, 0.2) }));
+  group.add(bright, dark);
+  tintToMeasured(group, '#404040');
+  const colours = [];
+  group.traverse(o => { if (o.isMesh) colours.push(o.material.color.r); });
+  assert.ok(colours[0] > colours[1], '亮的那块仍然该比暗的亮');
+  // three.js 把 sRGB 的 #404040 转成线性，约 0.051——不是 0.25。
+  // 这正是倍率下限不能定在 0.25 的原因：那会把「迁到昏暗场景」这件事整个挡住。
+  const target = new THREE.Color('#404040').r;
+  const mean = (colours[0] + colours[1]) / 2;
+  assert.ok(Math.abs(mean - target) < 0.02,
+    `平均色该迁到 ${target.toFixed(3)}（线性），实际 ${mean.toFixed(3)}`);
+});
+
+test('迁色不会改到共享的原材质', () => {
+  const shared = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.9, 0.1, 0.1) });
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
+  tintToMeasured(group, '#003300');
+  assert.ok(Math.abs(shared.color.r - 0.9) < 1e-6, 'GLB 的材质在实例之间共享，不能就地改');
+});
+
+test('近乎全黑的资产不会把倍率炸掉', () => {
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(0.001, 0.001, 0.001) })));
+  tintToMeasured(group, '#ffffff');
+  let colour = null;
+  group.traverse(o => { if (o.isMesh) colour = o.material.color; });
+  assert.ok(Number.isFinite(colour.r) && colour.r <= 1.0 && colour.r >= 0);
 });
