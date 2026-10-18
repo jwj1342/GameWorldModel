@@ -29,6 +29,7 @@ if str(REPO) not in sys.path:
 def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict | None:
     """编译 -> 稳定（带分离）-> 采纳 -> 重编译 -> 探一遍交互。"""
     from gwm.compiler.compile import compile_program
+    from gwm.synthesis.contact import settle_on_ground
     from gwm.synthesis.stabilise import apply_settled
     from gwm.feedback.interaction_probe import measure
 
@@ -49,6 +50,12 @@ def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict
     except (subprocess.SubprocessError, OSError) as error:
         return {"clip": clip_dir.name, "ok": False, "reason": type(error).__name__}
     rows = apply_settled(program, json.loads(settle_json.read_text(encoding="utf-8")))
+    # 管线在采纳之后还会再过一次接触装配：仿真允许极小的穿透来保持接触稳定，而校验器
+    # 按几何判定，两者容差对不上，不补这一下有些片段会重编译不过。这里必须照做，
+    # 否则扫出来的数和真正跑出来的不是一回事——而且它正好能回答一个问题：
+    # 这次按地面贴合的调整，会不会把刚刚分开的物体又推回去。
+    refit = len([m for m in settle_on_ground(program) if m["applied"]]) if any(
+        r.get("applied") for r in rows) else 0
     (out / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False),
                                       encoding="utf-8")
     result = compile_program(program, out / "game", cfg)
@@ -62,7 +69,7 @@ def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict
             if (o.get("drag") or {}).get("mode") == "free"]
     pens = [p for p in pens if isinstance(p, (int, float))]
     return {"clip": clip_dir.name, "ok": True,
-            "applied": sum(1 for r in rows if r.get("applied")),
+            "applied": sum(1 for r in rows if r.get("applied")), "refit": refit,
             "declared": s["declared_grabbable"], "works": s["works"],
             "success": s["manipulation_success_fraction"],
             "clickable": s["median_clickable_fraction"],
@@ -103,14 +110,17 @@ def main() -> int:
         v = [r[key] for r in rows if r.get("ok") and isinstance(r.get(key), (int, float))]
         return round(statistics.median(v), 3) if v else None
 
-    print(f"\n{'分离秒数':>8}{'片段':>6}{'声明能抓':>10}{'真拖得动':>10}"
-          f"{'成功率中位数':>14}{'插入深度中位数':>16}{'插超1cm比例':>14}")
+    print(f"\n{'分离秒数':>8}{'片段':>6}{'声明能抓':>10}{'真拖得动':>10}{'汇总成功率':>12}"
+          f"{'插入深度中位数':>16}{'插超1cm比例':>14}{'贴合改动':>10}")
     for separate, rows in table.items():
         ok = [r for r in rows if r.get("ok")]
-        print(f"{separate:>8.2f}{len(ok):>6}{sum(r['declared'] for r in ok):>10}"
-              f"{sum(r['works'] for r in ok):>10}{str(med(rows, 'success')):>14}"
+        declared = sum(r["declared"] for r in ok)
+        works = sum(r["works"] for r in ok)
+        print(f"{separate:>8.2f}{len(ok):>6}{declared:>10}{works:>10}"
+              f"{(works / declared if declared else 0):>12.3f}"
               f"{str(med(rows, 'penetration_median')):>16}"
-              f"{str(med(rows, 'penetration_over_1cm')):>14}")
+              f"{str(med(rows, 'penetration_over_1cm')):>14}"
+              f"{sum(r.get('refit') or 0 for r in ok):>10}")
     print("\n看的是「真拖得动」那一列：插入深度降下去但拖得动的没变多，这一步就不值得做。")
     return 0
 
