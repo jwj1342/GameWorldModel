@@ -48,13 +48,22 @@ def test_挤成一团的不合():
     assert len(program["objects"]) == 3
 
 
-def test_只有两块不合():
-    """两个挨近的本来就该交给 merge_duplicates，这里不抢它的活。"""
-    objs = [node("rail_0", [0.0, 0.05, 0.0], [0.2, 0.1, 0.1]),
-            node("rail_1", [0.3, 0.05, 0.0], [0.2, 0.1, 0.1])]
-    program = {"objects": objs}
-    assert merge_fragment_chains(program) == []
-    assert len(program["objects"]) == 2
+def test_块数不是安全阀_细长才是():
+    """**这条测试原来断言「只有两块不合」，是我凭直觉设的 min_chain=3 的产物。**
+
+    量完真实碎片才知道设错了：八组真碎片里只有 3 组有三块以上，五组是两块。
+    所以 min_chain 降到 2，而安全阀交给**细长**那条——两块挨近且合起来细长的是
+    碎片，合起来方的是两个物体。
+
+    留着这条测试是为了把这个取舍钉住：块数少不该是拒绝的理由，形状才是。
+    """
+    thin = {"objects": [node("rail_0", [0.0, 0.05, 0.0], [0.2, 0.1, 0.1]),
+                        node("rail_1", [0.3, 0.05, 0.0], [0.2, 0.1, 0.1])]}
+    assert len(merge_fragment_chains(thin)) == 1, "两块细长的碎片该合"
+
+    fat = {"objects": [node("a", [0.0, 0.1, 0.0], [0.2, 0.2, 0.2], "crate"),
+                       node("b", [0.25, 0.1, 0.0], [0.2, 0.2, 0.2], "crate")]}
+    assert merge_fragment_chains(fat) == [], "两个挨近的方块是两个物体，不是碎片"
 
 
 def test_隔得太远的不连成链():
@@ -64,12 +73,23 @@ def test_隔得太远的不连成链():
     assert len(program["objects"]) == 5
 
 
-def test_不同类别不合():
+def test_类名不同照样合_除非显式要求同类():
+    """**这条原来断言「不同类别不合」，也是我设错的前提。**
+
+    实测八组真碎片里只有 3 组类名一致——一根地面的 6 块被贴了 lava 和 pod 两个
+    名字，而这个数据集的类名本来就无意义。按类名分组等于用一个已被证伪的信号去
+    拆散正确的分组，端到端跑下来一条链都没合上。
+
+    所以默认不看类名。但开关留着：换成类名可靠的数据集时它有用。
+    """
     objs = [node("a", [0.0, 0.05, 0.0], [0.2, 0.1, 0.1], "rail"),
             node("b", [0.3, 0.05, 0.0], [0.2, 0.1, 0.1], "crate"),
             node("c", [0.6, 0.05, 0.0], [0.2, 0.1, 0.1], "beacon")]
-    program = {"objects": objs}
-    assert merge_fragment_chains(program) == []
+    assert len(merge_fragment_chains({"objects": list(objs)})) == 1, "默认不该看类名"
+
+    strict = {"objects": list(objs)}
+    assert merge_fragment_chains(strict, same_class_only=True) == [], "显式要求同类时才拆开"
+    assert len(strict["objects"]) == 3
 
 
 def test_碎片类名不一致也要能合():
