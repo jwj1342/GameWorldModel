@@ -46,6 +46,9 @@ perception:
                                # 一次都没触发，却在 5.4% 的运动物体上误触发。静止物体
                                # 每步位移是对角线的 0.165、运动物体 0.179，两条分布重合，
                                # 没有可用的阈值。见 probe_motion_signal.py --mode register
+    registration_smooth_window: 15 # 配准轨迹的时间平滑窗口。实测 9 和 15 的轨迹误差一样
+                                   # （0.140），但 15 把静止物体的漂移从 0.231 压到 0.084，
+                                   # 反超包围盒中心的 0.170。见 probe_motion_signal --mode register
     use_registration: true   # 运动估计用跨帧配准的轨迹，而不是包围盒中心序列。
                              # 实测位移误差 0.253 -> 0.188 m；静止物体漂移目前反而略大，
                              # 所以留了开关。见 scripts/probe_motion_signal.py --mode register                         # 世界坐标多假设估计；证据、残差、置信度阈值
