@@ -294,9 +294,15 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
         # 原始判据一并记下来：这样扫阈值不用重跑感知，一次测量能回答「阈值定多少」
         total_rot = float(np.degrees(np.arccos(np.clip(
             (np.trace(np.asarray(tracked.get("total_rotation") or np.eye(3), float)) - 1.0) / 2.0, -1.0, 1.0))))
+        # 运动分类器对同一个物体的判断。#63 的第一条建议是「两个估计器同时同意时
+        # 置信度更高」，要验它就得把两边放在同一行里——它们是独立的两条路：
+        # 关节推断解的是配准逐步变换里的轴和支点，运动分类拟合的是整条轨迹的形状。
+        guess = next((o.get("motion_guess") or {} for o in evidence.get("objects", [])
+                      if o.get("id") == oid), {})
         out.setdefault("rows", []).append({
             "id": oid, "gt_kind": kind, "is_joint": kind in joint_types,
             "fired": spec["grab"] if spec else None,
+            "motion_type": str(guess.get("type", "unknown")),
             "total_rotation_deg": round(total_rot, 3),
             "axis_consistency": round(float((spec.get("evidence") or {}).get("axis_consistency", 0.0)), 3) if spec else None,
             "straightness": round(float((spec.get("evidence") or {}).get("straightness", 0.0)), 3) if spec else None,
