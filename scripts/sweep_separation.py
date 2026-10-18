@@ -95,8 +95,10 @@ def main() -> int:
              if (p / "program_before_settle.json").is_file()][:a.limit]
     print(f"片段 {len(clips)} 条，配置 {a.seconds}")
     table = {}
-    for raw in a.seconds.split(","):
-        separate = float(raw)
+    wanted = [float(raw) for raw in a.seconds.split(",")]
+    if len(set(wanted)) != len(wanted):
+        raise SystemExit("--seconds 里有重复的值；表会少一行而且看不出来")
+    for separate in wanted:
         rows = []
         for clip_dir in clips:
             row = build_variant(clip_dir, Path(a.work) / f"sep_{separate}" / clip_dir.name,
