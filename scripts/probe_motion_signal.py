@@ -178,7 +178,12 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                             # 它在运动物体上触发就是误判成静止，而「全判成静止」正是
                             # 现在混淆矩阵的样子，所以必须单独量。
                             "static_detector/on_static": [],
-                            "static_detector/on_moving": []}
+                            "static_detector/on_moving": [],
+                            # 每步位移相对物体对角线的比例。静止和运动的分布差多少，
+                            # 决定了这个判据有没有可用的阈值——两条分布重叠得厉害
+                            # 就说明判据本身不行，不是阈值没调好。
+                            "step_frac/static": [],
+                            "step_frac/moving": []}
     for oid, per_frame in masks.items():
         if oid not in truth:
             continue
@@ -205,8 +210,12 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                                            if o["id"] == oid), []) or [])]
         diag = float(np.linalg.norm(np.median(sizes, axis=0))) if sizes else 1.0
         fired = 1.0 if looks_static(tracked, diag) else 0.0
-        key = "static_detector/on_static" if kinds.get(oid) == "static" else "static_detector/on_moving"
-        out[key].append(fired)
+        is_static = kinds.get(oid) == "static"
+        out["static_detector/on_static" if is_static else "static_detector/on_moving"].append(fired)
+        steps = tracked.get("step_translation") or []
+        if steps and diag > 1e-6:
+            out["step_frac/static" if is_static else "step_frac/moving"].append(
+                float(np.median(steps)) / diag)
         gt = np.stack([truth[oid][t] for t in stamps])
         obb = np.stack([boxes.get(oid, {}).get(t, np.full(3, np.nan)) for t in stamps])
         gt_rel = gt - gt[0]
