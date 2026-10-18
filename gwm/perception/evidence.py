@@ -202,6 +202,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                  cfg["perception"].get("color_min_pixels", 4),
                                  cfg["perception"].get("color_aspect_tolerance", 0.02))
     for o in tracks.objects:
+        registration = None   # 配准残差，只有走配准那条路的物体才有
         obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = is_static_class(o.phrase, cfg)
@@ -258,6 +259,18 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         motion_source, articulation = "obb_centre", None
         if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
             tracked = track_rigid(clouds)
+            # 配准残差按物体记下来。它和 motion_guess.residual 是两回事：那个是运动
+            # 假设拟合轨迹的残差，这个是「这团点在帧间能不能当成一个刚体对齐」。
+            # 后者不依赖任何运动模型，是独立的一维信息——#56 里排除掉的那八个判别子
+            # 都没碰到它。按物体自身尺度归一化，否则大物体天然残差大。
+            _res = [r for r in (tracked.get("residuals") or []) if r is not None]
+            if _res:
+                _diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))
+                registration = {
+                    "rmse_m": round(float(np.median(_res)), 5),
+                    "rmse_over_diagonal": round(float(np.median(_res)) / max(_diag, 1e-9), 4),
+                    "frames": len(clouds),
+                }
             if tracked["ok"] and len(tracked["positions"]) == len(c_a):
                 diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))
                 def _registered_quats(base_quat):
@@ -310,6 +323,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         geometry_conf = float(np.mean([ob["conf"] for ob in obbs])) if obbs else "unknown"
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
                         "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
+                        **({"registration": registration} if registration else {}),
                         "observations": observations,
                         "appearance": appearances[o.id],
                         **({"articulation": articulation} if articulation else {}),
