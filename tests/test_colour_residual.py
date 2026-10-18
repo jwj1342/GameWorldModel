@@ -143,3 +143,15 @@ def test_没写过光照时用内核的缺省值起步():
     out = fit_lighting(program, [{"id": "a", "clipped_by": 1.2}])
     assert out["before"]["key"] == 1.6, "和 kernel/scene.js 的 DEFAULT_LIGHTING 一致"
     assert program["style"]["lighting"]["key"]["intensity"] == 1.92
+
+
+def test_整体已经够亮就不再抬光照():
+    """第一版漏了这道闸：整体偏亮了但还剩一两个物体撞顶，光照继续涨，和颜色那一路
+    打架。实测亮度比从 1.021 一路爬到 1.122，每通道误差从 3.17 反涨到 15.33。"""
+    from gwm.feedback.colour import fit_lighting
+    program = {"style": {"lighting": {"key": {"intensity": 2.0}}}}
+    rows = [{"id": "a", "clipped_by": 1.3}]
+    assert fit_lighting(program, rows, luma_ratio=1.05) is None
+    assert program["style"]["lighting"]["key"]["intensity"] == 2.0, "一个字段都别碰"
+    # 还不够亮的时候照常抬
+    assert fit_lighting(program, rows, luma_ratio=0.8) is not None

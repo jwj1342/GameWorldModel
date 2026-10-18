@@ -150,16 +150,21 @@ def fit_colours(program: dict, residual: dict, damping: float = 1.0,
     return applied
 
 
-def fit_lighting(program: dict, applied: list[dict], max_step: float = 1.5) -> dict | None:
+def fit_lighting(program: dict, applied: list[dict], max_step: float = 1.5,
+                 luma_ratio: float | None = None) -> dict | None:
     """反照率余量用尽的时候，抬光照。
 
     只拟合颜色有一个结构性上限：材质颜色撞到 255 之后，增益再大也没用，残差卡成平台。
     那时剩下的自由度是光照强度，而它是场景级的——样本量大、噪声小，比逐物体的颜色
     更好估。
 
-    做法是取被截断的那些物体「还差多少倍」的中位数，按它抬主光和环境光。只抬不降：
-    降光照是颜色那一路该做的事，两边都动会互相抵消。
+    `luma_ratio` 是这一轮量到的整体亮度比。**只有它还小于 1 的时候才抬光照**——
+    第一版漏了这道闸，结果是：整体已经偏亮了，但场景里还剩一两个物体撞顶，于是光照
+    继续涨，和颜色那一路打起来。实测一条真实视频第二轮冲到 1.021、误差 3.17，之后
+    光照又抬了三轮，亮度比爬到 1.122、误差反涨到 15.33。机制对，控制律错。
     """
+    if luma_ratio is not None and luma_ratio >= 0.99:
+        return None
     clipped = [row["clipped_by"] for row in applied
                if isinstance(row.get("clipped_by"), (int, float)) and row["clipped_by"] > 1.01]
     if not clipped:

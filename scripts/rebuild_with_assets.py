@@ -300,7 +300,8 @@ def main() -> int:
             rows = fit_colours(program, residual, damping=0.7)
             # 反照率撞到 255 之后增益就被截断，残差卡成平台。那时唯一还能动的自由度
             # 是光照强度，它是场景级的，样本量大、噪声小。
-            lit = fit_lighting(program, rows)
+            lit = fit_lighting(program, rows,
+                               luma_ratio=residual.get("luma_ratio_median"))
             if lit:
                 print(f"  反照率余量用尽（{lit['clipped_objects']} 个物体被截断），"
                       f"光照抬 {lit['factor']} 倍", flush=True)
