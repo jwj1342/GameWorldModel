@@ -66,6 +66,24 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
         except Exception as e:
             log.record("perception", f"geometry_{name}_failed", repr(e), action_taken="next backend", exc=e); fallbacks.append(f"geometry:{name}")
     if geom is None: raise RuntimeError("all geometry backends failed")
+    # 消融档位：只把相机换成真值，深度和掩码仍走神经感知。
+    #
+    # 为什么需要它：物体的世界坐标 = 相机位姿 x 相机坐标下的观测。#7 下面十条排除全在
+    # 相机**下游**，而实测重建相机的位移误差占它自己行程的 64%（尺度对齐之后），行程比
+    # 本身在 0.13 到 6.9 倍之间乱跳。如果相机是主因，这一档的运动类型准确率应该明显
+    # 高于全神经；如果不是，说明还有别的东西。纯替换，不实现任何新方法。
+    gt_camera = pc.get("gt_camera_program")
+    if gt_camera:
+        from .gt_backend import GTGeometryBackend
+        truth = GTGeometryBackend(gt_camera, fc["geometry_width"]).estimate(gfiles, work_idx, cfg)
+        if len(truth.cam_to_world) == len(geom.cam_to_world):
+            geom.cam_to_world = truth.cam_to_world
+            geom.intrinsics = truth.intrinsics
+            geom.notes = (geom.notes or "") + f" | 相机位姿换成真值（{gt_camera}），深度保持神经"
+        else:
+            log.record("perception", "gt_camera_frame_mismatch",
+                       f"{len(truth.cam_to_world)} != {len(geom.cam_to_world)}",
+                       action_taken="保留重建的相机")
     save_geometry(geom, out_dir / "geometry.npz")
     # segmentation backend chain
     tracks = None
