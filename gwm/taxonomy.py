@@ -17,6 +17,10 @@ def is_ground_class(name: str) -> bool:
 
     实测的后果：有片段把 1.9 x 0.4 x 1.5 米的「ground」建成了一个沿轨迹运动的可拖动
     物体，它横在开场视角的最前面，后面十一个物体一个都点不到。
+
+    刻意用**完全相等**而不是子串或者分词匹配。子串会把 playground 一起吃掉；分词看着
+    更聪明（能认出「wooden floor」），但同样会把「floor lamp」判成地面，而落地灯是个
+    不折不扣的物体。这条规则的强度很高——它不看运动假设直接改归属——所以宁可漏不可错。
     """
     return (name or "").strip().lower() in GROUND_CLASSES
 
