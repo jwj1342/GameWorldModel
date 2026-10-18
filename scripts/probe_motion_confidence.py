@@ -59,6 +59,7 @@ def main() -> int:
     margins: list[float] = []
     by_truth: dict[str, Counter] = {}
     angles: dict[str, list] = {}
+    structure: dict[str, list] = {}
     for clip_dir in clips:
         gt_file = Path(a.gt_root) / clip_dir.name / "program.json"
         if not gt_file.is_file():
@@ -109,6 +110,23 @@ def main() -> int:
                 if n > 1e-9:
                     cos = abs(float(np.dot(v / n, view)))
                     angles.setdefault(want, []).append(np.degrees(np.arccos(min(1.0, cos))))
+            # 结构判据：真的滑轨有行程端点，会往复；自由轨迹和漂移是单向的。
+            # 沿主方向投影，数速度变号的次数，再看有多少时间几乎静止。
+            boxes = obj.get("obb") or []
+            if len(boxes) >= 6:
+                pts = np.array([[float(v) for v in b["center"]] for b in boxes])
+                delta = pts[-1] - pts[0]
+                span = np.linalg.norm(delta)
+                principal = delta / span if span > 1e-9 else np.array([1.0, 0.0, 0.0])
+                along = pts @ principal
+                vel = np.diff(along)
+                scale = np.max(np.abs(vel)) if len(vel) else 0.0
+                if scale > 1e-9:
+                    sign = np.sign(vel)
+                    nonzero = sign[np.abs(vel) > 0.1 * scale]
+                    reversals = int(np.sum(np.diff(nonzero) != 0)) if len(nonzero) > 1 else 0
+                    rest = float(np.mean(np.abs(vel) < 0.1 * scale))
+                    structure.setdefault(want, []).append((reversals, rest))
             details = mg.get("candidate_details") or []
             if details and isinstance(details[0].get("confidence"), (int, float)):
                 confs.append(float(details[0]["confidence"]))
@@ -138,6 +156,14 @@ def main() -> int:
             print(f"    真值 {want:<20} n={len(vals):<3} 中位数 {vals[len(vals)//2]:.1f}  "
                   f"范围 {vals[0]:.1f}~{vals[-1]:.1f}")
         print("    真值静止那一行如果明显更小，说明漂移沿视线，可以拿夹角当判别子。")
+    if structure:
+        print("\n  沿主方向的速度结构（真滑轨应该往复、有停顿；自由轨迹和漂移单向）：")
+        print(f"    {'真值类型':<20}{'样本':>5}{'往复次数中位数':>14}{'几乎静止的时间占比':>18}")
+        for want, vals in sorted(structure.items()):
+            rev = sorted(v[0] for v in vals); rest = sorted(v[1] for v in vals)
+            print(f"    {want:<20}{len(vals):>5}{rev[len(rev)//2]:>14}"
+                  f"{rest[len(rest)//2]:>18.2f}")
+        print("    真 prismatic 的往复次数如果明显高于 trajectory 和 static，就能当判别子。")
     print("\n置信度如果在这里能上到门槛，问题在感知；如果仍然上不去，"
           "分类器的置信度定义本身要重做——它在一条好轨迹上也给不出把握。")
     return 0
