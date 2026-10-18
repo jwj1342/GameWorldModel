@@ -67,6 +67,9 @@ def main() -> int:
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--likeness", action="store_true",
                     help="把重建的场景按输入相机轨迹重渲染，和原视频比相似度")
+    ap.add_argument("--likeness-reference", default=None,
+                    help="当下限用的那个 game 目录。做消融时必须固定，否则各变体的"
+                         "下限不一样，归一化没法比")
     ap.add_argument("--no-scale", action="store_true",
                     help="跳过度量尺度与尺寸回收，用于消融")
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
@@ -210,8 +213,13 @@ def main() -> int:
             if others:
                 break
         # 干净的下限：另一条片段重建出来的场景。同样是低多边形渲染，唯一的区别是场景不对。
-        other_game = next((g for g in sorted(out.parent.glob("*/game"))
-                           if g.parts[-2] != out.name and (g / "program.json").is_file()), None)
+        # 做消融时要用 --likeness-reference 把它固定住：自动挑的话，随着各变体陆续产出，
+        # 挑到的参照会变，下限跟着变，归一化就不可比了（踩过）。
+        if a.likeness_reference:
+            other_game = Path(a.likeness_reference)
+        else:
+            other_game = next((g for g in sorted(out.parent.glob("*/game"))
+                               if g.parts[-2] != out.name and (g / "program.json").is_file()), None)
         like = likeness(Path(result["game_dir"]), frames_list, out / "likeness",
                         str(REPO / "scripts/node_harness.sh"),
                         Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"],
