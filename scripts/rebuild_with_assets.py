@@ -32,7 +32,7 @@ from gwm.assets.embed import AssetIndex, Embedder               # noqa: E402
 from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
-from gwm.feedback.colour import colour_residual                 # noqa: E402
+from gwm.feedback.colour import colour_residual, fit_colours    # noqa: E402
 from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
@@ -80,6 +80,11 @@ def main() -> int:
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
     ap.add_argument("--probe-interaction", action="store_true",
                     help="真的去抓一遍、拖一遍，量出可交互程度（而不是只数程序声明了什么）")
+    ap.add_argument("--fit-colours", type=int, default=0, metavar="N",
+                    help="按闭环残差把材质颜色调 N 轮（#55）。渲出来比视频暗，因为把像素"
+                         "当反照率用、渲染时又乘了一遍光照。两轮实测：合成片段每通道误差"
+                         "16.8 -> 5.3、亮度比 0.833 -> 0.972；真实视频 27.9 -> 6.2、"
+                         "0.627 -> 0.897")
     ap.add_argument("--colour-residual", action="store_true",
                     help="样式那一半的验收指标：渲出来的颜色和视频里量到的差多少。"
                          "重渲染相似度看不见颜色（色相全改错只动 0.007），这一项不能靠它代替")
@@ -274,6 +279,32 @@ def main() -> int:
                   f"范围 {like['min']}~{like['max']}）{scale}", flush=True)
         else:
             print(f"重渲染相似度: 没算成（{like.get('reason')}）", flush=True)
+    if a.fit_colours > 0:
+        # #55 的闭环：量残差、按残差调颜色、重编译、再量。阻尼 0.7 不一轮到位——
+        # 增益是从一次带噪声的测量估出来的，到位容易过冲。
+        frames_file = out / "perception" / "frames" / "frames.json"
+        times = ([fr["t"] for fr in
+                  json.loads(frames_file.read_text(encoding="utf-8"))["frames"]][:6]
+                 if frames_file.is_file() else [])
+        for round_index in range(a.fit_colours):
+            if not times:
+                break
+            residual = colour_residual(Path(result["game_dir"]), program, evidence,
+                                       out / f"colour_fit{round_index}", times)
+            if not residual.get("ok"):
+                print(f"颜色拟合第 {round_index + 1} 轮没算成（{residual.get('reason')}）",
+                      flush=True)
+                break
+            rows = fit_colours(program, residual, damping=0.7)
+            rebuilt = compile_program(program, out / "game", cfg)
+            if not rebuilt["ok"]:
+                print("颜色拟合之后校验未过，这一轮放弃", flush=True)
+                break
+            result = rebuilt
+            print(f"颜色拟合第 {round_index + 1} 轮: 调了 {len(rows)} 个物体，"
+                  f"调之前每通道 {residual['channel_error_median']}/255、"
+                  f"亮度比 {residual['luma_ratio_median']}", flush=True)
+
     if a.colour_residual:
         # 样式那一半。重渲染相似度几乎看不见颜色，所以这一项必须单独量，
         # 否则「样式恢复得准不准」没有数——#52 要的正是这个。
