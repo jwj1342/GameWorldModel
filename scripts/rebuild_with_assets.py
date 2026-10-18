@@ -119,10 +119,14 @@ def main() -> int:
 
     root = library_root(cfg)
     decisions = []
+    # 在 if 外面初始化。下面汇总那一行是 `bool(index) if root else False`——它只守了
+    # root，没守 asset_nodes，于是一条**一个物体都没检出来**的片段（asset_nodes 为 0）
+    # 会在所有工作都做完之后、写汇总时崩在 UnboundLocalError 上，产物全丢。
+    # 实测十二条片段里有两条是这样（test_00000、test_00011）。
+    index = embedder = None
     if root and asset_nodes:
         t1 = time.time()
         catalog = load_catalog(root)
-        index = embedder = None
         index_file = Path(root) / "dinov2_index.npz"
         if not a.no_image_retrieval and index_file.is_file():
             index = AssetIndex.load(index_file)

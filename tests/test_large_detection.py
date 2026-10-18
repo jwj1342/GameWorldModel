@@ -87,3 +87,27 @@ def test_类名像结构件但有证据会动的_仍然是物体():
     guess = {"type": "unknown", "conf": "unknown", "moves": True}
     program = evidence_to_program(evidence([obj_with("belt_1", "belt", guess)]), "c", {})
     assert "belt_1" in ids(program["objects"]), "有证据会动却被当成了固定结构"
+
+
+def test_陷在地面下太深的直接丢掉():
+    """底面在地平面下方好几倍自身高度的「物体」不是能拿起来的东西。
+
+    实测（#56）：103 个预测物体里砍掉 6 个，**全是假阳性，一个命中都没丢**，
+    精确率 0.214 -> 0.227。这是今天为过检量过的十七条信号里唯一不花代价的一条。
+    """
+    box = {"center": [0.0, -3.0, 0.0], "quat": [0, 0, 0, 1], "size": [1.0, 1.0, 1.0], "conf": 0.9}
+    sunk = {"id": "ghost_1", "class_guess": "crate", "confidence": 0.9, "is_dynamic": True,
+            "obb": [{**box, "t": float(t)} for t in (0.0, 1.0, 2.0)],
+            "motion_guess": {"type": "unknown", "conf": "unknown"},
+            "contacts": [], "mask_area_frac": 0.03}
+    program = evidence_to_program(evidence([sunk]), "c", {})
+    assert "ghost_1" not in ids(program["objects"])
+    assert "ghost_1" not in ids(program["static"])
+    # 丢掉了什么要留痕
+    assert any(d["id"] == "ghost_1" for d in program["meta"]["dropped_sunk"])
+
+
+def test_正常坐在地面上的不受影响():
+    program = evidence_to_program(evidence([obj("crate_1", "crate", 0.03)]), "c", {})
+    assert "crate_1" in ids(program["objects"])
+    assert "dropped_sunk" not in program.get("meta", {})

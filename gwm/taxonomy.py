@@ -26,10 +26,23 @@ def is_ground_class(name: str) -> bool:
 
 
 def is_static_class(name: str, cfg: dict | None = None) -> bool:
-    """这个类别是固定结构（墙、地板、轨道、传送带）还是可以动的物体。"""
+    """这个类别是固定结构（墙、地板、轨道、传送带）还是可以动的物体。
+
+    按**词**匹配，不是按子串。`"ground" in "playground"` 是 True，`"table" in
+    "tablet"` 也是——子串匹配会把游乐场滑梯和平板电脑判成固定结构。
+
+    这个 bug 一直潜伏着，因为调用方原来要求「运动分类**肯定地说**它静止」才生效，
+    而运动分类 85% 的时候返回 unknown，等于把这条规则大部分时候关掉了。把那个与
+    条件换成「没有证据表明它会动」之后它立刻咬人：`playground slide` 被判成了固定
+    结构（有测试专门盯这个）。
+
+    比 `is_ground_class` 松一档是有意的：那一条用完全相等，因为它不看运动假设直接
+    改归属，强度太高宁可漏不可错；这一条还要配合「有没有证据会动」一起用，所以
+    允许「wooden floor」「train track」这种带修饰词的写法。
+    """
     words = (cfg or {}).get("perception", {}).get("static_classes") or DEFAULT_STATIC_CLASSES
-    low = (name or "").lower()
-    return any(w in low for w in words)
+    tokens = {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t}
+    return any(w in tokens for w in words)
 
 def slug(text: str, max_len: int = 40) -> str:
     """把任意名字变成合法的程序 id：字母开头，只含字母数字下划线（和 schema 的 pattern 一致）。"""

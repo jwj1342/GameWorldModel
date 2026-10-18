@@ -85,12 +85,23 @@ def main(argv=None) -> int:
                 hit += 1
                 continue
             aligned = p["pos"] @ R0.T + t0       # 和评测用同一个对齐
-            near = min((float(np.linalg.norm(aligned - g["pos"])) for g in gt_static),
-                       default=float("inf"))
-            if near <= a.tol:
-                on_static += 1; static_classes[p["class"]] += 1
-            else:
+            best, bd = None, float("inf")
+            for g in gt_static:
+                d = float(np.linalg.norm(aligned - g["pos"]))
+                if d < bd:
+                    best, bd = g, d
+            if bd > a.tol:
                 orphan += 1; orphan_classes[p["class"]] += 1
+                continue
+            # 「落在结构件附近」还不够。真值里光 rail 就有 45 根，又长又多，任何一个
+            # 瞎检出来的东西都容易落在某根的 0.45 米内。要说它是「真东西放错了列表」，
+            # **类名得对得上**；对不上就只是碰巧离得近，仍然算过检。
+            same = best["class"] and (best["class"] in p["class"] or p["class"] in best["class"])
+            if same:
+                on_static += 1; static_classes[f'{p["class"]} ~ {best["class"]}'] += 1
+            else:
+                orphan += 1
+                orphan_classes[f'{p["class"]}（近 {best["class"]}，类名对不上）'] += 1
 
     if not tot_pred:
         print("没有可用的评测行"); return 1
@@ -99,13 +110,13 @@ def main(argv=None) -> int:
         print(f"（跳过 {len(skipped)} 条：没有对齐信息或产物不全 {skipped}）")
     print()
     print(f"  评测判定配上真值 objects   {hit:4d}（{hit / tot_pred:.1%}）  <- 真正的命中")
-    print(f"  落在真值 static 上         {on_static:4d}（{on_static / tot_pred:.1%}）"
-          f"  <- **真东西，放错了列表**")
+    print(f"  落在真值 static 上**且类名对得上** {on_static:4d}（{on_static / tot_pred:.1%}）"
+          f"  <- 真东西，放错了列表")
     print(f"  附近什么都没有             {orphan:4d}（{orphan / tot_pred:.1%}）  <- 凭空捏的")
     print(f"\n  现在的精确率 {hit / tot_pred:.3f}")
     print(f"  「结构件写进 objects」这类全修掉的话，精确率上限 "
           f"{hit / max(tot_pred - on_static, 1):.3f}")
-    print("\n落在真值 static 上的，类名分布（分不清结构件和物体）：")
+    print("\n真东西放错列表的（预测类名 ~ 真值结构件类名）：")
     for c, n in static_classes.most_common(12):
         print(f"    {c or '（空）':<24} {n}")
     print("\n附近什么都没有的，类名分布（这些才是真的过检）：")
