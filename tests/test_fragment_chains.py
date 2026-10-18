@@ -117,3 +117,28 @@ def test_两块也能合但必须细长():
                        node("b", [0.25, 0.1, 0.0], [0.2, 0.2, 0.2], "crate")]}
     assert merge_fragment_chains(fat) == [], "两个挨近的方块不是碎片，是两个物体"
     assert len(fat["objects"]) == 2
+
+
+def test_默认关着():
+    """单变量对照上它是净亏的（召回 0.464 -> 0.268、可交互性 0.884 -> 0.802），
+    而且是**生效了并且有害**，不是没生效。所以默认关闭，代码和开关留着。"""
+    from gwm.config import load_config
+    from pathlib import Path as P
+
+    cfg = load_config([str(P(__file__).resolve().parents[1] / "configs" / "default.yaml")])
+    assert cfg["synthesis"]["merge_fragment_chains"] is False
+
+
+def test_一条链不该吞掉整排小物体():
+    """实测故障：一条链吞掉 10 个节点，而真碎片组平均只有 2.27 块、最大一组 6 块。
+
+    根因是**连通分量没有长度上限**——一排小东西会一个接一个连通下去，而
+    min_elongation 反而鼓励长链（串得越长越细长）。这条测试把这个故障钉住：
+    打开开关时，一排十个小方块会被串成一条，这正是不该发生的事。
+    """
+    objs = [node(f"b_{i}", [i * 0.25, 0.05, 0.0], [0.1, 0.1, 0.1], "block") for i in range(10)]
+    program = {"objects": objs}
+    merged = merge_fragment_chains(program)
+    assert merged and len(merged[0]["absorbed"]) == 9, (
+        "现在的实现会把整排串成一条——这正是它默认关着的原因。"
+        "哪天给链加了长度上限，这条测试该改成断言它**不**这么干。")
