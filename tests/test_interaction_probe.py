@@ -42,3 +42,12 @@ def test_样式替换那一项只在量过的时候才出现():
                                                    "compared_steps": 2400}})
     assert with_swap["style_swap_max_deviation"] == 0.0
     assert with_swap["style_swap_steps"] == 2400
+
+
+def test_反向解耦那一项也只在量过的时候才出现():
+    without = merge({}, PROBE)
+    assert "behaviour_swap_changed_nodes" not in without
+    with_back = merge({}, {**PROBE, "behaviour_swap": {"differing_nodes": 0,
+                                                       "compared_nodes": 17}})
+    assert with_back["behaviour_swap_changed_nodes"] == 0
+    assert with_back["behaviour_swap_nodes"] == 17

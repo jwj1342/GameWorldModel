@@ -15,13 +15,16 @@ from pathlib import Path
 
 
 def measure(game_dir: Path, out_dir: Path, harness: str,
-            style_swap: bool = False, timeout: int = 900) -> dict:
+            style_swap: bool = False, timeout: int = 900,
+            behaviour_swap: bool = False) -> dict:
     """跑一遍探针。跑不起来就返回 {"ok": False}，不让它挡住整条链路。"""
     target = Path(out_dir) / "interaction_probe.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     cmd = [harness, "interaction_probe.mjs", "--game", str(game_dir), "--out", str(target)]
     if style_swap:
         cmd.append("--style-swap")
+    if behaviour_swap:
+        cmd.append("--behaviour-swap")
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
         report = json.loads(target.read_text(encoding="utf-8"))
@@ -59,4 +62,10 @@ def merge(interactivity: dict, probe: dict) -> dict:
         # 碰撞体从基本体那一套算（kernel/scene.js 的 buildNode），所以应该是 0。
         out["style_swap_max_deviation"] = swap.get("max_position_deviation")
         out["style_swap_steps"] = swap.get("compared_steps")
+    back = probe.get("behaviour_swap")
+    if back:
+        # 反过来那一半：改运动、改质量、改能不能抓，样式应该一个字段都不变。
+        # 两个方向都成立，「分开写的两半」才不是一句口号。
+        out["behaviour_swap_changed_nodes"] = back.get("differing_nodes")
+        out["behaviour_swap_nodes"] = back.get("compared_nodes")
     return out

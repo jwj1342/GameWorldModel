@@ -315,6 +315,71 @@ export function standInScenes(program) {
   return out;
 }
 
+/** 把一个节点在画面上长什么样，抽成一串可以逐字比对的描述。
+ *
+ *  比的是场景图本身，不是渲染出来的像素：渲染会引入分辨率、抗锯齿、光照这些和
+ *  主张无关的噪声，而场景图是确定性的。描述里放的全是「样式那一半」的东西——
+ *  网格的几何参数、材质的表面参数、以及它在节点里的局部摆放。
+ */
+function styleSignature(entry) {
+  const parts = [];
+  entry.group.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry, m = o.material;
+    parts.push(JSON.stringify({
+      type: g?.type ?? null,
+      params: g?.parameters ?? null,
+      colour: m?.color?.getHexString?.() ?? null,
+      roughness: m?.roughness ?? null,
+      metalness: m?.metalness ?? null,
+      opacity: m?.opacity ?? null,
+      transparent: !!m?.transparent,
+      emissive: m?.emissive?.getHexString?.() ?? null,
+      pos: o.position.toArray().map(round),
+      quat: o.quaternion.toArray().map(round),
+      scale: o.scale.toArray().map(round),
+    }));
+  });
+  return parts.join("|");
+}
+
+/** 把行为那一半改掉。`motion` 说的是「视频里它自己怎么动」，`interaction` 说的是
+ *  「用户能怎么动它」——按 DSL 的划分，这两个字段加上质量、速度就是行为那一半。
+ *  改法故意选得很粗暴：静止的变成物理驱动、有轨迹的变成自转、全部挂上速度和质量，
+ *  再把能抓的改成沿轴滑动。样式那一半一个字段都不碰。 */
+export function mutateBehaviour(program) {
+  const out = JSON.parse(JSON.stringify(program));
+  for (const node of out.objects ?? []) {
+    const type = (node.motion ?? {}).type ?? 'static';
+    node.motion = type === 'static'
+      ? { type: 'dynamic', mass: 3.5, linear_velocity: [0.3, 0, -0.2], restitution: 0.4 }
+      : { type: 'spin', axis: [0, 1, 0], rate_deg_s: 90 };
+    node.interaction = { grab: 'slide', axis: [1, 0, 0], limit: [-0.3, 0.3] };
+  }
+  return out;
+}
+
+/** 行为换掉之后，样式这一半有没有跟着动。第四条主张的另一半。
+ *
+ *  正向那个数（styleSwapDeviation）证明的是「换外形不改变怎么动」。这个证明的是
+ *  反过来：改运动、改质量、改能不能抓，画面上一个像素都不该变。两个方向都成立，
+ *  「分开写的两半」才不是一句口号。 */
+export function behaviourSwapDeviation(program) {
+  const before = makeWorld(program);
+  const after = makeWorld(mutateBehaviour(program));
+  const byId = new Map(after.registry.map(e => [e.name, e]));
+  const differing = [];
+  let compared = 0;
+  for (const entry of before.registry) {
+    const other = byId.get(entry.name);
+    if (!other) { differing.push({ id: entry.id, reason: '改完之后这个节点不见了' }); continue; }
+    compared++;
+    const a = styleSignature(entry), b = styleSignature(other);
+    if (a !== b) differing.push({ id: entry.id, before: a.slice(0, 160), after: b.slice(0, 160) });
+  }
+  return { compared_nodes: compared, differing_nodes: differing.length, differing };
+}
+
 /** 样式换掉之后，行为这一半有没有跟着动。论文第四条主张的那个数。 */
 export function styleSwapDeviation(program) {
   const plain = [], swapped = [];
@@ -346,6 +411,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const program = JSON.parse(fs.readFileSync(file, 'utf8'));
   const report = probeProgram(program);
   if (args['style-swap']) report.style_swap = styleSwapDeviation(program);
+  if (args['behaviour-swap']) report.behaviour_swap = behaviourSwapDeviation(program);
   if (args.out) {
     fs.mkdirSync(path.dirname(args.out), { recursive: true });
     fs.writeFileSync(args.out, JSON.stringify(report, null, 1));
@@ -355,6 +421,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     + `（${s.manipulation_success_fraction}）`);
   console.log(`  提起进度中位数 ${s.median_lift_progress}，跟随误差 ${s.median_follow_error}，`
     + `带动别人 ${s.median_disturbance} m，掉穿地面 ${s.fell_through}`);
+  if (report.behaviour_swap) {
+    const b = report.behaviour_swap;
+    console.log(`  改掉行为之后样式有变化的节点 ${b.differing_nodes} / ${b.compared_nodes}`);
+  }
   if (report.style_swap) {
     console.log(`  换一套外形之后轨迹最大偏离 ${report.style_swap.max_position_deviation} m`
       + `（对比了 ${report.style_swap.compared_steps} 步）`);
