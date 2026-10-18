@@ -192,3 +192,39 @@ def test_点到面不会解出镜像或发散():
     out = icp(cloud @ R.T + t, cloud, point_to_plane=True)
     assert out["ok"] and np.linalg.det(out["rotation"]) > 0.9
     assert np.all(np.isfinite(out["translation"])) and np.linalg.norm(out["translation"]) < 2.0
+
+
+def test_两遍精化反而更差_部分对完整比部分对部分更欠定():
+    """两遍精化的想法是：拿全部帧建一个完整模型，每帧独立对它配准，链式累积就断开了。
+    实测**反而更差**，而且原因有意思：一帧只看得见一个局部表面，拿它去配准一个更完整
+    的模型时，这块局部可以滑到模型上好几个位置都说得通；而相邻两帧的可见面大小相当、
+    重叠又多，反倒是良态的。
+
+    部分对完整比部分对部分更欠定——这也解释了之前扫模型帧数时「6 帧比全部帧好」。
+    所以 refine 默认是 0，实现留着备查。"""
+    base = box_cloud(n=1500, seed=41)
+    clouds, truth = [], []
+    for k in range(20):
+        shift = np.array([0.06 * k, 0.0, 0.0])
+        moved = base + shift
+        cut = np.quantile(moved[:, 0], 0.3 + 0.015 * k)
+        clouds.append(moved[moved[:, 0] > cut])
+        truth.append(shift)
+    gt = np.array(truth)
+    def error(positions):
+        p = np.array(positions)
+        return float(np.median(np.linalg.norm((p - p[0]) - (gt - gt[0]), axis=1)))
+    err_plain = error(track_rigid(clouds)["positions"])
+    err_refined = error(track_rigid(clouds, refine=2)["positions"])
+    assert err_plain < 0.01, f"逐帧两两配准在这个合成例子上该是准的，实际 {err_plain:.4f}"
+    assert err_refined > err_plain, (
+        f"精化在这里确实更差，这条测试就是把这个事实钉住：{err_plain:.4f} -> {err_refined:.4f}")
+
+
+def test_精化开着也不该把静止物体搞出大漂移():
+    """就算精化整体上更差，它也不该把静止的东西甩出去——那是另一个级别的错误。"""
+    base = box_cloud(n=1200, seed=43)
+    clouds = [base[base[:, 2] > np.quantile(base[:, 2], 0.2 + 0.03 * k)] for k in range(12)]
+    positions = np.array(track_rigid(clouds, refine=2)["positions"])
+    drift = float(np.linalg.norm(positions.max(0) - positions.min(0)))
+    assert drift < 0.3, f"静止物体被精化出了 {drift:.3f} m 的漂移"

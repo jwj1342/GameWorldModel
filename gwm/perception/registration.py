@@ -125,7 +125,7 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
 
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
-                **icp_kwargs) -> dict:
+                refine: int = 0, **icp_kwargs) -> dict:
     """把一串逐帧点云配成一条轨迹。
 
     点云本身已经在世界坐标里，所以帧与帧之间的变换就是物体这一步的运动。
@@ -153,6 +153,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
     step_transforms: list[tuple[np.ndarray, np.ndarray]] = []
     R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
+    transforms = [(R_acc.copy(), t_acc.copy())]
     for index, current in enumerate(clouds[1:], start=1):
         cloud = np.asarray(current, float)
         # 用上一帧的位姿做初值：相邻帧位姿接近，这样 ICP 从一开始就在收敛域里
@@ -175,9 +176,15 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 if len(model) > model_points:
                     model = model[rng.choice(len(model), model_points, replace=False)]
         residuals.append(step["rmse"] if step["ok"] else None)
+        transforms.append((R_acc.copy(), t_acc.copy()))
         positions.append(R_acc.T @ (point - t_acc))
         # R_acc 把第 k 帧映回第 0 帧，所以物体在第 k 帧相对第 0 帧的朝向是它的转置
         orientations.append(R_acc.T.copy())
+    if refine > 0 and len(clouds) >= 3 and len(transforms) == len(clouds):
+        # 第二遍：全部帧建模型，每帧独立对它配准，链式累积就断开了
+        refined = refine_poses(clouds, transforms, iterations=refine, seed=seed, **icp_kwargs)
+        positions = [R.T @ (point - t) for R, t in refined]
+        orientations = [R.T.copy() for R, t in refined]
     return {"positions": [np.asarray(p, float).tolist() for p in positions],
             "orientations": [np.asarray(r, float).tolist() for r in orientations],
             "residuals": residuals, "anchor": point.tolist(),
@@ -289,3 +296,38 @@ def infer_articulation(tracked: dict, *, min_rotation_deg: float = 8.0,
                         "evidence": {"straightness": round(straightness, 3),
                                      "travel_m": round(travel, 4)}}
     return None
+
+
+def refine_poses(clouds: list[np.ndarray], poses: list[tuple[np.ndarray, np.ndarray]],
+                 *, iterations: int = 2, model_points: int = 8000, seed: int = 0,
+                 **icp_kwargs) -> list[tuple[np.ndarray, np.ndarray]]:
+    """拿全部帧建一个完整模型，然后每一帧**独立**对它配准。
+
+    这一步要解决的是链式累积：逐帧两两配准时，每步的小误差会沿三十帧攒起来，实测每步
+    残差只有 0.026 m 却得到 0.298 m 的轨迹误差。这里的两遍法把链断开——第二遍里每一帧
+    都直接对完整模型配准，相互之间没有依赖，所以误差不会传递。
+
+    模型也比第一遍好：第一遍只能用已经走过的帧（而且实测只吸收前六帧最好，再多反而把
+    噪声攒进去），第二遍可以用全部帧，包括物体转过去之后才露出来的那些面。
+
+    `poses` 是第一遍给出的 (R, t)，把第 k 帧的点映到第 0 帧。返回同样形状的精化结果。
+    """
+    rng = np.random.default_rng(seed)
+    current = [(np.asarray(R, float).copy(), np.asarray(t, float).copy()) for R, t in poses]
+    for _ in range(max(1, iterations)):
+        aligned = [np.asarray(c, float) @ R.T + t for c, (R, t) in zip(clouds, current)]
+        model = np.concatenate(aligned, axis=0) if aligned else np.zeros((0, 3))
+        if len(model) > model_points:
+            model = model[rng.choice(len(model), model_points, replace=False)]
+        if len(model) < 20:
+            break
+        nxt = []
+        for cloud, (R, t) in zip(clouds, current):
+            guess = np.asarray(cloud, float) @ R.T + t
+            step = icp(guess, model, **icp_kwargs)
+            if step["ok"]:
+                nxt.append((step["rotation"] @ R, step["rotation"] @ t + step["translation"]))
+            else:
+                nxt.append((R, t))
+        current = nxt
+    return current
