@@ -47,11 +47,21 @@ def render_at(game_dir: Path, times: list[float], out_dir: Path, harness: str,
 
 def likeness(game_dir: Path, frames: list[dict], out_dir: Path, harness: str,
              weights_dir: str | Path, count: int = 8,
-             width: int = 640, height: int = 360) -> dict:
-    """返回重建场景和原视频的相似度。
+             width: int = 640, height: int = 360,
+             unrelated_frames: list[str] | None = None) -> dict:
+    """返回重建场景和原视频的相似度，**连同两条标尺**。
 
-    `frames` 是感知阶段抽出来的帧（带 `t` 和 `file`）。每个采样时刻各取一对：
-    渲染图和最接近那个时刻的原帧。
+    光报一个 0.19 没有意义：DINOv2 在两张毫不相干的图之间也有 0.1 上下的相似度。
+    所以一起报两条参照：
+
+    * `reference_self`：原视频不同时刻的两帧互相比。这是「同一个场景、不同视角」的
+      相似度，也就是我们能指望的上限——重建得再好，视角和光照的差异也还在。
+    * `reference_unrelated`：原帧和**另一段视频**的帧比。这是下限，相当于「完全没
+      重建对」时这个数会是多少。
+
+    重建的分落在这两条之间的什么位置，才是真正能读的东西。
+
+    `frames` 是感知阶段抽出来的帧（带 `t` 和 `file`）。
     """
     import numpy as np
     from .metrics import Dino
@@ -80,8 +90,25 @@ def likeness(game_dir: Path, frames: list[dict], out_dir: Path, harness: str,
     if not scores:
         return {"ok": False, "reason": "no comparable frames"}
     ordered = sorted(scores)
-    return {"ok": True, "n": len(scores),
-            "median": round(float(np.median(ordered)), 4),
-            "mean": round(float(np.mean(ordered)), 4),
-            "min": round(ordered[0], 4), "max": round(ordered[-1], 4),
-            "per_frame": pairs}
+    out = {"ok": True, "n": len(scores),
+           "median": round(float(np.median(ordered)), 4),
+           "mean": round(float(np.mean(ordered)), 4),
+           "min": round(ordered[0], 4), "max": round(ordered[-1], 4),
+           "per_frame": pairs}
+
+    # 上限：同一段视频不同时刻的两帧。重建得再好也追不上这个数，因为视角差异还在。
+    sampled = [by_time[t] for t in times if t in by_time]
+    if len(sampled) >= 2:
+        embeddings = [dino.embed(f) for f in sampled]
+        self_scores = [float(embeddings[i] @ embeddings[i + 1]) for i in range(len(embeddings) - 1)]
+        out["reference_self"] = round(float(np.median(self_scores)), 4)
+        # 下限：和另一段视频的帧比，相当于完全没重建对时这个数是多少
+        if unrelated_frames:
+            others = [dino.embed(f) for f in unrelated_frames[:len(embeddings)]]
+            cross = [float(a @ b) for a in embeddings for b in others]
+            out["reference_unrelated"] = round(float(np.median(cross)), 4)
+            span = out["reference_self"] - out["reference_unrelated"]
+            if span > 1e-6:
+                # 重建的分落在下限和上限之间的什么位置，0 是完全没重建对，1 是追平了
+                out["normalised"] = round((out["median"] - out["reference_unrelated"]) / span, 3)
+    return out

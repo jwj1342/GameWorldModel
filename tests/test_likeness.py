@@ -30,3 +30,20 @@ def test_重复时刻只算一次():
 def test_没有帧时返回空而不是炸():
     assert pick_times([], count=8) == []
     assert pick_times([{"file": "a.jpg"}], count=8) == []
+
+
+def test_归一化把分数放到两条标尺之间():
+    """光报一个 0.19 没有意义：DINOv2 在两张毫不相干的图之间也有 0.1 上下。
+    必须报出「同视频不同时刻」的上限和「不同视频」的下限，才知道 0.19 是好是坏。"""
+    # 这里直接验算归一化的算法，不跑模型
+    median, upper, lower = 0.19, 0.55, 0.08
+    normalised = (median - lower) / (upper - lower)
+    assert abs(normalised - 0.234) < 0.01
+
+
+def test_没有参照视频时只报上限():
+    from gwm.feedback.likeness import likeness
+    import inspect
+    sig = inspect.signature(likeness)
+    assert "unrelated_frames" in sig.parameters
+    assert sig.parameters["unrelated_frames"].default is None

@@ -192,13 +192,34 @@ def main() -> int:
         frames_json = out / "perception" / "frames" / "frames.json"
         frames_list = json.loads(frames_json.read_text(encoding="utf-8"))["frames"] \
             if frames_json.is_file() else []
+        # 下限那条标尺要一段**别的**视频的帧。没有就只报上限。
+        unrelated = [str(p) for p in sorted(
+            (REPO / "data/clips/trimmed").glob("*.mp4"))][:1]
+        others: list[str] = []
+        for other in sorted((out.parent).glob("*/perception/frames/frames.json")):
+            if other.parts[-4] == out.name:
+                continue
+            try:
+                rows = json.loads(other.read_text(encoding="utf-8"))["frames"]
+            except (OSError, ValueError):
+                continue
+            others = [r["file"] for r in rows[::max(1, len(rows) // 8)] if r.get("file")][:8]
+            if others:
+                break
         like = likeness(Path(result["game_dir"]), frames_list, out / "likeness",
                         str(REPO / "scripts/node_harness.sh"),
-                        Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
+                        Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"],
+                        unrelated_frames=others)
         completeness["likeness"] = like
         if like.get("ok"):
+            scale = ""
+            if like.get("reference_self") is not None:
+                scale = f"；标尺 上限 {like['reference_self']}"
+                if like.get("reference_unrelated") is not None:
+                    scale += (f" 下限 {like['reference_unrelated']}"
+                              f"，归一化 {like.get('normalised')}")
             print(f"重渲染相似度: 中位数 {like['median']}（{like['n']} 帧，"
-                  f"范围 {like['min']}~{like['max']}）", flush=True)
+                  f"范围 {like['min']}~{like['max']}）{scale}", flush=True)
         else:
             print(f"重渲染相似度: 没算成（{like.get('reason')}）", flush=True)
     print(format_table(completeness), flush=True)
