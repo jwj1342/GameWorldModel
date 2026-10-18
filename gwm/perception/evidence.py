@@ -269,7 +269,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     return np.asarray([(R.from_matrix(np.asarray(m, float)) * base).as_quat()
                                        for m in tracked["orientations"]], float)
 
-                if looks_static(tracked, diag):
+                # 静止判据默认关着。实测它在真值静止的物体上**一次都没触发过**，
+                # 却在 5.4% 的运动物体上误触发。根因是每步位移这个量分不开两类：
+                # 静止物体每步位移是对角线的 0.165，运动物体是 0.179，两条分布重合。
+                # 不是阈值没调好，是判据本身没有区分力。
+                if cfg["perception"]["motion"].get("use_static_detector", False) \
+                        and looks_static(tracked, diag):
                     # 每步修正都接近单位阵，说明物体没动。这种情况下配准的累积轨迹会被
                     # 缓慢滑移带偏（实测静止漂移 0.286 m，比包围盒中心的 0.182 m 还大），
                     # 所以把位置钉在第一帧，让静止这个假设干干净净地成立。
