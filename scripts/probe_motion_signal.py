@@ -32,6 +32,7 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
+from gwm.perception.evidence import smooth_series                                  # noqa: E402
 from gwm.perception.registration import infer_articulation, looks_static, track_rigid  # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
@@ -227,6 +228,16 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         gt_rel = gt - gt[0]
         reg_rel = registered - registered[0]
         out["step/register"].extend(np.linalg.norm(reg_rel - gt_rel, axis=1).tolist())
+        # 包围盒中心那条路本来就过一道时间平滑，配准这条没有。每步噪声是物体尺寸的 17%，
+        # 而真实运动是平滑的——平滑应该能吃掉不少。窗口扫几个值看哪个合适。
+        for window in (5, 9, 15):
+            if len(registered) >= window:
+                smoothed = smooth_series(registered, window)
+                out.setdefault(f"step/smooth{window}", []).extend(
+                    np.linalg.norm((smoothed - smoothed[0]) - gt_rel, axis=1).tolist())
+                if is_static:
+                    out.setdefault(f"drift_static/smooth{window}", []).append(
+                        float(np.linalg.norm(smoothed.max(0) - smoothed.min(0))))
         # 模型吸收多少帧：转过半圈的物体，后半段看到的面可能根本不在模型里
         for frames_in_model, tag in ((12, "m12"), (len(clouds), "mall")):
             variant = track_rigid(clouds, model_frames=frames_in_model)
