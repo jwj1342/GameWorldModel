@@ -32,7 +32,7 @@ from gwm.assets.embed import AssetIndex, Embedder               # noqa: E402
 from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
-from gwm.feedback.colour import colour_residual, fit_colours    # noqa: E402
+from gwm.feedback.colour import colour_residual, fit_colours, fit_lighting  # noqa: E402
 from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
@@ -298,6 +298,12 @@ def main() -> int:
                       flush=True)
                 break
             rows = fit_colours(program, residual, damping=0.7)
+            # 反照率撞到 255 之后增益就被截断，残差卡成平台。那时唯一还能动的自由度
+            # 是光照强度，它是场景级的，样本量大、噪声小。
+            lit = fit_lighting(program, rows)
+            if lit:
+                print(f"  反照率余量用尽（{lit['clipped_objects']} 个物体被截断），"
+                      f"光照抬 {lit['factor']} 倍", flush=True)
             rebuilt = compile_program(program, out / "game", cfg)
             if not rebuilt["ok"]:
                 print("颜色拟合之后校验未过，这一轮放弃", flush=True)

@@ -106,3 +106,40 @@ def test_拟合轮数的缺省值进了配置():
     from pathlib import Path
     cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
     assert cfg["synthesis"]["colour_fit_rounds"] == 4
+
+
+# ---- 反照率余量用尽时抬光照 ----
+
+def test_没有被截断就不动光照():
+    from gwm.feedback.colour import fit_lighting
+    program = {"style": {}}
+    assert fit_lighting(program, [{"id": "a", "gain": 1.2, "clipped_by": 1.0}]) is None
+    assert program["style"] == {}, "没必要就一个字段都别碰"
+
+
+def test_被截断时按中位数抬主光和环境光():
+    from gwm.feedback.colour import fit_lighting
+    program = {"style": {"lighting": {"key": {"intensity": 2.0},
+                                      "ambient": {"intensity": 1.0}}}}
+    out = fit_lighting(program, [{"id": "a", "clipped_by": 1.2},
+                                 {"id": "b", "clipped_by": 1.4},
+                                 {"id": "c", "clipped_by": 1.3}])
+    assert out["factor"] == 1.3, "取中位数，不被个别极端值拽走"
+    assert out["clipped_objects"] == 3
+    assert program["style"]["lighting"]["key"]["intensity"] == 2.6
+    assert program["style"]["lighting"]["ambient"]["intensity"] == 1.3
+
+
+def test_一次抬太多会被挡住():
+    from gwm.feedback.colour import fit_lighting
+    program = {"style": {"lighting": {"key": {"intensity": 1.0}}}}
+    out = fit_lighting(program, [{"id": "a", "clipped_by": 9.0}], max_step=1.5)
+    assert out["factor"] == 1.5
+
+
+def test_没写过光照时用内核的缺省值起步():
+    from gwm.feedback.colour import fit_lighting
+    program = {"style": {}}
+    out = fit_lighting(program, [{"id": "a", "clipped_by": 1.2}])
+    assert out["before"]["key"] == 1.6, "和 kernel/scene.js 的 DEFAULT_LIGHTING 一致"
+    assert program["style"]["lighting"]["key"]["intensity"] == 1.92

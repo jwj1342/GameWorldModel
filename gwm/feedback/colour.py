@@ -135,12 +135,46 @@ def fit_colours(program: dict, residual: dict, damping: float = 1.0,
         gain = 1.0 + damping * (gain - 1.0)
         gain = max(1.0 / max_gain, min(max_gain, gain))
         before = _current_material_colour(node)
-        after = tuple(max(0, min(255, int(round(c * gain)))) for c in before)
+        raw = tuple(c * gain for c in before)
+        after = tuple(max(0, min(255, int(round(c)))) for c in raw)
         _set_material_colour(node, after)
+        # 增益被 255 截断了多少。实测亮场景里反照率的余量会用尽：一条真实视频上
+        # 十四个物体有三个撞顶、最亮通道均值 184/255，于是亮度比卡在 0.924 不动——
+        # 增益算出来仍大于 1，乘完被截断，下一轮残差一模一样。那时候唯一还能动的
+        # 自由度是光照强度，见 fit_lighting。
+        want = max(raw) / 255.0 if max(raw) > 255.0 else 1.0
         applied.append({"id": node.get("id"), "gain": round(gain, 3),
+                        "clipped_by": round(want, 3),
                         "before": "#%02x%02x%02x" % before,
                         "after": "#%02x%02x%02x" % after})
     return applied
+
+
+def fit_lighting(program: dict, applied: list[dict], max_step: float = 1.5) -> dict | None:
+    """反照率余量用尽的时候，抬光照。
+
+    只拟合颜色有一个结构性上限：材质颜色撞到 255 之后，增益再大也没用，残差卡成平台。
+    那时剩下的自由度是光照强度，而它是场景级的——样本量大、噪声小，比逐物体的颜色
+    更好估。
+
+    做法是取被截断的那些物体「还差多少倍」的中位数，按它抬主光和环境光。只抬不降：
+    降光照是颜色那一路该做的事，两边都动会互相抵消。
+    """
+    clipped = [row["clipped_by"] for row in applied
+               if isinstance(row.get("clipped_by"), (int, float)) and row["clipped_by"] > 1.01]
+    if not clipped:
+        return None
+    clipped.sort()
+    factor = min(max_step, clipped[len(clipped) // 2])
+    lighting = program.setdefault("style", {}).setdefault("lighting", {})
+    before = {}
+    for key, field, default in (("key", "intensity", 1.6), ("ambient", "intensity", 1.1)):
+        block = lighting.setdefault(key, {})
+        current = float(block.get(field, default))
+        before[key] = round(current, 3)
+        block[field] = round(current * factor, 4)
+    return {"factor": round(factor, 3), "clipped_objects": len(clipped), "before": before}
+
 
 
 def _current_material_colour(node: dict) -> tuple[int, int, int]:
