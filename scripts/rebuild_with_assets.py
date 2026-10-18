@@ -143,7 +143,13 @@ def main() -> int:
 
     # 全局尺度之后再单独处理个别离谱的物体：小物体的包围盒被深度噪声撑大，
     # 实测同一段视频里玩具火车会被量成一米一，而桌子只差百分之十几。
-    resized = [] if a.no_scale else regularize_object_sizes(program, vlm_sizes)
+    # 尺寸回收默认关掉。三条真实视频上做过消融，用的是唯一直接衡量「像不像」的指标：
+    #   plarail  开 0.281 / 关 0.473   传送带 开 0.098 / 关 0.098   牛顿摆 开 0.017 / 关 0.022
+    # plarail 那条差了 0.19，是整张消融表里最大的单项效应。原因大概是：把物体按先验
+    # 缩回去的同时，相机距离并没有跟着改，于是取景整个变了——度量上更对，画面上更不像。
+    # 要重新打开的话，得先把相机和物体尺寸一起解，而不是只动物体。
+    resized = ([] if (a.no_scale or not (cfg.get("synthesis") or {}).get("size_regularisation", False))
+               else regularize_object_sizes(program, vlm_sizes))
     if resized:
         print(f"尺寸回收: {len(resized)} 个物体 "
               f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
