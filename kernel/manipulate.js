@@ -44,6 +44,12 @@ export function canGrab(entry) {
   return PICK_LAYERS.includes(entry.kind);
 }
 
+/** 这个节点以及它所有祖先都可见吗。 */
+function isVisible(object) {
+  for (let node = object; node; node = node.parent) if (node.visible === false) return false;
+  return true;
+}
+
 function clamp(value, limit) {
   if (!limit) return value;
   return Math.min(Math.max(value, Math.min(limit[0], limit[1])), Math.max(limit[0], limit[1]));
@@ -57,15 +63,28 @@ export class Manipulator {
     this.grabbed = null;            // { entry, offset, distance, restore }
     this.target = new THREE.Vector3();
     this.log = [];                  // 操纵记录，给评测用：谁在什么时候被抓、被放到哪
+    this.woken = [];                // 被手里的物体推到、因而转成物理驱动的那些
   }
 
   /** 屏幕归一化坐标 (-1..1) 打一条射线，返回命中的 entry 和世界坐标交点。 */
   pick(ndcX, ndcY) {
+    // 先把世界矩阵刷新一遍。射线检测读的是 matrixWorld，而它只在渲染的时候才会被
+    // 更新——浏览器里每帧都渲染所以看不出问题，无头跑的时候没人更新，射线就按
+    // 「所有东西都还在原点」算，于是点中的是另一个物体。这一下只在点击时发生。
+    this.scene.updateMatrixWorld();
+    this.camera.updateMatrixWorld();
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
+    // 挡在前面的东西要真的挡住。原来这里是「抓不动就跳过、接着往后找」，于是隔着墙、
+    // 隔着桌面也能把后面的杯子抓出来——鼠标能穿墙，不是可交互，是穿帮。
+    // 取第一个属于某个节点的命中：它抓得动就抓，抓不动就说明被挡住了。
+    //
+    // 看不见的东西不算挡住，也不能被抓。three 的射线检测**不**看 visible，而模板会
+    // 把收集掉的物品隐藏起来；不滤掉的话，一枚吃掉的金币会一直挡着它后面的东西。
     for (const hit of hits) {
       const entry = hit.object?.userData?.entry;
-      if (entry && canGrab(entry)) return { entry, point: hit.point.clone() };
+      if (!entry || !isVisible(hit.object)) continue;
+      return canGrab(entry) ? { entry, point: hit.point.clone() } : null;
     }
     return null;
   }
@@ -140,9 +159,45 @@ export class Manipulator {
     return { pos, quat: rest.quat.clone().premultiply(turn), value };
   }
 
+  /** 手里这个物体推到的东西，也该跟着动起来。
+   *
+   *  场景里除了手上那个，其余物体默认是**焊死的**：kernel/physics.js 的 addEntry 里，
+   *  视频中没观测到运动的物体 dynamic=false，建成 fixed 刚体。于是拿杯子去撞旁边那个
+   *  杯子，对方纹丝不动。拖得动一个、推不动别的，不算一个可交互的场景。
+   *
+   *  这里只激活**真的被碰到**的物体：推到了才活，没碰过的保持原样。所以场景不会一
+   *  加载就整体塌下来，开销也只落在接触发生的那一帧。两类物体不碰：
+   *  静态结构（地面、墙、桌面）该是焊死的；有脚本运动的物体该按视频里看到的那样走。
+   */
+  wakeContacts() {
+    const { entry } = this.grabbed;
+    const world = this.physics?.world;
+    if (!entry?.colliderHandles || typeof world?.contactPairsWith !== 'function') return;
+    for (const handle of entry.colliderHandles) {
+      const collider = world.getCollider(handle);
+      if (!collider) continue;
+      world.contactPairsWith(collider, (other) => {
+        const hit = this.physics.colliderToEntry.get(other.handle);
+        if (!hit || hit === entry || hit.kind !== 'object') return;
+        if (hit.dynamic || hit.simulated || hit.grabbed) return;
+        // contactPairsWith 给的是**可能**接触的一对，真挨上了才算
+        let touching = false;
+        world.contactPair(collider, other, (manifold) => {
+          if (manifold.numContacts() > 0) touching = true;
+        });
+        if (!touching) return;
+        this.physics.makeDynamic(hit);
+        hit.dynamic = true; hit.simulated = true;
+        this.woken.push({ id: hit.id, by: entry.id });
+        this.log.push({ event: 'wake', id: hit.id, by: entry.id });
+      });
+    }
+  }
+
   /** 每帧在 physics.step() 之前调一次。 */
   update() {
     if (!this.grabbed) return;
+    this.wakeContacts();            // 用的是上一步算出来的接触，晚一帧，60Hz 下看不出来
     const { entry } = this.grabbed;
     const goal = this.constrain(this.target);
     this.grabbed.value = goal.value;

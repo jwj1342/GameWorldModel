@@ -33,6 +33,7 @@ from gwm.assets.library import library_root, load_catalog       # noqa: E402
 from gwm.compiler.compile import compile_program                # noqa: E402
 from gwm.compiler.repair import repair_candidate                # noqa: E402
 from gwm.feedback.completeness import assess, format_table      # noqa: E402
+from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
 from gwm.synthesis.contact import settle_on_ground              # noqa: E402
@@ -73,6 +74,10 @@ def main() -> int:
     ap.add_argument("--no-scale", action="store_true",
                     help="跳过度量尺度与尺寸回收，用于消融")
     ap.add_argument("--no-settle", action="store_true", help="跳过物理稳定这一步")
+    ap.add_argument("--probe-interaction", action="store_true",
+                    help="真的去抓一遍、拖一遍，量出可交互程度（而不是只数程序声明了什么）")
+    ap.add_argument("--style-swap", action="store_true",
+                    help="顺带量样式-行为解耦：换一套外形网格，轨迹应该一丝不差")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
     ap.add_argument("--no-image-retrieval", action="store_true",
                     help="只用文字检索，用来和带图像检索的结果做对照")
@@ -199,6 +204,10 @@ def main() -> int:
         return 2
     completeness = assess(program, evidence, result["assets"],
                           load_masks(out / "perception"))
+    if a.probe_interaction:
+        probe = probe_interaction(Path(result["game_dir"]), out,
+                                  str(REPO / "scripts/node_harness.sh"), a.style_swap)
+        completeness["interactivity"] = merge_probe(completeness["interactivity"], probe)
     if a.likeness:
         # 唯一直接回答「像不像」的数：按输入的相机轨迹重渲染，和原帧比
         frames_json = out / "perception" / "frames" / "frames.json"
