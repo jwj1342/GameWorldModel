@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initRapier } from '../kernel/physics.js';
-import { probeProgram, styleSwapDeviation, succeeded } from '../harness/interaction_probe.mjs';
+import { probeProgram, styleSwapDeviation, behaviourSwapDeviation, mutateBehaviour, succeeded } from '../harness/interaction_probe.mjs';
 
 await initRapier();
 
@@ -77,6 +77,26 @@ test('换一套完全不同的外形网格，轨迹一丝不差', () => {
   assert.equal(dev.steps_plain, dev.steps_swapped, '两边步数应该一样');
   assert.equal(dev.max_position_deviation, 0,
     `外形换掉不该改变轨迹，实际最大偏离 ${dev.max_position_deviation} m`);
+});
+
+test('改掉行为那一半，样式一个字段都不变', () => {
+  // 第四条主张的另一半。正向那条证明「换外形不改变怎么动」，这条证明反过来：
+  // 改运动、改质量、改能不能抓，画面上不该有任何变化。
+  const p = program([cup('a', [-0.4, 0.15, 0]), cup('b', [0.4, 0.15, 0])]);
+  const dev = behaviourSwapDeviation(p);
+  assert.equal(dev.compared_nodes, 3, '地面加两个杯子');
+  assert.equal(dev.differing_nodes, 0,
+    `改行为不该动样式，实际有变化的：${JSON.stringify(dev.differing)}`);
+});
+
+test('改行为的那一步确实把行为改掉了，不是什么都没做', () => {
+  // 上一条如果因为「改动根本没生效」而通过，那它什么也没证明
+  const p = program([cup('a', [0, 0.15, 0])]);
+  const m = mutateBehaviour(p);
+  assert.notDeepEqual(m.objects[0].motion, p.objects[0].motion, '运动字段应该被改掉');
+  assert.equal(m.objects[0].interaction.grab, 'slide');
+  assert.deepEqual(m.objects[0].geom, p.objects[0].geom, '几何不该被碰');
+  assert.deepEqual(m.objects[0].pose, p.objects[0].pose, '位姿不该被碰');
 });
 
 test('互相穿插着生成的物体，拖一个会把别人带飞，这要被记下来', () => {

@@ -80,6 +80,8 @@ def main() -> int:
                     help="真的去抓一遍、拖一遍，量出可交互程度（而不是只数程序声明了什么）")
     ap.add_argument("--style-swap", action="store_true",
                     help="顺带量样式-行为解耦：换一套外形网格，轨迹应该一丝不差")
+    ap.add_argument("--behaviour-swap", action="store_true",
+                    help="解耦的另一半：改运动和交互，样式应该一个字段都不变")
     ap.add_argument("--settle-seconds", type=float, default=1.5)
     ap.add_argument("--separate-seconds", type=float, default=None,
                     help="重力稳定之前先跑多久的纯分离（不开重力，只把互相插着的顶开）。"
@@ -213,7 +215,8 @@ def main() -> int:
                           load_masks(out / "perception"))
     if a.probe_interaction:
         probe = probe_interaction(Path(result["game_dir"]), out,
-                                  str(REPO / "scripts/node_harness.sh"), a.style_swap)
+                                  str(REPO / "scripts/node_harness.sh"), a.style_swap,
+                                  behaviour_swap=a.behaviour_swap)
         completeness["interactivity"] = merge_probe(completeness["interactivity"], probe)
     if a.likeness:
         # 唯一直接回答「像不像」的数：按输入的相机轨迹重渲染，和原帧比
