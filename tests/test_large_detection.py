@@ -57,3 +57,33 @@ def test_按面积判成结构件时注明理由():
     program = evidence_to_program(evidence([obj("slab_1", "slab", 0.67)]), "c", {})
     node = next(n for n in program["static"] if n["id"] == "slab_1")
     assert "67%" in node["notes"] and "area" in node["notes"]
+
+
+def obj_with(oid, cls, motion_guess, area=0.03):
+    box = {"center": [0.0, 0.5, 0.0], "quat": [0, 0, 0, 1], "size": [1.0, 1.0, 1.0], "conf": 0.9}
+    return {"id": oid, "class_guess": cls, "confidence": 0.9, "is_dynamic": True,
+            "obb": [{**box, "t": float(t)} for t in (0.0, 1.0, 2.0)],
+            "motion_guess": motion_guess, "contacts": [], "mask_area_frac": area}
+
+
+def test_类名像结构件而且没有证据会动的_按结构件处理():
+    """原来这里要求运动分类**肯定地说**它静止，那是个坏掉的默认。
+
+    运动分类 85% 的时候返回 unknown，而它的贡献实测精确为零（#7）。后果：类名含
+    rail/block 的 61 个检测里只有 4 个满足那个与条件，其余全默认进了 objects，
+    在评测里变成假阳性——哪怕检测完全正确。真值里 rail 有 45 个，全在 static。
+    """
+    for guess in ({"type": "unknown", "conf": "unknown"},
+                  {"type": "unknown", "conf": "unknown", "moves": False},
+                  {"type": "static", "conf": 0.8}):
+        program = evidence_to_program(evidence([obj_with("rail_1", "rail", guess)]), "c", {})
+        assert "rail_1" in ids(program["static"]), f"{guess} 下没按结构件处理"
+        assert "rail_1" not in ids(program["objects"])
+
+
+def test_类名像结构件但有证据会动的_仍然是物体():
+    """传送带会动，轨道上的东西也可能会动。有证据就别按结构件处理——
+    `moves` 是真值感知上查全 0.925 的那个信号，不是七分类那个坏掉的。"""
+    guess = {"type": "unknown", "conf": "unknown", "moves": True}
+    program = evidence_to_program(evidence([obj_with("belt_1", "belt", guess)]), "c", {})
+    assert "belt_1" in ids(program["objects"]), "有证据会动却被当成了固定结构"

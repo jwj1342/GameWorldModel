@@ -137,7 +137,21 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         area_cap = float((cfg or {}).get("synthesis", {}).get("max_object_area_frac", 0.35))
         too_large = float(o.get("mask_area_frac") or 0.0) >= area_cap
         is_ground = is_ground_class(cls)
-        if too_large or is_ground or (o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg)):
+        # 类名像结构件（墙、地板、轨道、传送带）的，只要**没有证据表明它会动**，就按
+        # 结构件处理。
+        #
+        # 原来这里要求的是运动分类**肯定地说**它静止（`type == "static"`），那是个
+        # 坏掉的默认：运动分类 85% 的时候返回 `unknown`，而这一轮量清楚了它的贡献
+        # 精确为零——七个配置的准确率等于「恒答 static」常数基线，161 个配对物体里
+        # 一次都没判对过任何一个会动的（#7）。实测后果：类名含 rail/block 的 61 个
+        # 检测里只有 4 个满足这个与条件，其余全默认进了 objects，在评测里变成假阳性
+        # ——哪怕检测本身完全正确、位置也摆对了。真值里 rail 有 45 个，全在 static。
+        #
+        # 换成 `moves`：它绕开七分类的两道闸单独算「会不会动」，真值感知上查全 0.925，
+        # 是我们唯一验证过有信息的运动信号。语义也更对——「没有信息」不该被当成
+        # 「它会动」，对一个名字叫 rail/wall/floor 的东西尤其不该。
+        looks_structural = is_static_class(cls, cfg) and o["motion_guess"].get("moves") is not True
+        if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
             sz = [float(max(v, 0.05)) for v in sz]

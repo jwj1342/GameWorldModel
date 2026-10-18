@@ -15,8 +15,13 @@
 ——哪怕检测本身完全正确。这类错误的修法（分清结构件和物体）和「过滤假检测」
 完全不同，所以得先知道占比。
 
+**必须吃 `scripts/eval.py` 的产物，不能自己比坐标。** 重建的世界原点和朝向相对真值
+差一个**观测不到的**偏航加水平平移（规范自由度），评测会先对齐掉再配对。第一版我
+直接比世界坐标，于是报出精确率 0.015，而评测报的是 0.226——十五倍的差，全是口径。
+实测某条片段的对齐偏航是 157 度，不对齐比坐标等于在比两个不同的坐标系。
+
 用法:
-  python -m scripts.probe_false_positives --report <产物目录> --gt-root <真值根>
+  python -m scripts.probe_false_positives --eval <eval 产物.json> --gt-root <真值根>
 """
 from __future__ import annotations
 
@@ -33,73 +38,74 @@ def nodes_with_pos(program: dict, key: str) -> list[dict]:
     for n in program.get(key, []):
         pos = ((n.get("pose") or {}).get("pos"))
         if isinstance(pos, list) and len(pos) == 3:
-            ext = (n.get("geom") or {}).get("extent") or [0.3, 0.3, 0.3]
             out.append({"id": n["id"], "class": str(n.get("class", "")).lower(),
-                        "pos": np.asarray(pos, float),
-                        "diag": float(np.linalg.norm(np.asarray(ext, float)))})
+                        "pos": np.asarray(pos, float)})
     return out
+
+
+def gauge_of(metrics: dict) -> tuple[np.ndarray, np.ndarray] | None:
+    """把评测记下来的规范对齐取出来：预测 -> 真值的偏航和水平平移。"""
+    g = ((metrics or {}).get("full") or {}).get("gauge_alignment") or {}
+    yaw, txz = g.get("yaw_deg"), g.get("translation_xz_m")
+    if not isinstance(yaw, (int, float)) or not isinstance(txz, list) or len(txz) != 2:
+        return None
+    a = np.deg2rad(float(yaw))
+    R0 = np.array([[np.cos(a), 0.0, np.sin(a)], [0.0, 1.0, 0.0], [-np.sin(a), 0.0, np.cos(a)]])
+    return R0, np.array([float(txz[0]), 0.0, float(txz[1])])
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--report", required=True)
+    ap.add_argument("--eval", required=True, help="scripts/eval.py 的输出 JSON")
     ap.add_argument("--gt-root", required=True)
-    ap.add_argument("--tol", type=float, default=0.45,
-                    help="配对容差（米），和 scripts/eval.py 的 --max-dist 对齐")
+    ap.add_argument("--tol", type=float, default=0.45, help="和 eval 的 --max-dist 对齐")
     a = ap.parse_args(argv)
 
-    tot_pred = tot_matched_obj = tot_matched_static = tot_orphan = 0
+    rows = json.loads(Path(a.eval).read_text(encoding="utf-8")).get("rows", [])
+    tot_pred = hit = on_static = orphan = 0
     static_classes, orphan_classes = Counter(), Counter()
-    per_clip = []
-    for prog_path in sorted(Path(a.report).glob("*/program.json")):
-        clip = prog_path.parent.name
-        gt_path = Path(a.gt_root) / clip / "program.json"
-        if not gt_path.is_file():
-            continue
+    skipped = []
+    for row in rows:
+        metrics = row.get("metrics") or {}
+        pairs = (metrics.get("matching") or {}).get("pairs") or {}
+        gauge = gauge_of(metrics)
+        run = Path(row["run"])
+        prog_path = run / "program.json"
+        gt_path = Path(a.gt_root) / row["clip"] / "program.json"
+        if gauge is None or not prog_path.is_file() or not gt_path.is_file():
+            skipped.append(row.get("clip")); continue
+        R0, t0 = gauge
         gt = json.loads(gt_path.read_text(encoding="utf-8"))
         pred = json.loads(prog_path.read_text(encoding="utf-8"))
-        gt_obj = nodes_with_pos(gt, "objects")
-        gt_sta = nodes_with_pos(gt, "static")
-        preds = nodes_with_pos(pred, "objects")
-
-        # 贪心配对：先配真值 objects，配不上的再看是不是落在某个真值 static 上。
-        # 这里不追求和 eval.py 的匈牙利配对完全一致——要回答的是「这个假阳性旁边
-        # 有没有一个真值结构件」，粗配对足够。
-        used = set()
-        m_obj = m_sta = orphan = 0
-        for p in preds:
-            best, bd = None, float("inf")
-            for g in gt_obj:
-                if g["id"] in used:
-                    continue
-                d = float(np.linalg.norm(p["pos"] - g["pos"]))
-                if d < bd:
-                    best, bd = g, d
-            if best is not None and bd <= a.tol:
-                used.add(best["id"]); m_obj += 1; continue
-            near = min((float(np.linalg.norm(p["pos"] - g["pos"])) for g in gt_sta),
+        gt_static = nodes_with_pos(gt, "static")
+        matched_pred = {v for v in pairs.values() if v}
+        for p in nodes_with_pos(pred, "objects"):
+            tot_pred += 1
+            if p["id"] in matched_pred:          # 评测说它配上了真值 object
+                hit += 1
+                continue
+            aligned = p["pos"] @ R0.T + t0       # 和评测用同一个对齐
+            near = min((float(np.linalg.norm(aligned - g["pos"])) for g in gt_static),
                        default=float("inf"))
             if near <= a.tol:
-                m_sta += 1
-                static_classes[p["class"]] += 1
+                on_static += 1; static_classes[p["class"]] += 1
             else:
-                orphan += 1
-                orphan_classes[p["class"]] += 1
-        tot_pred += len(preds); tot_matched_obj += m_obj
-        tot_matched_static += m_sta; tot_orphan += orphan
-        per_clip.append((clip, len(preds), m_obj, m_sta, orphan))
+                orphan += 1; orphan_classes[p["class"]] += 1
 
     if not tot_pred:
-        print("没有产物"); return 1
-    print(f"预测出来的物体 {tot_pred} 个（{len(per_clip)} 条片段，容差 {a.tol} m）\n")
-    print(f"  配上真值 objects      {tot_matched_obj:4d}（{tot_matched_obj / tot_pred:.1%}）  <- 真正的命中")
-    print(f"  落在真值 static 上    {tot_matched_static:4d}（{tot_matched_static / tot_pred:.1%}）"
+        print("没有可用的评测行"); return 1
+    print(f"预测出来的物体 {tot_pred} 个（{len(rows) - len(skipped)} 条片段，容差 {a.tol} m）")
+    if skipped:
+        print(f"（跳过 {len(skipped)} 条：没有对齐信息或产物不全 {skipped}）")
+    print()
+    print(f"  评测判定配上真值 objects   {hit:4d}（{hit / tot_pred:.1%}）  <- 真正的命中")
+    print(f"  落在真值 static 上         {on_static:4d}（{on_static / tot_pred:.1%}）"
           f"  <- **真东西，放错了列表**")
-    print(f"  附近什么都没有        {tot_orphan:4d}（{tot_orphan / tot_pred:.1%}）  <- 凭空捏的")
-    print(f"\n  现在的精确率 {tot_matched_obj / tot_pred:.3f}")
-    print(f"  如果「结构件写进 objects」这类错误全修掉，精确率上限 "
-          f"{tot_matched_obj / max(tot_pred - tot_matched_static, 1):.3f}")
-    print("\n落在真值 static 上的，类名分布（这些是分不清结构件和物体）：")
+    print(f"  附近什么都没有             {orphan:4d}（{orphan / tot_pred:.1%}）  <- 凭空捏的")
+    print(f"\n  现在的精确率 {hit / tot_pred:.3f}")
+    print(f"  「结构件写进 objects」这类全修掉的话，精确率上限 "
+          f"{hit / max(tot_pred - on_static, 1):.3f}")
+    print("\n落在真值 static 上的，类名分布（分不清结构件和物体）：")
     for c, n in static_classes.most_common(12):
         print(f"    {c or '（空）':<24} {n}")
     print("\n附近什么都没有的，类名分布（这些才是真的过检）：")
