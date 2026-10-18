@@ -26,7 +26,8 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 
-def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict | None:
+def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict,
+                  refit: bool = True) -> dict | None:
     """编译 -> 稳定（带分离）-> 采纳 -> 重编译 -> 探一遍交互。"""
     from gwm.compiler.compile import compile_program
     from gwm.synthesis.contact import settle_on_ground
@@ -54,8 +55,9 @@ def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict
     # 按几何判定，两者容差对不上，不补这一下有些片段会重编译不过。这里必须照做，
     # 否则扫出来的数和真正跑出来的不是一回事——而且它正好能回答一个问题：
     # 这次按地面贴合的调整，会不会把刚刚分开的物体又推回去。
-    refit = len([m for m in settle_on_ground(program) if m["applied"]]) if any(
-        r.get("applied") for r in rows) else 0
+    refit_count = 0
+    if refit and any(r.get("applied") for r in rows):
+        refit_count = len([m for m in settle_on_ground(program) if m["applied"]])
     (out / "program.json").write_text(json.dumps(program, indent=1, ensure_ascii=False),
                                       encoding="utf-8")
     result = compile_program(program, out / "game", cfg)
@@ -69,7 +71,7 @@ def build_variant(clip_dir: Path, out: Path, separate: float, cfg: dict) -> dict
             if (o.get("drag") or {}).get("mode") == "free"]
     pens = [p for p in pens if isinstance(p, (int, float))]
     return {"clip": clip_dir.name, "ok": True,
-            "applied": sum(1 for r in rows if r.get("applied")), "refit": refit,
+            "applied": sum(1 for r in rows if r.get("applied")), "refit": refit_count,
             "declared": s["declared_grabbable"], "works": s["works"],
             "success": s["manipulation_success_fraction"],
             "clickable": s["median_clickable_fraction"],
@@ -83,6 +85,8 @@ def main() -> int:
     ap.add_argument("--work", required=True)
     ap.add_argument("--seconds", default="0,0.5,1.0")
     ap.add_argument("--limit", type=int, default=10)
+    ap.add_argument("--no-refit", action="store_true",
+                    help="跳过稳定之后那次按地面的接触装配，用来看它是不是把刚分开的又推回去了")
     a = ap.parse_args()
     from gwm.config import load_config, site_name
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml"]
@@ -96,7 +100,7 @@ def main() -> int:
         rows = []
         for clip_dir in clips:
             row = build_variant(clip_dir, Path(a.work) / f"sep_{separate}" / clip_dir.name,
-                                separate, cfg)
+                                separate, cfg, refit=not a.no_refit)
             if row:
                 rows.append(row)
                 print(f"  [{separate}] {row['clip']:<14} "
