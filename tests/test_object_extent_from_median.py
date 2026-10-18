@@ -75,7 +75,8 @@ def test_判不出模型但动得够多时按观测轨迹回放():
     centres = [[i * 0.3, 0.5, 0.0] for i in range(n)]      # 走 2.7 米，远超自身对角线
     ev = evidence_with_sizes(sizes, centres)
     ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": True}
-    node = only_object(evidence_to_program(ev, "c", {}))
+    cfg = {"synthesis": {"write_observed_motion": True}}
+    node = only_object(evidence_to_program(ev, "c", cfg))
     assert node.get("motion", {}).get("type") == "trajectory", f"没写轨迹：{node.get('motion')}"
     keys = node["motion"]["keyframes"]
     assert len(keys) >= 3
@@ -91,7 +92,8 @@ def test_位移小于自身对角线的那一档不写运动():
     centres = [[i * 0.005, 0.5, 0.0] for i in range(n)]    # 一共才动 4.5 厘米
     ev = evidence_with_sizes(sizes, centres)
     ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": True}
-    node = only_object(evidence_to_program(ev, "c", {}))
+    cfg = {"synthesis": {"write_observed_motion": True}}
+    node = only_object(evidence_to_program(ev, "c", cfg))
     assert "motion" not in node, "位移这么小不该写运动，那是误报的主力"
     assert "位移太小" in node.get("notes", "")
 
@@ -121,3 +123,16 @@ def test_判出它不动时不要乱记():
     ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": False}
     node = only_object(evidence_to_program(ev, "c", {}))
     assert "在动" not in node.get("notes", "")
+
+
+def test_观测轨迹默认关着():
+    """在神经感知上它是净亏的（召回 0.500->0.429、可交互性 0.911->0.821），
+    所以默认关着。真值感知上是明确的改进，但那不是真实链路。"""
+    n = 10
+    sizes = [[0.4, 0.4, 0.4]] * n
+    centres = [[i * 0.3, 0.5, 0.0] for i in range(n)]
+    ev = evidence_with_sizes(sizes, centres)
+    ev["objects"][0]["motion_guess"] = {"type": "unknown", "conf": "unknown", "moves": True}
+    node = only_object(evidence_to_program(ev, "c", {}))          # 不给配置 = 默认
+    assert "motion" not in node, "默认不该写观测轨迹"
+    assert "在动" in node.get("notes", ""), "但观测到的事实还是要记下来"

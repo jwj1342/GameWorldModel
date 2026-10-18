@@ -183,8 +183,16 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             # 不写一个**猜的**参数化模型（那会穿帮，也正是那两道闸存在的理由），
             # 而是把**观测到的轨迹**原样写进去：第一档要的就是「在场景里把视频里走过
             # 的路再走一遍」，它不需要知道这是 spin 还是 periodic_rotate。
-            frac = float((cfg or {}).get("synthesis", {}).get("observed_motion_min_span_frac", 0.4))
-            observed = observed_trajectory(o["obb"], frac)
+            syn = (cfg or {}).get("synthesis", {})
+            # 默认关着：在真值感知上这是明确的改进（会动查全 0.136 -> 0.750，
+            # 物体召回和精确率也跟着涨），但在**神经感知**上是净亏——查全同样涨到
+            # 0.500，可召回 0.500 -> 0.429、精确率 0.218 -> 0.207、实测可交互性
+            # 0.911 -> 0.821 全都降了。差别在轨迹质量：神经轨迹带噪声，写进去等于
+            # 给物体加抖动，于是配不上；而且被轨迹动画驱动的物体不跟鼠标走，
+            # 第一档和第二档在这里打架。详见 configs/default.yaml 的注释和 #7。
+            observed = (observed_trajectory(
+                o["obb"], float(syn.get("observed_motion_min_span_frac", 0.4)))
+                if syn.get("write_observed_motion", False) else None)
             if observed:
                 node["motion"] = observed
                 node["notes"] = "运动模型判不出来，按观测到的轨迹回放"
