@@ -37,6 +37,7 @@ perception:
     time_decay_frames: 12.0
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
+  visibility_time_tolerance_s: 0.0001  # 拒绝GT参考与观测采样时刻不一致，不补造比例
   motion:
     infer_articulation: false  # 从配准的逐步变换里推铰链轴和滑轨行程。默认关着：
                                # 四十条有真值的合成片段上扫过阈值，最好一档的可用率

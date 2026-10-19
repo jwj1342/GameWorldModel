@@ -95,6 +95,7 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
             log.record("perception", f"segmentation_{name}_failed", repr(e), action_taken="next backend", exc=e); fallbacks.append(f"segmentation:{name}")
     if tracks is None: raise RuntimeError("all segmentation backends failed")
     # save masks (frame-resolution, downscaled to width 480 to keep the file small)
+    save_visibility_references(tracks, out_dir)
     masks_index = {}
     with_arrays = {}
     for o in tracks.objects:
@@ -104,7 +105,8 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     np.savez_compressed(out_dir / "masks.npz", **with_arrays)
     (out_dir / "masks_index.json").write_text(json.dumps({"objects": {o.id: {"phrase": o.phrase, "score": o.score, "frames": sorted(masks_index.get(o.id, [])),
                                                                                   "identity_hypotheses": o.identity_hypotheses,
-                                                                                  "source_detection_ids": o.source_detection_ids} for o in tracks.objects},
+                                                                                  "source_detection_ids": o.source_detection_ids,
+                                                                                  "visibility_measurements": o.visibility_measurements} for o in tracks.objects},
                                                           "frame_size": tracks.frame_size, "backend": tracks.backend,
                                                           "association_diagnostics": tracks.association_diagnostics}))
     t1 = time.time()
@@ -116,15 +118,110 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     (out_dir / "evidence.json").write_text(json.dumps(ev, indent=1))
     return ev
 
+def save_visibility_references(tracks, out_dir: Path) -> None:
+    """Keep byte-exact PNG members in one NPZ; verify cached members before reuse.
+
+    Legacy relative PNG references remain readable, but no new PNG tree is made.
+    Hash the container and original PNG bytes independently; never trust an NPZ
+    member merely because it has the expected name. No pickle is allowed.
+    """
+    import hashlib
+    import io
+    import os
+    import tempfile
+    import zipfile
+
+    out_dir = Path(out_dir)
+    root = out_dir.resolve()
+    archive_path = out_dir / "visibility_refs.npz"
+    archives = {}
+    members, retained = {}, []
+    write_archive = False
+
+    def digest(payload):
+        return hashlib.sha256(payload).hexdigest()
+
+    def cached_bytes(record, key):
+        reference = record.get("reference", "unknown")
+        if not isinstance(reference, str):
+            raise ValueError("invalid reference")
+        relative, sep, member = reference.partition("#")
+        path = (out_dir / relative).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("reference outside cache")
+        if not sep:  # Read old caches without deleting or rewriting their PNGs.
+            return path.read_bytes()
+        if relative != "visibility_refs.npz" or member != key:
+            raise ValueError("reference member identity mismatch")
+        if path not in archives:
+            payload = path.read_bytes()
+            with np.load(io.BytesIO(payload), allow_pickle=False) as data:
+                if len(data.files) != len(set(data.files)):
+                    raise ValueError("duplicate archive members")
+                archives[path] = (digest(payload), {name: data[name] for name in data.files})
+        sha, data = archives[path]
+        if sha != record.get("reference_archive_sha256"):
+            raise ValueError("archive changed")
+        array = data[member]
+        if array.dtype != np.uint8 or array.ndim != 1:
+            raise ValueError("invalid PNG member encoding")
+        return array.tobytes()
+
+    for obj in tracks.objects:
+        for fi, record in obj.visibility_measurements.items():
+            source = record.pop("reference_path", None)
+            if source == "unknown":
+                continue
+            try:
+                key = f"entry_{int(record['registry_index'])}_frame_{int(fi)}"
+                if record.get("object_id") != obj.id or record.get("frame_index") != fi:
+                    raise ValueError("record identity mismatch")
+                payload = Path(source).read_bytes() if source is not None else cached_bytes(record, key)
+                if digest(payload) != record.get("reference_sha256"):
+                    raise ValueError("PNG bytes changed")
+                with Image.open(io.BytesIO(payload)) as image:
+                    image.verify()
+            except (OSError, ValueError, KeyError, TypeError, EOFError, zipfile.BadZipFile):
+                record.update(fraction="unknown", reason=("reference_changed_or_missing" if source is not None
+                                                         else "cached_reference_changed_or_missing"))
+                continue
+            if key in members:
+                raise ValueError(f"duplicate visibility reference identity: {key}")
+            members[key] = np.frombuffer(payload, dtype=np.uint8)
+            retained.append((record, key))
+            write_archive |= source is not None
+
+    if not write_archive:
+        return  # Cache rebuild is validation only; do not overwrite history.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **members)
+    payload = buffer.getvalue()
+    archive_hash = digest(payload)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=out_dir, prefix="visibility_refs_", suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+        if file_sha256(temporary) != archive_hash:
+            raise OSError("visibility archive write verification failed")
+        os.replace(temporary, archive_path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    for record, key in retained:
+        record.update(reference=f"visibility_refs.npz#{key}", reference_archive_sha256=archive_hash)
+
+
 def save_geometry(geom, path: Path) -> None:
     np.savez_compressed(path, frame_indices=np.asarray(geom.frame_indices), intrinsics=np.stack(geom.intrinsics), cam_to_world=np.stack(geom.cam_to_world), depth=np.stack(geom.depth).astype(np.float16),
-                        depth_conf=np.stack(geom.depth_conf).astype(np.float16) if geom.depth_conf is not None else np.zeros(1), has_conf=np.asarray(geom.depth_conf is not None), scale=np.asarray(geom.scale), backend=np.asarray(geom.backend), notes=np.asarray(geom.notes))
+                        depth_conf=np.stack(geom.depth_conf).astype(np.float16) if geom.depth_conf is not None else np.zeros(1), has_conf=np.asarray(geom.depth_conf is not None), scale=np.asarray(geom.scale), backend=np.asarray(geom.backend), notes=np.asarray(geom.notes), source_program_sha256=np.asarray(geom.source_program_sha256))
 
 def load_geometry(path: Path):
     from .base import Geometry
     z = np.load(path)
     return Geometry(frame_indices=[int(i) for i in z["frame_indices"]], intrinsics=[k for k in z["intrinsics"]], cam_to_world=[m for m in z["cam_to_world"]], depth=[d.astype(np.float32) for d in z["depth"]],
-                    depth_conf=[c.astype(np.float32) for c in z["depth_conf"]] if bool(z["has_conf"]) else None, scale=str(z["scale"]), backend=str(z["backend"]), notes=str(z["notes"]))
+                    depth_conf=[c.astype(np.float32) for c in z["depth_conf"]] if bool(z["has_conf"]) else None, scale=str(z["scale"]), backend=str(z["backend"]), notes=str(z["notes"]), source_program_sha256=str(z["source_program_sha256"]) if "source_program_sha256" in z.files else "")
 
 def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     """Recompute evidence.json from cached geometry.npz + masks.npz (CPU only)."""
@@ -135,10 +232,12 @@ def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
     geom = load_geometry(out_dir / "geometry.npz")
     mi = json.loads((out_dir / "masks_index.json").read_text()); masks = load_masks(out_dir)
     objs = [TrackedObject(id=oid, phrase=m["phrase"], score=m["score"], masks=masks.get(oid, {}),
-                          identity_hypotheses=m.get("identity_hypotheses", []), source_detection_ids=m.get("source_detection_ids", []))
+                          identity_hypotheses=m.get("identity_hypotheses", []), source_detection_ids=m.get("source_detection_ids", []),
+                          visibility_measurements={int(k): v for k, v in m.get("visibility_measurements", {}).items()})
             for oid, m in mi["objects"].items()]
     tracks = Tracks(objects=objs, frame_size=tuple(mi["frame_size"]), backend=mi["backend"],
                     association_diagnostics=mi.get("association_diagnostics", []))
+    save_visibility_references(tracks, out_dir)
     old = json.loads((out_dir / "evidence.json").read_text()) if (out_dir / "evidence.json").exists() else None
     rebuilt = build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir,
                              keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")

@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 from ..taxonomy import is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
+from .visibility import checked_visibility
 from .color import observe_colors
 from .registration import infer_articulation, looks_static, track_rigid
 
@@ -233,6 +234,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         if lam <= 0 or np.linalg.norm(hit - origin) > 60: return None
         return [float(hit[0]), float(size_y / 2), float(hit[2])]
     objects = []
+    visibility_provenance = {}
     dropped_tracks: list[dict] = []
     appearances = observe_colors(frames, {o.id: o.masks for o in tracks.objects}, tracks.frame_size,
                                  cfg["perception"].get("color_min_pixels", 4),
@@ -265,8 +267,15 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             valid_depth = geom.depth[k][mres & (geom.depth[k] > 1e-4)]
             depth = ({"min": float(valid_depth.min()), "median": float(np.median(valid_depth)), "max": float(valid_depth.max()),
                       "unit": "m" if geom.scale == "metric" else "relative"} if len(valid_depth) else "unknown")
+            measurement = o.visibility_measurements.get(fi)
+            visible_fraction, visibility_reason = checked_visibility(
+                measurement, o.id, int(fi), float(ob["t"]), (W, H), geom.source_program_sha256,
+                cfg["perception"].get("visibility_time_tolerance_s", 1e-4))
+            visibility_provenance.setdefault(o.id, []).append({
+                "frame_index": int(fi), "fraction": visible_fraction, "reason": visibility_reason,
+                "reference": copy.deepcopy(measurement) if measurement else "unknown"})
             observations.append({"frame_index": int(fi), "track_id": o.id, "t": float(ob["t"]), "bbox": bbox,
-                                 "mask_ref": f"masks.npz#{o.id}__{fi}", "visible_fraction": "unknown", "depth": depth,
+                                 "mask_ref": f"masks.npz#{o.id}__{fi}", "visible_fraction": visible_fraction, "depth": depth,
                                  "source": {"geometry": geom.backend or "unknown", "segmentation": tracks.backend or "unknown", "tracking": "mask_centroid_obb"},
                                  "confidence": {"geometry": ob["conf"], "segmentation": float(min(1.0, o.score)), "tracking": "unknown"}})
             obbs.append(ob); ts.append(ob["t"]); centers.append(ob["center"]); quaternions.append(ob["quat"])
@@ -361,6 +370,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     if cfg["perception"]["motion"].get("infer_articulation", False):
                         articulation = infer_articulation(tracked)
         motion_result = estimate_motion(ts_a, motion_positions, motion_quaternions, cfg, size=median_size, coordinate_space="world",
+                                        visible_fractions=np.asarray([v["visible_fraction"] for v in observations])
+                                        if all(isinstance(v["visible_fraction"], (int, float)) for v in observations) else None,
                                         camera_pose_available=geom.backend != "static",
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
@@ -395,6 +406,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         "meta": {"clip": clip, "fps_sampled": float(round(1 / max(frames[1]["t"] - frames[0]["t"], 1e-6), 3)) if len(frames) > 1 else 0.0, "n_frames": len(frames), "duration": float(frames[-1]["t"]),
                  "geometry_backend": geom.backend, "segmentation_backend": tracks.backend, "tracks_backend": "mask_centroid_obb", "fallbacks": fallbacks,
                  "scale": geom.scale, "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "alignment": align_info, "phrases_source": phrases_source, "geometry_frames": geom.frame_indices,
+                 "visibility_measurements": visibility_provenance,
                  "association_diagnostics": association_diagnostics,
                  "dropped_short_tracks": dropped_tracks},
         "frames": [{"frame_index": int(frame["index"]), "t": float(frame["t"]),
