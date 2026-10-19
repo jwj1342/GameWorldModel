@@ -54,6 +54,13 @@ def main(argv=None) -> int:
     long_hit: list[float] = []
     long_miss: list[float] = []
     n_short = n_short_hit = 0
+    # 在**短轨迹这个子群里**再试几个属性。它们作为全局过滤器都失败过（#56 的二十条），
+    # 但一个信号在全局没用、在子群里有用是完全可能的——全局失败的原因是「这些信号
+    # 只描述检测自身」，而在短轨迹里要分的恰好是「这条短轨迹是真东西露了几帧，
+    # 还是检测器闪了几下」，可能真的写在检测自身的属性里。
+    attrs: dict[str, dict[str, list[float]]] = {
+        k: {"hit": [], "miss": []} for k in
+        ("检测分数", "掩码占画面", "包围盒尺寸变异", "包围盒中心抖动", "帧数")}
 
     for r in rows:
         scene = ((r.get("metrics") or {}).get("full") or {}).get("scene") or {}
@@ -64,6 +71,12 @@ def main(argv=None) -> int:
             continue
         mi = json.loads(mi_path.read_text(encoding="utf-8"))
         n_total = len(np.load(geo)["frame_indices"])
+        # evidence.json 里有更有信息量的几项：掩码占画面的比例、逐帧包围盒。
+        ev_path = Path(a.report) / r["clip"] / "perception" / "evidence.json"
+        ev: dict[str, dict] = {}
+        if ev_path.is_file():
+            for e in (json.loads(ev_path.read_text(encoding="utf-8")).get("objects") or []):
+                ev[str(e.get("id"))] = e
         for oid, m in (mi.get("objects") or {}).items():
             frames = sorted(int(f) for f in (m.get("frames") or []))
             if len(frames) < 2 or n_total < 2:
@@ -76,6 +89,24 @@ def main(argv=None) -> int:
                 n_short += 1
                 n_short_hit += hit
                 (short_hit if hit else short_miss).append(contiguity)
+                side = "hit" if hit else "miss"
+                attrs["检测分数"][side].append(float(m.get("score") or 0.0))
+                attrs["帧数"][side].append(float(len(frames)))
+                e = ev.get(oid)
+                if e:
+                    if isinstance(e.get("mask_area_frac"), (int, float)):
+                        attrs["掩码占画面"][side].append(float(e["mask_area_frac"]))
+                    obb = [b for b in (e.get("obb") or [])
+                           if isinstance(b.get("size"), list) and isinstance(b.get("center"), list)]
+                    if len(obb) >= 2:
+                        S = np.asarray([b["size"] for b in obb], float)
+                        C = np.asarray([b["center"] for b in obb], float)
+                        diag = float(np.linalg.norm(np.median(S, axis=0)))
+                        attrs["包围盒尺寸变异"][side].append(
+                            float(np.std(S, axis=0).mean() / max(np.mean(S), 1e-9)))
+                        if diag > 1e-6:
+                            attrs["包围盒中心抖动"][side].append(
+                                float(np.sqrt(((C - np.median(C, 0)) ** 2).sum(1).mean()) / diag))
             else:
                 (long_hit if hit else long_miss).append(contiguity)
 
@@ -90,6 +121,30 @@ def main(argv=None) -> int:
     print(describe("短轨迹·配不上", short_miss))
     print(describe("长轨迹·配上真值", long_hit))
     print(describe("长轨迹·配不上", long_miss))
+
+    print("\n—— 短轨迹子群里，几个检测自身属性的判别力 ——")
+    print("  （这些作为**全局**过滤器都失败过，见 #56 的二十条；这里问的是")
+    print("   它们在**短轨迹这个子群**里能不能把真东西挑出来）")
+    for name, d in attrs.items():
+        h, mi = d["hit"], d["miss"]
+        if not (h and mi):
+            print(f"  {name:<14} （样本不够：真 {len(h)} 假 {len(mi)}）")
+            continue
+        H, M = np.sort(np.asarray(h)), np.sort(np.asarray(mi))
+        best, best_dir = -1.0, ""
+        for thr in np.percentile(np.concatenate([H, M]), [10, 25, 50, 75, 90]):
+            for keep_high in (True, False):
+                k = float((H >= thr).mean() if keep_high else (H <= thr).mean())
+                b = float((M < thr).mean() if keep_high else (M > thr).mean())
+                if k + b - 1 > best:
+                    best, best_dir = k + b - 1, ("高的留" if keep_high else "低的留")
+        print(f"  {name:<14} 真 中位 {np.median(H):.3f} / 假 中位 {np.median(M):.3f}"
+              f"   最好 {best:+.3f}（{best_dir}）  真 n={len(H)}")
+    print("\n  **最后一列是乐观偏置的，别直接信。** 它在五个阈值 × 两个方向里取最大，")
+    print("  而正例只有五到七个——这种情况下总能找到一组阈值和方向凑出 +0.2 到 +0.4。")
+    print("  真正的判据应该**方向固定**，而且在没调过参的数据上方向不变。")
+    print("  所以这张表要两批数据并排看：**哪一行的「真/假」大小关系在两批上翻了个个儿，**")
+    print("  **那一行就是在拟合噪声**，不管它的最后一列有多好看。")
 
     if short_hit and short_miss:
         sh, sm = np.asarray(short_hit), np.asarray(short_miss)
