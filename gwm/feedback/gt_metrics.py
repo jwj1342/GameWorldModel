@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import re
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from gwm.config import load_config
@@ -88,6 +90,45 @@ def node_extent(node: dict) -> np.ndarray | None:
     if isinstance(ext, list) and len(ext) == 3:
         e = np.asarray(ext, float)
         return e if np.all(e > 0) else None
+    return None
+
+
+# 内核 `kernel/scene.js` 的 `fallbackForClass` 按**类名正则**挑基本体。这里复刻一份，
+# 因为要量「最终渲出来的是什么形状」就必须知道这个映射，而程序里并不记录它
+# ——节点写的是 `kind: "asset"`，真正渲什么由内核在运行时决定。
+#
+# **这是跨语言重复一份逻辑，是个明确的债。** 留着是因为没有它就量不了形状种类，
+# 而量不了就改不动（#56）。哪天把有效形状写进程序，这段就该删掉，
+# 有一条测试盯着两边保持一致。
+_FALLBACK_SHAPE: tuple[tuple[str, str], ...] = (
+    (r"coin|disc|ring|wheel", "cylinder"),
+    (r"ball|sphere|orb|marble", "sphere"),
+    (r"tree|plant|bush", "composite"),
+    (r"train|car|cart|vehicle|truck|bus|locomotive", "composite"),
+    (r"door|gate|panel", "box"),
+)
+
+
+def effective_shape(node: dict) -> str | None:
+    """这个节点**最终会渲成什么形状**。
+
+    `kind: "primitive"` 直接读 shape。`kind: "asset"` 要分两种：解析到了资产
+    （有 `ref`）就是那个网格，这里记成 "mesh"；没解析到就走内核的类名兜底。
+    """
+    geom = node.get("geom") or {}
+    kind = geom.get("kind")
+    if kind == "primitive":
+        return str(geom.get("shape") or "box")
+    if kind == "composite":
+        return "composite"
+    if kind in ("asset", "generated"):
+        if geom.get("ref"):
+            return "mesh"
+        name = str(node.get("class") or geom.get("query") or "").lower()
+        for pattern, shape in _FALLBACK_SHAPE:
+            if re.search(pattern, name):
+                return shape
+        return "box"          # 内核的默认分支
     return None
 
 
@@ -498,11 +539,26 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     gt_nodes = {o["id"]: o for o in gt_program.get("objects", [])}
     pred_nodes = {o["id"]: o for o in pred_program.get("objects", [])}
     shape_errs, scale_ratios = [], []
+    # 形状**种类**判对了没有。这和 shape_scale_agreement 是两件事：后者比的是三条边
+    # 的比例，一个该是球、却渲成同样尺寸盒子的物体在它上面是满分。
+    # 实测这正是现状——真值 objects 是 28 box / 16 sphere / 9 cone / 6 cylinder，
+    # 而我们所有物体都渲成盒子（节点写 kind:"asset"，一半没有 ref，内核按 12.5%
+    # 准确的类名兜底，真值那些类名一个都不匹配兜底的正则）。见 #56。
+    shape_kind_hits = shape_kind_total = 0
+    shape_kind_confusion: dict[str, int] = {}
     for g, q, _ in matched:
         pair = (shape_scale_agreement(gt_nodes[g], pred_nodes[q])
                 if g in gt_nodes and q in pred_nodes else None)
         if pair:
             shape_errs.append(pair[0]); scale_ratios.append(pair[1])
+        if g in gt_nodes and q in pred_nodes:
+            want = effective_shape(gt_nodes[g])
+            got = effective_shape(pred_nodes[q])
+            if want and got:
+                shape_kind_total += 1
+                shape_kind_hits += want == got
+                key = f"{want}->{got}"
+                shape_kind_confusion[key] = shape_kind_confusion.get(key, 0) + 1
 
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
@@ -572,6 +628,14 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                               "而这批真值里 static 比 object 还多（69 对 59），超过一半的几何体"
                               "从来没进过指标——一个正确落在结构件上的检出被记成假阳性。"
                               "规范变换沿用 objects 那一档的，不重新拟合，所以这一档是纯增量。"},
+            "shape_kind": {"n": shape_kind_total, "correct": shape_kind_hits,
+                           "accuracy": (shape_kind_hits / shape_kind_total
+                                        if shape_kind_total else None),
+                           "confusion": shape_kind_confusion,
+                           "note": "最终渲出来的基本体种类判对了没有。和 shape_ok 不是一回事"
+                                   "——那个比的是三条边的比例，该是球却渲成同尺寸盒子在它上面"
+                                   "是满分。节点写 kind:\"asset\" 时，没有 ref 的走内核按类名"
+                                   "的兜底，这里复刻了那段映射（见 effective_shape）。"},
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
                         "recall": len(matched) / n_gt if n_gt else None,
                         "precision": len(matched) / n_pred if n_pred else None,
