@@ -436,6 +436,8 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 逐字喂进了模型（同义反复，已更正）。资产网格是从三角面上采的，和相机无关，
         # 也和观测完全独立。
         asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
+        # 第四条：模板用**对观测拟合出来的长方体**，不需要检索也不需要真值。
+        prim_deg = _primitive_template_rotation_deg(clouds)
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -452,6 +454,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
             out.setdefault(f"{kind}/template_rmse_deg", []).append(
                 float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        if len(prim_deg) == len(true_deg):
+            out.setdefault(f"{kind}/prim_range_deg", []).append(float(np.ptp(prim_deg)))
+            out.setdefault(f"{kind}/prim_rmse_deg", []).append(
+                float(np.sqrt(np.mean((prim_deg - true_deg) ** 2))))
         if len(asset_deg) == len(true_deg):
             out.setdefault(f"{kind}/asset_range_deg", []).append(float(np.ptp(asset_deg)))
             out.setdefault(f"{kind}/asset_rmse_deg", []).append(
@@ -533,6 +539,62 @@ def _asset_points(query: str) -> np.ndarray | None:
     pts = load_points(Path(root) / hits[0][0].path, samples=3000) if hits else None
     _ASSET_CACHE[query] = pts
     return pts
+
+
+def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.ndarray | None:
+    """对观测点云拟合一个长方体，在它**六个面**上均匀采点，当 ICP 的模板。
+
+    为什么试这个（#7）。完整模板确实管用——用真值位姿拼出来的预言机模板把 static
+    的角度 RMSE 从 12.53° 压到 7.00°。但唯一能落地的模板源（检索到的资产网格）实测
+    反而差一个量级（85.24°），因为这个数据集的真值**全是基本体**，资产库里没有
+    spool / totem / beacon 这些类，拿错形状的网格去配只会解出噪声。
+
+    所以换一个**不需要检索、也不需要真值**的模板：直接按观测点云的包围盒造一个
+    闭合长方体。赌的是预言机那一行暗示的东西——ICP 需要的是「有一个闭合、不随视角
+    扫动的表面可对」，**不一定需要形状种类判对**。真值里盒子本来也占 28/59。
+
+    **这是个候选，不是结论。** 我今天量过点云分不开球和盒（径向离散度 0.4226 对
+    0.4333），所以拟合出来的盒子对一个球来说可能差得离谱。这个函数就是去把这件事
+    量出来的。
+    """
+    if not clouds:
+        return None
+    span = np.vstack(clouds)
+    lo, hi = span.min(0), span.max(0)
+    size = hi - lo
+    if (size <= 1e-6).any():
+        return None
+    rng = np.random.default_rng(seed)
+    per = max(n // 6, 1)
+    faces = []
+    for axis in range(3):
+        for end in (0.0, 1.0):
+            uv = rng.random((per, 3))
+            uv[:, axis] = end
+            faces.append(lo + uv * size)
+    pts = np.vstack(faces)
+    return pts - pts.mean(0)
+
+
+def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
+    """和资产模板同一套流程，只把模板换成拟合出来的长方体。
+
+    两者唯一的差别就是模板从哪来，所以并排比能干净地回答「问题出在模板的来源
+    （检索不到对的资产）还是模板这个思路本身」。
+    """
+    from gwm.perception.registration import icp
+    model = _fitted_primitive_points(clouds)
+    if model is None:
+        return np.array([])
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out)
 
 
 def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
