@@ -164,7 +164,10 @@ perception:
     # 实测依据见 #7：真值静止的物体里，足迹比 1.2–1.5 那一档 yaw 跨度中位 73.5 度，
     # 2.5 以上只有 5.1 度；但真会转的物体也挤在 1.5–2.5，所以这条线压在 1.6。
     yaw_square_below: 1.6
-  contact_dist_m: 0.08
+  contact_dist_m: 0.08             # legacy config alias; never multiplied by object height
+  ground_proximity:
+    max_gap_world: 0.05           # aligned-world units; relative scale is NOT measured metres
+    min_ground_confidence: 0.80   # unreliable/ambiguous ground yields unknown, not contact
   ground_ransac_thresh_m: 0.03
   far_depth_factor: 3.0            # 丢弃深度 > 3×中位深度的点（天空、远景）
   assumed_camera_height_m: 1.2     # 相对尺度后端的定标假设

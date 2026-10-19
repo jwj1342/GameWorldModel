@@ -337,6 +337,23 @@ def assess_evidence_quality(evidence: Any, config: dict | None = None) -> dict:
     duration = _number((normalized.get("meta") or {}).get("duration")) or 0.0
     object_metrics = [_object_metrics(obj, frames, frame_order, duration, thresholds) for obj in normalized.get("objects") or []]
     for index, obj in enumerate(normalized.get("objects") or []):
+        proximity = obj.get("ground_proximity")
+        if proximity is not None:
+            counts = {state: sum(s["state"] == state for s in proximity["samples"])
+                      for state in ("compatible", "separated", "penetrating", UNKNOWN)}
+            object_metrics[index]["ground_proximity"] = {
+                "status": proximity["status"], "sample_counts": counts,
+                "temporal_scope": "sample_points", "physical_contact": UNKNOWN}
+            if proximity["status"] != "assessed":
+                diagnostics.append(_diagnostic(
+                    f"/objects/{index}/ground_proximity", "ground_proximity_unknown",
+                    "ground or some OBB observations are unavailable; unsampled times remain unknown",
+                    "inspect ground provenance and missing samples; do not assume continuous contact"))
+            if counts["penetrating"]:
+                diagnostics.append(_diagnostic(
+                    f"/objects/{index}/ground_proximity", "ground_geometry_conflict",
+                    f"{counts['penetrating']} OBB samples lie below the declared ground tolerance",
+                    "ground, depth, masks or transforms may disagree; do not snap or relax validation"))
         appearance = obj.get("appearance")
         has_masks = any(ob.get("mask_ref", UNKNOWN) != UNKNOWN for ob in obj.get("observations", []))
         if appearance is not None and has_masks and not appearance.get("samples"):

@@ -13,6 +13,7 @@ from typing import Any
 from .geometry import _aabb, _overlaps_xz
 from .validate import validate_candidate
 from ..perception.quality import assess_evidence_quality
+from ..perception.ground_proximity import is_geometric_proximity
 
 
 DEFAULTS = {
@@ -179,6 +180,8 @@ def _contact_action(program: dict, evidence: dict, index: int, codes: set[str], 
     if len(matching) != 1 or any(item.get("with_id") != support_id for item in contacts):
         return None, "Evidence contact is missing, ambiguous, or semantically conflicting"
     contact_index, contact = matching[0]
+    if is_geometric_proximity(contact):
+        return None, "geometric proximity is not physical contact evidence for a position correction"
     contact_conf = contact.get("conf")
     if not _number(contact_conf) or contact_conf < settings["min_contact_confidence"]:
         return None, "Evidence contact confidence is insufficient"

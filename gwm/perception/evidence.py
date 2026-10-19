@@ -9,6 +9,7 @@ from ..taxonomy import is_ground_class, is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
+from .ground_proximity import measure_ground_proximity
 from .registration import infer_articulation, looks_static, track_rigid
 
 
@@ -107,6 +108,8 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np
             if c["cam_height"] < 0: c["n"], c["d"], c["cam_height"] = -c["n"], -c["d"], -c["cam_height"]
         if ok: info["ground_mode"] = "facing_camera"
     info["plane_candidates"] = [{k: v for k, v in c.items() if k not in ("n", "d")} for c in cands]
+    # Provenance only: retain the original best-plane selection and transform.
+    info["ground_candidate_count"] = len(ok)
     if not ok:
         info["ground"] = "not_found"; return T, 1.0, info
     best = max(ok, key=lambda c: c["inliers"] * (0.5 + 0.5 * c["frac_obj_above"]))
@@ -401,14 +404,14 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
         mg["position_source"] = motion_source
-        # contacts with ground
-        bottoms = cs[:, 1] - sz[:, 1] / 2
-        on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)
-        contacts = []
-        if on_ground.mean() > 0.5: contacts.append({"with_id": "ground", "t_start": float(ts_a[0]), "t_end": float(ts_a[-1]), "conf": float(on_ground.mean())})
+        # Geometric compatibility is not evidence of continuous physical contact.
+        proximity = measure_ground_proximity(
+            obbs, [ground], cfg, scale=geom.scale, alignment=align_info,
+            frames=[{"frame_index": int(f["index"]), "t": float(f["t"])} for f in frames])
         geometry_conf = float(np.mean([ob["conf"] for ob in obbs])) if obbs else "unknown"
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
-                        "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
+                        "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg,
+                        "contacts": [], "ground_proximity": proximity,
                         **({"registration": registration} if registration else {}),
                         "observations": observations,
                         "appearance": appearances[o.id],
