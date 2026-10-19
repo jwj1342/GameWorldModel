@@ -237,6 +237,19 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     appearances = observe_colors(frames, {o.id: o.masks for o in tracks.objects}, tracks.frame_size,
                                  cfg["perception"].get("color_min_pixels", 4),
                                  cfg["perception"].get("color_aspect_tolerance", 0.02))
+    # 先定好哪些轨迹留下，再进循环。
+    #
+    # `min_track_frame_frac` 是个**全局阈值**，所以一条片段里要是所有轨迹都短，
+    # 它会被整条清空——实测确实有片段从 2 个物体掉到 0 个，而召回的损失正集中在
+    # 这种片段上（逐片段配对：0 赢 / 3 输 / 9 平，输的就是这几条）。
+    #
+    # `min_track_keep` 是个**按名次的保底**：不管阈值怎么说，每条片段最长的那 N 条
+    # 永远留下。名次是片段内相对的，所以不会出现「这条片段恰好都短 → 一个不剩」。
+    # 帧数用 len(o.masks) 估，和下面 len(obbs) 差在个别拟合失败的帧上，不影响排序。
+    _keep_floor = int(cfg["perception"].get("min_track_keep", 0) or 0)
+    _ranked = sorted(tracks.objects, key=lambda t: len(t.masks), reverse=True)
+    _floor_ids = {t.id for t in _ranked[:_keep_floor]} if _keep_floor > 0 else set()
+
     for o in tracks.objects:
         registration = None   # 配准残差，只有走配准那条路的物体才有
         obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
@@ -299,7 +312,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         # 运动估计成功率是 0%，而它们占了预测物体的一大块，把精确率压得很低
         # （五十条小批量上真值 5 个物体、预测 11.5 个）。这里按被看到的帧数比例过滤。
         min_frac = float(cfg["perception"].get("min_track_frame_frac", 0.0))
-        if min_frac > 0 and len(geom.frame_indices) and len(obbs) / len(geom.frame_indices) < min_frac:
+        if (min_frac > 0 and len(geom.frame_indices) and o.id not in _floor_ids
+                and len(obbs) / len(geom.frame_indices) < min_frac):
             dropped_tracks.append({"id": o.id, "frames": len(obbs),
                                    "frac": round(len(obbs) / len(geom.frame_indices), 3)})
             continue
