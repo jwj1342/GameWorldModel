@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
-from ..taxonomy import is_static_class
+from ..taxonomy import is_ground_class, is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
@@ -242,6 +242,22 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         obbs, observations, ts, centers, quaternions, clouds = [], [], [], [], [], []
         best_frame, best_area = None, 0
         is_structure = is_static_class(o.phrase, cfg)
+        # 贴地接触点那一步只排除**地面本身**，不排除所有结构件。
+        #
+        # 这里原来用的是 is_structure。实测下来那是个会反咬一口的耦合：接触点修正
+        # （加上中心序列时间平滑）一共值 **+0.143 米**——拿 15 个真值结构件量，
+        # 产物里带后处理的首帧框心离真值 0.277 m（容差内 0.867），而现算的、不带
+        # 后处理的首帧是 0.420 m（0.533）。而 is_static_class 在这批数据上只对
+        # 5.2% 的轨迹为真，所以**几乎所有轨迹现在都吃到了这个修正**，包括那 15 个
+        # 真值结构件——它们恰恰是因为类名没认出来才吃到的。
+        #
+        # 也就是说：哪天把「结构件被归进 objects」那个缺口补上，这些节点会**立刻
+        # 失去 0.143 米的修正**，修好一个问题会让另一个变差。先把这个耦合拆掉。
+        #
+        # 排除地面本身仍然是对的：地面就是地平面，拿「掩码最低点与地面的交点」当它
+        # 的中心没有意义。用 is_ground_class（完全相等匹配）而不是 is_static_class
+        # （按词匹配），强度正好对应这个更窄的意图。
+        is_ground = is_ground_class(o.phrase)
         for k, fi in enumerate(geom.frame_indices):
             m = o.masks.get(fi)
             if m is None: continue
@@ -249,7 +265,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             pts = wpt(unproject(geom.depth[k], geom.intrinsics[k], mres, stride=2), k)
             ob = obb_from_points(pts)
             if ob is None: continue
-            if use_contact and not is_structure:
+            if use_contact and not is_ground:
                 cc = contact_center(mres, k, ob["size"][1])
                 # only trust the ground-contact point when the object really rests on the ground: the depth-based centre must agree in xz
                 # and its bottom must be near y=0 (floating objects such as coins keep the depth-based centre)
