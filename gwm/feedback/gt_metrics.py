@@ -541,9 +541,21 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     shape_errs, scale_ratios = [], []
     # 形状**种类**判对了没有。这和 shape_scale_agreement 是两件事：后者比的是三条边
     # 的比例，一个该是球、却渲成同样尺寸盒子的物体在它上面是满分。
-    # 实测这正是现状——真值 objects 是 28 box / 16 sphere / 9 cone / 6 cylinder，
-    # 而我们所有物体都渲成盒子（节点写 kind:"asset"，一半没有 ref，内核按 12.5%
-    # 准确的类名兜底，真值那些类名一个都不匹配兜底的正则）。见 #56。
+    # 实测基线（2026-10-19，两批数据）：
+    #
+    #   ab015    判对 6 / 20 = 0.300   box->mesh 7、box->box 6、sphere->mesh 4、
+    #                                  cylinder->mesh 1、cone->mesh 1、sphere->box 1
+    #   hold015  判对 2 / 11 = 0.182   cylinder->box 3、box->box 2、cone->mesh 2、
+    #                                  cylinder->mesh 2、box->mesh 2
+    #
+    # **这是整张表里最差的一个数**，而且构成很说明问题：真值**全是基本体**
+    # （objects 28 box / 16 sphere / 9 cone / 6 cylinder，static 69 box），而我们
+    # 检索成功的那些渲成网格（mesh）——在这个基准上**网格永远是错的**。
+    #
+    # 也就是说：**资产检索成功反而让形状种类变差。** 两批上「一律用盒子」能拿到
+    # 0.650 和 0.364，都比现状高一倍以上。这不是说该改成一律用盒子——那是在往一个
+    # 只有基本体的基准上过拟合——而是说**这个基准没有能力奖励资产检索**，
+    # 这件事得在数据集那一层解决（见 #5、#9）。见 #56。
     shape_kind_hits = shape_kind_total = 0
     shape_kind_confusion: dict[str, int] = {}
     for g, q, _ in matched:
