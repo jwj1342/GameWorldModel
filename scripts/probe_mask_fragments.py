@@ -72,6 +72,29 @@ def gt_static_pos(program: dict) -> dict[str, np.ndarray]:
     return out
 
 
+def base_colours(pdir: Path) -> dict[str, np.ndarray]:
+    """每条轨迹的代表色（链路已经算好存在 evidence.json 里的 appearance.base_color）。
+
+    为什么试这个：掩码层合并的第一个判据（边界深度跳）不成立——接触的物体本来就
+    深度连续，单目深度跨边界还会被抹平。但**外观是另一类信号**：一根被切成两段的
+    轨道，两段的颜色该一样；而搁在轨道上的球和轨道，颜色该不一样。这个信号链路
+    本来就在算，一直没人拿它判过「该不该合」。
+    """
+    ev = pdir / "evidence.json"
+    out: dict[str, np.ndarray] = {}
+    if not ev.is_file():
+        return out
+    for entry in (json.loads(ev.read_text(encoding="utf-8")).get("objects") or []):
+        c = ((entry.get("appearance") or {}).get("base_color") or "")
+        if isinstance(c, str) and c.startswith("#") and len(c) == 7:
+            try:
+                out[str(entry.get("id"))] = np.asarray(
+                    [int(c[i:i + 2], 16) for i in (1, 3, 5)], float) / 255.0
+            except ValueError:
+                pass
+    return out
+
+
 def classify(a: np.ndarray, b: np.ndarray, others: list[np.ndarray]) -> tuple[float, float]:
     """返回 (最小缝宽像素, 走廊被别的掩码盖住的比例)。"""
     da = distance_transform_edt(~a)
@@ -138,6 +161,9 @@ def main(argv=None) -> int:
     # （不该合）各自的边界深度跳。分不开就说明这个判据不成立。
     jump_same: list[float] = []
     jump_diff: list[float] = []
+    # 同一组正反例上再试一个**完全不同类**的信号：代表色之差。
+    col_same: list[float] = []
+    col_diff: list[float] = []
     for run in sorted(Path(a.report).iterdir()):
         clip = run.name
         pdp, gtp = run / "program.json", Path(a.gt_root) / clip / "program.json"
@@ -151,10 +177,21 @@ def main(argv=None) -> int:
         scale = float(g.get("scale") or 1.0)
 
         pred = {k: scale * (R @ v) + t for k, v in nodes_with_pos(json.loads(pdp.read_text(encoding="utf-8"))).items()}
-        gt = gt_static_pos(json.loads(gtp.read_text(encoding="utf-8")))
+        gt_prog = json.loads(gtp.read_text(encoding="utf-8"))
+        gt = gt_static_pos(gt_prog)
+        # 反例集合第一版只有 7 个样本——0/7 的误合率撑不起任何结论（95% 上界约 35%）。
+        # 扩法：归属不再只认真值 **static**，改成最近的**任意**真值节点。这样正反例
+        # 口径对称（都是「最近的真值节点是不是同一个」），反例也不再被人为限制在
+        # 结构件附近。
+        gt_any = dict(gt)
+        for n in (gt_prog.get("objects") or []):
+            pos = (n.get("pose") or {}).get("pos")
+            if isinstance(pos, list) and len(pos) == 3:
+                gt_any[str(n.get("id"))] = np.asarray(pos, float)
         if not pred or not gt:
             continue
         grouped: dict[str, list[str]] = {}
+        owner_any: dict[str, str] = {}
         for pid, p in pred.items():
             best, bd = None, float("inf")
             for gid, q in gt.items():
@@ -163,12 +200,23 @@ def main(argv=None) -> int:
                     best, bd = gid, d
             if best is not None and bd <= a.group_tol:
                 grouped.setdefault(best, []).append(pid)
+            ba, da = None, float("inf")
+            for gid, q in gt_any.items():
+                d = float(np.linalg.norm(p - q))
+                if d < da:
+                    ba, da = gid, d
+            if ba is not None and da <= a.group_tol:
+                owner_any[pid] = ba
         groups = {k: v for k, v in grouped.items() if len(v) >= 2}
         owner = {pid: gid for gid, members in grouped.items() for pid in members}
         if not groups:
             continue
         geom = load_geometry(pdir / "geometry.npz")
         slot = {int(fi): k for k, fi in enumerate(geom.frame_indices)}
+        cols = base_colours(pdir)
+        # 颜色是**按轨迹**的量，不按帧，所以在轨迹对的层面统计一次就够，
+        # 不要跟着帧循环重复计入——那会让样本数虚高、把置信度说大。
+        seen_pairs: set[tuple[str, str]] = set()
 
         mi = json.loads((pdir / "masks_index.json").read_text(encoding="utf-8"))
         size = tuple(mi["frame_size"])
@@ -201,6 +249,10 @@ def main(argv=None) -> int:
                         gaps.append(gap); pairs_seen += 1; clip_pairs += 1
                         if gap <= TOUCHING_PX:
                             kinds["分割硬切开"] += 1
+                            pk = tuple(sorted((keys[i], keys[j])))
+                            if pk not in seen_pairs and pk[0] in cols and pk[1] in cols:
+                                seen_pairs.add(pk)
+                                col_same.append(float(np.linalg.norm(cols[pk[0]] - cols[pk[1]])))
                             if dep is not None and keys[i] in full_d and keys[j] in full_d:
                                 jp = boundary_depth_jump(full_d[keys[i]], full_d[keys[j]], dep)
                                 if jp is not None:
@@ -210,15 +262,15 @@ def main(argv=None) -> int:
                         else:
                             kinds["中间整段漏掉"] += 1
         # 反例：挨着、但归属**不同**真值节点的掩码对——这些是不该合的。
-        for fi in sorted(slot)[:3]:
+        for fi in sorted(slot)[:8]:
             dep = geom.depth[slot[fi]]
             dsize = (dep.shape[1], dep.shape[0])
             avail = {k: resize_mask(v[fi], dsize).astype(bool)
-                     for k, v in masks.items() if fi in v and k in owner}
+                     for k, v in masks.items() if fi in v and k in owner_any}
             ks = sorted(avail)
             for i in range(len(ks)):
                 for j in range(i + 1, len(ks)):
-                    if owner[ks[i]] == owner[ks[j]] or len(jump_diff) >= a.max_pairs:
+                    if owner_any[ks[i]] == owner_any[ks[j]] or len(col_diff) >= a.max_pairs:
                         continue
                     da = distance_transform_edt(~avail[ks[i]])
                     if not avail[ks[j]].any() or float(da[avail[ks[j]]].min()) > TOUCHING_PX:
@@ -226,6 +278,10 @@ def main(argv=None) -> int:
                     jp = boundary_depth_jump(avail[ks[i]], avail[ks[j]], dep)
                     if jp is not None:
                         jump_diff.append(jp)
+                    pk = tuple(sorted((ks[i], ks[j])))
+                    if pk not in seen_pairs and pk[0] in cols and pk[1] in cols:
+                        seen_pairs.add(pk)
+                        col_diff.append(float(np.linalg.norm(cols[pk[0]] - cols[pk[1]])))
 
         if clip_pairs:
             per_clip.append((clip, len(groups), clip_pairs))
@@ -263,6 +319,25 @@ def main(argv=None) -> int:
         print("  那就别在掩码层合，碎片连链那次的教训是判据不成立时调阈值没有用。")
     else:
         print("\n（深度跳那一档样本不够，判据可分性没量到）")
+
+    if col_same and col_diff:
+        cs = np.sort(np.asarray(col_same)); cd = np.sort(np.asarray(col_diff))
+        print("\n—— 第二个判据：代表色之差（0=同色，最大 √3）——")
+        print(f"  同一个真值节点（该合）  n={len(cs):<4} 中位 {np.median(cs):.4f}  "
+              f"四分位 {np.percentile(cs,25):.4f} / {np.percentile(cs,75):.4f}")
+        print(f"  不同真值节点（不该合）  n={len(cd):<4} 中位 {np.median(cd):.4f}  "
+              f"四分位 {np.percentile(cd,25):.4f} / {np.percentile(cd,75):.4f}")
+        best = (None, -1.0)
+        for thr in np.percentile(np.concatenate([cs, cd]), [10, 25, 40, 50, 60, 75, 90]):
+            keep, wrong = float((cs <= thr).mean()), float((cd <= thr).mean())
+            if keep - wrong > best[1]:
+                best = (float(thr), keep - wrong, keep, wrong)
+        print(f"  最好的阈值 {best[0]:.4f}：该合的留下 {best[2]:.3f}，"
+              f"不该合的误合 {best[3]:.3f}，差 {best[1]:+.3f}")
+        print("  这个差要是也接近零，那就是几何、深度、外观三类信号全试过了，")
+        print("  掩码层合并没有可用判据，该换层面而不是换阈值。")
+    else:
+        print("\n（代表色那一档样本不够）")
 
     print("\n三种成因该做的事完全不同：第一种在分割那一层合回去就行，信息没丢；")
     print("第二种要靠共面、同材质之类的依据跨过遮挡；第三种是检测召回的问题，")
