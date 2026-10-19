@@ -101,11 +101,14 @@ def test_gt_provider_decodes_visible_and_isolated_instance_masks(tmp_path,monkey
     if not missing:
         from gwm.perception.run import save_visibility_references
         out=tmp_path/"retained";save_visibility_references(tracks,out)
-        assert (out/measurement["reference"]).is_file()
+        archive, member = measurement["reference"].split("#")
+        assert (out/archive).is_file()
+        with np.load(out/archive, allow_pickle=False) as data:
+            assert member in data.files
         assert "reference_path" not in measurement
         save_visibility_references(tracks,out)
         assert measurement["fraction"]==.25
-        (out/measurement["reference"]).write_bytes(b"modified")
+        (out/archive).write_bytes(b"modified")
         save_visibility_references(tracks,out)
         assert measurement["fraction"]=="unknown"
         assert measurement["reason"]=="cached_reference_changed_or_missing"
@@ -156,7 +159,7 @@ def test_full_cached_evidence_rebuild(tmp_path, monkeypatch, cache_state):
     reference = tmp_path / "reference.png"
     Image.new("RGB", (40,40)).save(reference)
     reference_hash = file_sha256(reference)
-    measurements = {i: {**record(float(i), .1), "frame_index": i,
+    measurements = {i: {**record(float(i), .1), "frame_index": i, "registry_index": 1,
                          "reference": "reference.png", "reference_sha256": reference_hash}
                     for i in range(6)}
     obj = {"phrase": "wall", "score": 1, "visibility_measurements": measurements}

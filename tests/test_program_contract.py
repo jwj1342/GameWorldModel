@@ -4,7 +4,9 @@ import copy, json
 from html.parser import HTMLParser
 from pathlib import Path
 
-from gwm.compiler.bundle import kernel_config
+import pytest
+
+from gwm.compiler.bundle import bundle, kernel_config
 from gwm.compiler.compile import compile_program
 from gwm.compiler.validate import validate, validate_candidate
 
@@ -107,3 +109,34 @@ def test_geometry_checks_support_contact():
     program["objects"][2]["pose"]["pos"] = [20.0, 0.4, 20.0]
     report = validate_candidate(program)
     assert not report["ok"] and any(e["code"] == "support_no_overlap" for e in report["errors"])
+
+
+@pytest.mark.parametrize("path, value", [
+    (["meta", "duration"], float("inf")),
+    (["camera", "intrinsics", "far"], float("nan")),
+    (["static", 0, "geom", "extent", 0], float("inf")),
+    (["objects", 0, "motion", "period"], float("nan")),
+    (["objects", 0, "motion", "phase"], float("-inf")),
+])
+def test_non_finite_numbers_are_rejected_anywhere_in_the_program(path, value):
+    """NaN 穿得过 schema 的上下界比较，1e400 这种字面量溢出成 inf 又穿得过无上界的字段。
+    漏过去的后果不是渲染难看，是 program.json 里写着裸的 NaN/Infinity，浏览器 JSON.parse
+    直接 SyntaxError，而编译这一步什么都不报。"""
+    p = copy.deepcopy(EXAMPLE)
+    node = p
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    report = validate(p)
+    pointer = "".join(f"/{key}" for key in path)
+    assert not report["ok"]
+    assert any(e["code"] == "non_finite" and e["path"] == pointer for e in report["errors"]), report["errors"]
+
+
+def test_bundle_refuses_to_write_a_bare_infinity(tmp_path, monkeypatch):
+    """校验是第一道闸，写文件这道也得关着——真漏过去的话产物是坏的，但编译会报成功。"""
+    monkeypatch.setattr("gwm.compiler.bundle._copy_vendor", lambda _: None)
+    broken = copy.deepcopy(EXAMPLE)
+    broken["objects"][0]["motion"]["phase"] = float("inf")
+    with pytest.raises(ValueError):
+        bundle(broken, tmp_path / "game")

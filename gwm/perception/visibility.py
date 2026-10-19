@@ -1,6 +1,12 @@
 """In-frame occlusion fractions from independently rendered instance silhouettes."""
 import math
+from numbers import Real
 import numpy as np
+
+
+def _finite_real(value):
+    """Accept real Python/NumPy scalars, never booleans or non-finite values."""
+    return isinstance(value, Real) and not isinstance(value, (bool, np.bool_)) and math.isfinite(value)
 
 
 def measure_visibility(visible, unoccluded):
@@ -18,7 +24,7 @@ def measure_visibility(visible, unoccluded):
 
 
 def checked_visibility(record, object_id, frame_index, t, image_size, program_hash="", tolerance=1e-4):
-    if type(tolerance) not in (int, float) or not math.isfinite(tolerance) or tolerance < 0:
+    if not _finite_real(tolerance) or tolerance < 0:
         raise ValueError("visibility time tolerance must be finite and non-negative")
     if not isinstance(record, dict):
         return "unknown", "missing_reference"
@@ -34,10 +40,10 @@ def checked_visibility(record, object_id, frame_index, t, image_size, program_ha
         return "unknown", "program_source_mismatch"
     for field in ("requested_t", "actual_t"):
         value = record.get(field)
-        if type(value) not in (int, float) or not math.isfinite(value) or abs(value - t) > tolerance:
+        if not _finite_real(value) or not _finite_real(t) or abs(value - t) > tolerance:
             return "unknown", "time_mismatch"
     value = record.get("fraction")
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+    if not _finite_real(value) or not 0 <= value <= 1:
         return "unknown", record.get("reason") or "invalid_fraction"
     if record.get("method") != "isolated_instance_id":
         return "unknown", "unsupported_reference_method"

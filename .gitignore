@@ -4,7 +4,7 @@ data/clips/raw/*.mp4
 data/clips/trimmed/
 out/
 # node
-node_modules/
+node_modules
 pw-browsers/
 # python
 __pycache__/

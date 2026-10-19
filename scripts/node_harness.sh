@@ -16,5 +16,8 @@ if [ ! -d "$ROOT/node_modules" ]; then
 fi
 export PLAYWRIGHT_BROWSERS_PATH=$ROOT/pw-browsers GWM_NODE_MODULES=$ROOT/node_modules
 mkdir -p "$ROOT/harness"; cp -u "$REPO"/harness/*.mjs "$REPO"/harness/package.json "$ROOT/harness/"
+# interaction_probe.mjs 直接 import ../kernel/*.js（它不开浏览器，内核是当成库用的），
+# 所以内核也要跟过去，否则相对路径落在 $ROOT/kernel 上是空的
+cp -ru "$REPO"/kernel "$ROOT/"
 script=$1; shift
 exec node "$ROOT/harness/$script" "$@"

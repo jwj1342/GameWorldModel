@@ -51,6 +51,22 @@ const finalState = await g.page.evaluate(() => window.__game.state());
 verdict.deaths = finalState.player.deaths; verdict.collected = finalState.player.collected; verdict.collectibles_total = finalState.player.collectibles_total;
 verdict.sim_seconds = finalState.t; verdict.wall_ms = Date.now() - wall0; verdict.sim_fps = finalState.frame / Math.max(verdict.wall_ms / 1000, 1e-3);
 verdict.playable = verdict.reached_goal && verdict.deaths < 10;
+// 这次判定是怎么来的。槽位由模板猜出来的时候，出生点和目标被放在同一块地面的两个
+// 角上，中间没有障碍，于是几乎必然通关——那种结果不该和真的走到目标的混在一起算
+// 通过率。trustworthy 为 false 的判定，汇总时要单独看。
+// 老的 game 目录里打包的是加这个接口之前的内核，取不到就记成 null，不能因此崩掉——
+// 判定文件本身比这一项重要，而且归档的产物还要能重跑。
+verdict.binding = await g.page.evaluate(
+  () => (typeof window.__game.bindingInfo === 'function' ? window.__game.bindingInfo() : null));
+// 取不到来源的时候不敢说它可信，但也不能说它不可信——记成 null，由汇总那一步决定怎么办
+verdict.trustworthy = verdict.binding
+  ? (verdict.binding.inferred_slots ?? []).length === 0
+  : null;
+if (verdict.trustworthy === false) {
+  verdict.untrustworthy_reason =
+    `槽位由模板兜底猜出：${verdict.binding.inferred_slots.join('、')}；`
+    + `这条链路没走 gwm/binding/，也就没做尺度归一化`;
+}
 fs.writeFileSync(path.join(outDir, 'verdict.json'), JSON.stringify(verdict, null, 2));
 await g.close();
 console.log(JSON.stringify(verdict));
