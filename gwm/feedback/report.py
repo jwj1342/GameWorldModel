@@ -36,6 +36,7 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     scene_recalls, scene_precs = [], []
     kind_hits: list[float] = []
     shape_hits, scale_hits, scale_ratios = [], [], []
+    scale_run_medians, geometry_unavailable = [], []
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
@@ -68,14 +69,28 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         # 「场景复原得像不像」就没在量（见 #56）。按**物体**汇总，和准确率一致。
         # 形状和尺度：按**物体**汇总，和准确率一致。这两列才是「复原得像不像」
         # 该报的数——类名在当前合成数据集上和形状脱钩，恒等于噪声（见 #56）。
-        if ob.get("shape_ok_frac") is not None and ob.get("matched"):
-            k = round(float(ob["shape_ok_frac"]) * ob["matched"])
-            shape_hits.extend([1.0] * k + [0.0] * (ob["matched"] - k))
-        if ob.get("scale_ok_frac") is not None and ob.get("matched"):
-            k = round(float(ob["scale_ok_frac"]) * ob["matched"])
-            scale_hits.extend([1.0] * k + [0.0] * (ob["matched"] - k))
+        per_geometry = ob.get("geometry_per_object")
+        if isinstance(per_geometry, dict):
+            for measured in per_geometry.values():
+                if measured.get("shape_error") is not None:
+                    shape_hits.append(float(measured["shape_error"] <= 0.2))
+                if measured.get("scale_ratio") is not None:
+                    ratio = float(measured["scale_ratio"])
+                    scale_ratios.append(ratio)
+                    scale_hits.append(float(0.8 <= ratio <= 1.25))
+        else:
+            # Old reports do not retain per-object ratios. A known measured
+            # count can recover binary hits, but never an object-level median.
+            n = ob.get("geometry_n")
+            if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+                for key, hits in (("shape_ok_frac", shape_hits), ("scale_ok_frac", scale_hits)):
+                    if ob.get(key) is not None:
+                        k = round(float(ob[key]) * n)
+                        hits.extend([1.0] * k + [0.0] * (n - k))
+            elif any(ob.get(k) is not None for k in ("shape_ok_frac", "scale_ok_frac", "scale_ratio")):
+                geometry_unavailable.append(r.get("clip", "unknown"))
         if ob.get("scale_ratio") is not None:
-            scale_ratios.append(float(ob["scale_ratio"]))
+            scale_run_medians.append(float(ob["scale_ratio"]))
         if isinstance(ob.get("class_correct"), int) and ob.get("matched"):
             class_hits.extend([1.0] * ob["class_correct"])
             class_hits.extend([0.0] * (ob["matched"] - ob["class_correct"]))
@@ -108,6 +123,8 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "shape_ok": stat(shape_hits),
         "scale_ok": stat(scale_hits),
         "scale_ratio": stat(scale_ratios),
+        "scale_ratio_run_medians": stat(scale_run_medians),
+        "geometry_unavailable_runs": geometry_unavailable,
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},
         # 按整段平均距离配对，会把运动判错的物体一并算成没检出。这两个数说明那个偏差
         # 有多大：start_position_only 是「位置对上了、但运动没对上所以被判成未检出」的

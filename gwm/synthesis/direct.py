@@ -150,7 +150,12 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         # 换成 `moves`：它绕开七分类的两道闸单独算「会不会动」，真值感知上查全 0.925，
         # 是我们唯一验证过有信息的运动信号。语义也更对——「没有信息」不该被当成
         # 「它会动」，对一个名字叫 rail/wall/floor 的东西尤其不该。
-        looks_structural = is_static_class(cls, cfg) and o["motion_guess"].get("moves") is not True
+        guess = o["motion_guess"]
+        # Legacy Evidence has no `moves` field. A known motion type is positive
+        # evidence too; even a conflicting binary flag must not erase it.
+        has_motion = guess.get("moves") is True or guess.get("type") in {
+            "prismatic", "trajectory", "revolute", "spin", "periodic_translate", "periodic_rotate"}
+        looks_structural = is_static_class(cls, cfg) and not has_motion
         if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             #

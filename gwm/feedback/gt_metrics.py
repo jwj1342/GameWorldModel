@@ -196,17 +196,35 @@ def camera_scale_hint(gt_states: list[dict], pred_states: list[dict],
     返回 1.0 并在诊断里说明——宁可不估，也不要用一个噪声主导的倍数去缩放整个场景。
     """
     def cam(states):
-        out = []
+        times, positions = [], []
         for s in states:
             c = (s.get("camera") or {}).get("pos") if isinstance(s, dict) else None
-            if isinstance(c, (list, tuple)) and len(c) == 3 and np.isfinite(np.asarray(c, float)).all():
-                out.append([float(v) for v in c])
-        return np.asarray(out, float).reshape(-1, 3)
+            t = s.get("t") if isinstance(s, dict) else None
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(t):
+                continue
+            try:
+                pos = np.asarray(c, float)
+            except (TypeError, ValueError):
+                continue
+            if pos.shape == (3,) and np.isfinite(pos).all():
+                times.append(float(t)); positions.append(pos)
+        return {"t": np.asarray(times), "pos": np.asarray(positions).reshape(-1, 3)}
 
-    g_cam, p_cam = cam(gt_states), cam(pred_states)
-    info = {"gt_frames": len(g_cam), "pred_frames": len(p_cam)}
-    if len(g_cam) < 2 or len(p_cam) < 2:
+    gt_cam, pred_cam = cam(gt_states), cam(pred_states)
+    info = {"gt_frames": len(gt_cam["t"]), "pred_frames": len(pred_cam["t"])}
+    if len(gt_cam["t"]) < 2 or len(pred_cam["t"]) < 2:
         return 1.0, {**info, "used": "none", "why": "相机轨迹点不够"}
+    if any(np.any(np.diff(c["t"]) <= 0) for c in (gt_cam, pred_cam)):
+        return 1.0, {**info, "used": "none", "why": "相机时间不严格递增"}
+    lo, hi = max(gt_cam["t"][0], pred_cam["t"][0]), min(gt_cam["t"][-1], pred_cam["t"][-1])
+    if hi <= lo:
+        return 1.0, {**info, "used": "none", "why": "相机没有共同时间跨度"}
+    # Compare the same times, not independently sampled path radii. The caller
+    # has already removed every source frame after the observation cut, so even
+    # interpolation cannot reach into the holdout segment. Never extrapolate.
+    times = np.linspace(lo, hi, 120)
+    g_cam, p_cam = _sample(gt_cam, times), _sample(pred_cam, times)
+    info.update({"window_s": [float(lo), float(hi)], "samples": len(times)})
     g_r, p_r = _rms_radius(g_cam), _rms_radius(p_cam)
     info.update({"gt_radius": round(g_r, 4), "pred_radius": round(p_r, 4)})
     for pts, radius, side in ((gt_pts, g_r, "gt"), (pred_pts, p_r, "pred")):
@@ -429,7 +447,9 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
         pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
         hint, hint_info = ((None, {"used": "off"}) if not with_scale else
-                           camera_scale_hint(gt_states, pred_states, gt_c, pred_c))
+                           camera_scale_hint([s for s in gt_states if t_start <= s["t"] <= cut],
+                                             [s for s in pred_states if t_start <= s["t"] <= cut],
+                                             gt_c, pred_c))
         R0, t0v, s0, coarse = coarse_gauge(gt_c, pred_c, max_dist_m, with_scale,
                                            hint if hint and hint != 1.0 else None)
         coarse["scale_source"] = hint_info
@@ -534,11 +554,13 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         a, b = gt_class.get(gt_id, ""), pred_class.get(pred_id, "")
         return bool(a) and bool(b) and (a == b or a in b or b in a)
 
-    class_correct = sum(1 for g, q, _ in matched if same_class(g, q))
+    class_correct = sum(1 for g, q, _ in matched
+                        if same_class(gt_tr[g]["object_id"], pred_tr[q]["object_id"]))
 
     gt_nodes = {o["id"]: o for o in gt_program.get("objects", [])}
     pred_nodes = {o["id"]: o for o in pred_program.get("objects", [])}
     shape_errs, scale_ratios = [], []
+    geometry_per_object = {}
     # 形状**种类**判对了没有。这和 shape_scale_agreement 是两件事：后者比的是三条边
     # 的比例，一个该是球、却渲成同样尺寸盒子的物体在它上面是满分。
     # 实测基线（2026-10-19，两批数据）：
@@ -559,18 +581,22 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     shape_kind_hits = shape_kind_total = 0
     shape_kind_confusion: dict[str, int] = {}
     for g, q, _ in matched:
-        pair = (shape_scale_agreement(gt_nodes[g], pred_nodes[q])
-                if g in gt_nodes and q in pred_nodes else None)
+        gt_node = gt_nodes[gt_tr[g]["object_id"]]
+        pred_node = pred_nodes[pred_tr[q]["object_id"]]
+        pair = shape_scale_agreement(gt_node, pred_node)
+        geometry_per_object[g] = {"pred_id": q,
+                                  "shape_error": pair[0] if pair else None,
+                                  "scale_ratio": pair[1] if pair else None,
+                                  "status": "measured" if pair else "missing_geometry"}
         if pair:
             shape_errs.append(pair[0]); scale_ratios.append(pair[1])
-        if g in gt_nodes and q in pred_nodes:
-            want = effective_shape(gt_nodes[g])
-            got = effective_shape(pred_nodes[q])
-            if want and got:
-                shape_kind_total += 1
-                shape_kind_hits += want == got
-                key = f"{want}->{got}"
-                shape_kind_confusion[key] = shape_kind_confusion.get(key, 0) + 1
+        want = effective_shape(gt_node)
+        got = effective_shape(pred_node)
+        if want and got:
+            shape_kind_total += 1
+            shape_kind_hits += want == got
+            key = f"{want}->{got}"
+            shape_kind_confusion[key] = shape_kind_confusion.get(key, 0) + 1
 
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
@@ -668,6 +694,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                         # 基本体），所以 class_accuracy 在这里恒等于噪声，别拿它
                         # 当成绩也别拿它调参——换成类名有语义的数据集时它才有意义。
                         "shape_error": (float(np.median(shape_errs)) if shape_errs else None),
+                        "geometry_n": len(shape_errs),
+                        "geometry_per_object": geometry_per_object,
                         "shape_ok_frac": (float(np.mean(np.asarray(shape_errs) <= 0.2))
                                           if shape_errs else None),
                         "scale_ratio": (float(np.median(scale_ratios)) if scale_ratios else None),
