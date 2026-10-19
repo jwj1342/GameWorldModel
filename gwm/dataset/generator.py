@@ -12,7 +12,7 @@
 from __future__ import annotations
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .framing import scale_program
 from .behavior import (BINDING_CLASSES, TEST_FAMILIES, TRAIN_FAMILIES,
@@ -41,21 +41,24 @@ class SceneSpec:
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
 
+    # 两个派生方法都用 `dataclasses.replace`，**不要逐字段重建**。
+    #
+    # 原来是逐字段抄的，于是 `stage_scale` 被漏掉、退回默认的 1.0——基准片段缩到了
+    # 0.15，派生出来的配对没缩，两边差 6.667 倍。后果是 `style_variant` 这组
+    # 「同行为、只换样式」的不变量**根本不成立**，而 #52 的整个指标就建立在这个
+    # 不变量上。实测六组 style_variant 行为全不同，一组都用不了。
+    #
+    # 逐字段重建是这类 bug 的温床：以后往 SceneSpec 加字段，一样会被静默漏掉，
+    # 而且不报错。replace 只改要改的，其余自动带上。
     def with_style(self, style_seed: int, clip: str) -> "SceneSpec":
         """同行为、同观测，只换样式。"""
-        return SceneSpec(clip=clip, family=self.family, behavior_seed=self.behavior_seed,
-                         style_seed=style_seed, camera_seed=self.camera_seed, profile=self.profile,
-                         duration=self.duration, fps=self.fps, objects=self.objects,
-                         camera_track=self.camera_track, notes=self.notes,
-                         tags=tuple(self.tags) + ("style_variant",))
+        return replace(self, clip=clip, style_seed=style_seed,
+                       tags=tuple(self.tags) + ("style_variant",))
 
     def with_behavior(self, behavior_seed: int, clip: str) -> "SceneSpec":
         """同样式、同观测，只换行为。"""
-        return SceneSpec(clip=clip, family=self.family, behavior_seed=behavior_seed,
-                         style_seed=self.style_seed, camera_seed=self.camera_seed, profile=self.profile,
-                         duration=self.duration, fps=self.fps, objects=self.objects,
-                         camera_track=self.camera_track, notes=self.notes,
-                         tags=tuple(self.tags) + ("behavior_variant",))
+        return replace(self, clip=clip, behavior_seed=behavior_seed,
+                       tags=tuple(self.tags) + ("behavior_variant",))
 
 
 def _material_rng(style_seed: int, node_id: str) -> random.Random:
