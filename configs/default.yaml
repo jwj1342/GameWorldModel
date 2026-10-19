@@ -94,7 +94,12 @@ perception:
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
   motion:
-    infer_articulation: false  # 从配准的逐步变换里推铰链轴和滑轨行程。默认关着：
+    # 默认关着。**根因是 #7 那个 ICP 伪造转动，不是阈值没调好**：静止物体被 ICP
+    # 解出 26.6° 的转动（合成对照），而这里铰链的门槛是 8°，实测触发时的转角中位数
+    # 是 22.4°/37.8°/76.5°。全真值几何 + 全真值分割下 12 个真关节也只找回 1 个
+    # ——完美的掩码和深度不会让 ICP 不伪造转动。详见 gwm/perception/registration.py
+    # 里 infer_articulation 上面那段注释和 #63。
+    infer_articulation: false  # 从配准的逐步变换里推铰链轴和滑轨行程。原来的说明：
                                # 四十条有真值的合成片段上扫过阈值，最好一档的可用率
                                # （报出来的里既是真关节、类型也判对的比例）只有 0.333，
                                # 再收紧就一个都报不出来。见 scripts/sweep_articulation.py
