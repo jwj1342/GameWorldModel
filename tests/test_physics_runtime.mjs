@@ -24,7 +24,8 @@ function harness(objects) {
   const template = {camera: {}, playerMesh: {}, goalMesh: {}, spawn: new THREE.Vector3(100, 100, 100), state: () => ({}), update: () => {}};
   const replay = {camera: {}, update: () => {}};
   const game = {t: 0, frame: 0, modeName: 'replay', input: {}};
-  vm.runInNewContext(control, {registry, physics, template, replay, game, DT, scene, renderer: {}, far: 100});
+  const manipulator = {update() {}};   // 真的直接操纵在 test_manipulate.mjs 里单独测
+  vm.runInNewContext(control, {registry, physics, template, replay, game, DT, scene, renderer: {}, far: 100, manipulator});
   return {game, physics, registry};
 }
 test('composite total mass is volume-weighted and independent of part count', () => {
@@ -88,7 +89,7 @@ test('existing collision scene stays finite and replays identically on CPU', () 
   physics.createPlayer(new THREE.Vector3(100, 100, 100));
   const template = {camera: {}, playerMesh: {}, goalMesh: {}, spawn: new THREE.Vector3(100, 100, 100), state: () => ({}), update: () => {}};
   const game = {t: 0, frame: 0, modeName: 'replay', input: {}};
-  vm.runInNewContext(control, {registry, physics, template, replay: {camera: {}, update: () => {}}, game, DT, scene, renderer: {}, far: 100});
+  vm.runInNewContext(control, {registry, physics, template, replay: {camera: {}, update: () => {}}, game, DT, scene, renderer: {}, far: 100, manipulator: {update() {}}});
   try {
     for (let i = 0; i < 180; i++) game.seek(i / 30);
     const final = registry.filter(e => e.simulated).map(e => e.group.position.clone());

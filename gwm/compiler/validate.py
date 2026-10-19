@@ -32,10 +32,53 @@ def _finite(v) -> bool:
     except TypeError:
         return False
 
+def _check_style(program: dict, errors: list[dict], warnings: list[dict]) -> None:
+    """样式那一半里 schema 说不了的两条。"""
+    key = ((program.get("style") or {}).get("lighting") or {}).get("key") or {}
+    d = key.get("direction")
+    if d is not None and _finite(d) and sum(x * x for x in d) < 1e-12:
+        errors.append(_err("/style/lighting/key/direction", "zero_direction",
+                           "key light direction must be a non-zero vector", "point it at the scene, e.g. [6, 12, 8]"))
+    for node, path in ([(n, f"/static/{i}") for i, n in enumerate(program.get("static", []))]
+                       + [(n, f"/objects/{i}") for i, n in enumerate(program.get("objects", []))]):
+        m = node.get("material")
+        if isinstance(m, dict) and m.get("emissive_intensity") is not None and m.get("emissive") is None:
+            warnings.append(_err(path + "/material", "emissive_intensity_without_emissive",
+                                 "emissive_intensity has no effect without 'emissive'", "set emissive or drop the intensity"))
+
+
+def _nonfinite_errors(node: Any, path: str = "") -> list[dict]:
+    """Reject nonfinite numbers anywhere in the program, before schema validation.
+
+    Schema bounds do not catch them: NaN compares false against every bound, and
+    an unbounded field accepts the inf that a literal like 1e400 parses to. Either
+    one reaches program.json as a bare NaN/Infinity, which the runtime's JSON.parse
+    refuses. Walking the whole program keeps this from drifting as fields are added,
+    and keeps the exact numeric field path in the diagnostic.
+    """
+    errors: list[dict] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            errors.extend(_nonfinite_errors(value, f"{path}/{key}"))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            errors.extend(_nonfinite_errors(value, f"{path}/{index}"))
+    elif type(node) in (int, float):  # bool is not a number here; types stay the schema's job.
+        try:
+            finite = math.isfinite(node)
+        except OverflowError:
+            finite = False  # An int too large for float decodes to Infinity in JSON.parse too.
+        if not finite:
+            errors.append(_err(path, "non_finite", "numeric value must be finite",
+                               "replace it with a finite value; NaN and Infinity are not supported"))
+    return errors
+
+
 def semantic_errors(program: dict) -> tuple[list[dict], list[dict]]:
     errors: list[dict] = []
     warnings: list[dict] = []
     ids: dict[str, str] = {}
+    _check_style(program, errors, warnings)
     for i, s in enumerate(program.get("static", [])):
         p = f"/static/{i}"
         if s["id"] in ids: errors.append(_err(p + "/id", "duplicate_id", f"id '{s['id']}' already used at {ids[s['id']]}", "rename to a unique id"))
@@ -153,6 +196,8 @@ def validate_candidate(program: Any, evidence: dict | None = None) -> dict:
     """
     del evidence  # Explicitly unused by the model-independent candidate preflight.
     findings: list[dict] = []
+
+    findings.extend(_annotate(_nonfinite_errors(program), "semantic", "error"))
 
     schema_errs = schema_errors(program)
     findings.extend(_annotate(schema_errs, "schema", "error"))

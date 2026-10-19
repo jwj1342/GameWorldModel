@@ -1,8 +1,12 @@
 // scene.js — 把 program.json 的 static[] 与 objects[] 变成 three.js 节点，并给每个物体分配 24 位 ID 颜色
 import * as THREE from 'three';
 import { makePose, isSimulated } from './motions.js';
+import { fitToExtent, tintToMeasured } from './assets.js';
 
-const MATERIALS = {
+// 调色板是 DSL 契约的一部分：schema 的 $defs.materialName 列的就是这些词，
+// tests/test_style_kernel.mjs 盯着两边不许漂。名字写错了会悄悄变成灰色，
+// 所以 schema 那边是闭集，不是任意字符串。
+export const MATERIALS = {
   default: { color: 0x9a9a9a, roughness: 0.8 },
   grass: { color: 0x5f9e4a, roughness: 0.95 },
   stone: { color: 0x8c8c8c, roughness: 0.9 },
@@ -24,10 +28,33 @@ const MATERIALS = {
   cardboard: { color: 0xc49a6c, roughness: 0.9 },
 };
 
+// 实测颜色是否迁移到资产上。由 kernel_config 控制，缺省开启。
+let TINT_ASSETS = true;
+export function setTintAssets(on) { TINT_ASSETS = !!on; }
+
+const hex = (v, fallback) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? parseInt(v.slice(1), 16) : fallback);
+
+// 样式那一半：调色板词、十六进制颜色，或者一个写全表面参数的对象。
+// 对象那条是给「颜色从视频里量出来」留的——调色板的 19 个词对不上真实场景。
+function surfaceParams(m) {
+  const spec = { color: hex(m.base_color, 0x9a9a9a), roughness: m.roughness ?? 0.7 };
+  if (m.metalness != null) spec.metalness = m.metalness;
+  if (m.emissive != null) { spec.emissive = hex(m.emissive, 0x000000); spec.emissiveIntensity = m.emissive_intensity ?? 1; }
+  if (m.opacity != null && m.opacity < 1) { spec.transparent = true; spec.opacity = m.opacity; }
+  return spec;
+}
+
 export function makeMaterial(name) {
+  if (name && typeof name === 'object') return new THREE.MeshStandardMaterial(surfaceParams(name));
   const spec = MATERIALS[name] ?? (typeof name === 'string' && /^#[0-9a-f]{6}$/i.test(name) ? { color: parseInt(name.slice(1), 16), roughness: 0.7 } : MATERIALS.default);
   return new THREE.MeshStandardMaterial(spec);
 }
+
+// 默认值就是这一行原来写死的那组数，所以不写 lighting 的老程序渲染结果不变。
+export const DEFAULT_LIGHTING = {
+  ambient: { sky_color: '#ffffff', ground_color: '#556655', intensity: 1.1 },
+  key: { color: '#ffffff', intensity: 1.6, direction: [6, 12, 8], shadow: true },
+};
 
 // ---- primitive fallback for asset / generated ----
 function fallbackForClass(cls, extent) {
@@ -61,8 +88,12 @@ function primitiveGeometry(g) {
   }
 }
 
-export function buildNode(spec, material) {
+export function buildNode(spec, assetScene = null) {
   // returns THREE.Group containing one or more meshes; also returns collider description list
+  //
+  // 碰撞体**永远**从基本体那一套算，哪怕这个节点挂了一个真网格。这是有意的：
+  // 外形换成什么样，都不改变这个物体能不能被拖动、能不能被踩上去、物理怎么解。
+  // 表征和交互是两半，分界线就在这个函数里——group 是表征，colliders 是交互。
   const group = new THREE.Group();
   const geom = spec.geom ?? { kind: 'primitive', shape: 'box', extent: [1, 1, 1] };
   const extent = geom.extent ?? geom.size ?? [1, 1, 1];
@@ -70,15 +101,24 @@ export function buildNode(spec, material) {
   if (geom.kind === 'asset' || geom.kind === 'generated') resolved = fallbackForClass(spec.class ?? geom.query, extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent);
   const colliders = [];
   const mat = makeMaterial(spec.material ?? resolved.material ?? (geom.kind !== 'primitive' ? guessMaterial(spec.class) : 'default'));
-  if (resolved.kind === 'composite') {
-    for (const p of resolved.parts) {
-      const m = new THREE.Mesh(primitiveGeometry(p), p.material ? makeMaterial(p.material) : mat);
-      m.position.set(...(p.offset ?? [0, 0, 0])); m.castShadow = m.receiveShadow = true; group.add(m);
-      colliders.push({ shape: p.shape, extent: p.extent, radius: p.radius, height: p.height, offset: p.offset ?? [0, 0, 0] });
+  const parts = resolved.kind === 'composite'
+    ? resolved.parts.map(p => ({ part: p, collider: { shape: p.shape, extent: p.extent, radius: p.radius, height: p.height, offset: p.offset ?? [0, 0, 0] } }))
+    : [{ part: resolved, collider: { shape: resolved.shape, extent: resolved.extent ?? resolved.scale, size: resolved.size, radius: resolved.radius, height: resolved.height, axis: resolved.axis, offset: [0, 0, 0] } }];
+  for (const { collider } of parts) colliders.push(collider);
+  if (assetScene) {
+    // 真网格替换外观。材质原则上跟着 GLB 自己带的走——库里的资产是美术做好的，
+    // 套一层按类名猜出来的调色板词只会更不像。但**实测到的**颜色是另一回事：
+    // 它来自视频本身，所以按它把资产的平均色迁过去，同时保留资产的相对色彩变化。
+    const fitted = fitToExtent(assetScene.clone(true), extent.length === 2 ? [extent[0], 0.1, extent[1]] : extent);
+    const measured = typeof spec.material === 'object' && spec.material ? spec.material.base_color : null;
+    group.add(measured && TINT_ASSETS ? tintToMeasured(fitted, measured) : fitted);
+  } else if (resolved.kind === 'composite') {
+    for (const { part } of parts) {
+      const m = new THREE.Mesh(primitiveGeometry(part), part.material ? makeMaterial(part.material) : mat);
+      m.position.set(...(part.offset ?? [0, 0, 0])); m.castShadow = m.receiveShadow = true; group.add(m);
     }
   } else {
     const m = new THREE.Mesh(primitiveGeometry(resolved), mat); m.castShadow = m.receiveShadow = true; group.add(m);
-    colliders.push({ shape: resolved.shape, extent: resolved.extent ?? resolved.scale, size: resolved.size, radius: resolved.radius, height: resolved.height, axis: resolved.axis, offset: [0, 0, 0] });
   }
   return { group, colliders };
 }
@@ -102,12 +142,21 @@ export function idToColor(i) {
   return new THREE.Color(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
 
-export function buildScene(program, kernelCfg = null) {
+export function buildScene(program, kernelCfg = null, assetScenes = null) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(program.style?.background ?? '#87a7c7');
   scene.fog = null;
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x556655, 1.1); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(6, 12, 8); sun.castShadow = true;
+  // 光照原来写死在这里，于是 5.8 的生成器随机化了光照也没处记，每条合成样本的
+  // 样式那一半按构造就是有损的。现在它是程序的一部分，缺省值与原来逐项相同。
+  const amb = { ...DEFAULT_LIGHTING.ambient, ...(program.style?.lighting?.ambient ?? {}) };
+  const key = { ...DEFAULT_LIGHTING.key, ...(program.style?.lighting?.key ?? {}) };
+  const hemi = new THREE.HemisphereLight(hex(amb.sky_color, 0xffffff), hex(amb.ground_color, 0x556655), amb.intensity);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(hex(key.color, 0xffffff), key.intensity);
+  // direction 是「光从哪个方向照过来」，按它摆灯位，长度不影响方向光的效果，只影响阴影视锥
+  const d = key.direction, len = Math.hypot(d[0], d[1], d[2]) || 1, far = 16;
+  sun.position.set(d[0] / len * far, d[1] / len * far, d[2] / len * far);
+  sun.castShadow = key.shadow;
   sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = sun.shadow.camera.bottom = -25; sun.shadow.camera.right = sun.shadow.camera.top = 25;
   scene.add(sun);
 
@@ -116,7 +165,7 @@ export function buildScene(program, kernelCfg = null) {
   // simulated = 物理驱动，位姿由 Rapier 算出来再读回 group，方向相反
   let idIndex = 1;
   const add = (spec, kind, base, motion, instanceIndex = 0) => {
-    const { group, colliders } = buildNode(spec);
+    const { group, colliders } = buildNode(spec, assetScenes?.[spec.id] ?? null);
     group.name = instanceIndex ? `${spec.id}#${instanceIndex}` : spec.id;
     group.position.set(...base.pos); group.quaternion.set(...(base.quat ?? [0, 0, 0, 1])).normalize();
     scene.add(group);

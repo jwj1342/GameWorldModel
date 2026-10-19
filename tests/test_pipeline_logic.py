@@ -249,16 +249,64 @@ def test_eval_aggregation_pools_objects_not_clips():
     assert a["trajectory_m"]["n"] == 5
     assert abs(a["trajectory_m"]["median"] - 0.0) < 1e-9
     assert abs(a["trajectory_m"]["mean"] - 0.2) < 1e-9
-    # 准确率是片段级的量，按片段汇总：两个片段 1.0 和 0.5
-    assert a["motion_type_accuracy"]["n"] == 2
-    assert abs(a["motion_type_accuracy"]["mean"] - 0.75) < 1e-9
+    # 准确率按**物体**汇总，不是按片段。模块文档一直这么写（「一个片段里物体数量不一样，
+    # 先按片段平均会让物体少的片段权重过高」），但实现原来是按片段收的，这条测试把错的
+    # 行为固化住了。实测后果：二十条片段共 35 个配对物体、判对 5 个（0.143），逐片段
+    # 中位数却报成 0.000，因为多数片段只配上一两个物体且恰好判错。
+    # 这里一个片段 1 个物体全对、另一个 4 个物体对一半，合起来是 5 个物体里对 3 个。
+    assert a["motion_type_accuracy"]["n"] == 5
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.6) < 1e-9
     # 混淆矩阵要累加
     assert a["confusion"]["static->spin"] == 2
     # 没有数据时不能假装有
     assert aggregate([])["trajectory_m"] is None
 
+    # 表里印出来的准确率必须是均值，不是中位数。汇总到物体一级之后准确率是一串 0/1，
+    # 中位数只会取 0 或 1——五个物体判对三个，中位数是 1.000，真实准确率是 0.600。
+    # 原来这里只断言「表里有竖线」，于是几何消融的三档被印成 0.000/0.000/0.000，
+    # 而真实值是 0.182/0.158/0.200。
     md = as_markdown({"甲": a})
     assert "甲" in md and "|" in md
+    assert "0.600" in md, f"准确率列应该报均值 0.600，实际渲染：{md}"
+    assert "1.000" not in md.split("|")[8], "准确率列不能报 0/1 序列的中位数"
+    # 配对物体数要露出来，否则读者判断不了一个差值是不是噪声
+    assert "| 5 |" in md
+
+
+def test_恒答static的常数基线要和准确率并排报():
+    """没有这一列，读不出准确率有没有区分力。
+
+    实测踩过：主线运动类型准确率 0.250，而判对的六个**全部**是 static->static，
+    「不管看到什么都答 static」在同一批上也是 6/24 = 0.250——一模一样。那不是
+    准确率偏低，是这个指标此刻对方法没有任何区分力。表里不并排报，没人会想起来算。
+    """
+    from gwm.feedback.report import aggregate, as_markdown
+
+    def run(confusion):
+        n = sum(sum(p.values()) for p in confusion.values())
+        hits = sum(p.get(t, 0) for t, p in confusion.items())
+        return {"metrics": {"full": {
+            "trajectory": {"per_object": {f"o{i}": 0.1 for i in range(n)},
+                           "median_m": 0.1, "max_m": 0.1, "n": n},
+            "motion_type": {"accuracy": hits / n, "n": n, "confusion": confusion},
+            "objects": {"recall": 0.5, "precision": 0.5},
+        }}}
+
+    # 八个物体：真值 static 的三个全判对，另外五个会动的全判成 static。
+    # 分类器准确率 3/8 = 0.375，而「恒答 static」也是 3/8 —— 零区分力。
+    a = aggregate([run({"static": {"static": 3},
+                        "spin": {"static": 2},
+                        "revolute": {"static": 3}})])
+    assert abs(a["motion_type_accuracy"]["mean"] - 0.375) < 1e-9
+    assert abs(a["always_static_accuracy"] - 0.375) < 1e-9
+    assert "恒答 static" in as_markdown({"甲": a})
+
+    # 反例：真的判出了会动的东西，常数基线就该明显低于准确率
+    b = aggregate([run({"static": {"static": 3},
+                        "spin": {"spin": 2},
+                        "revolute": {"revolute": 3}})])
+    assert abs(b["motion_type_accuracy"]["mean"] - 1.0) < 1e-9
+    assert abs(b["always_static_accuracy"] - 0.375) < 1e-9
 
 
 def test_gauge_alignment_absorbs_unobservable_but_not_real_errors():
