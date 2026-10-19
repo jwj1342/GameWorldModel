@@ -257,6 +257,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         # 排除地面本身仍然是对的：地面就是地平面，拿「掩码最低点与地面的交点」当它
         # 的中心没有意义。用 is_ground_class（完全相等匹配）而不是 is_static_class
         # （按词匹配），强度正好对应这个更窄的意图。
+        #
+        # **A/B 跑过，今天是个完全的 no-op**：十二条片段上每一个指标都一模一样
+        # （配对 24、物体 0.464/0.226、场景 0.348/0.261、可交互性 0.929）。它今天
+        # 只碰到 3 条 rail 轨迹，而那几条的接触点替换本来就被下面的几何守卫
+        # （xz 要对得上、底面要贴近 y=0）挡掉了。**这个改动的价值全部在于防住未来
+        # 那个回退，不在今天的数。** 如实写在这儿，免得以后有人以为它带来过收益。
         is_ground = is_ground_class(o.phrase)
         for k, fi in enumerate(geom.frame_indices):
             m = o.masks.get(fi)
