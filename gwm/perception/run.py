@@ -108,7 +108,7 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
                                                           "frame_size": tracks.frame_size, "backend": tracks.backend,
                                                           "association_diagnostics": tracks.association_diagnostics}))
     t1 = time.time()
-    ev = build_evidence(clip, frames, geom, tracks, cfg, out_dir, keyframes, fallbacks, phrases_source)
+    ev = build_evidence(clip, frames, geom, tracks, cfg, out_dir, keyframes, fallbacks, phrases_source, replay_source="production_in_memory")
     timing["evidence"] = round(time.time() - t1, 1); timing["total"] = round(time.time() - t0, 1)
     ev["meta"]["timing_s"] = timing
     ev["meta"]["source_video_sha256"] = file_sha256(video)
@@ -141,7 +141,7 @@ def rebuild_evidence(out_dir: Path, cfg: dict) -> dict:
                     association_diagnostics=mi.get("association_diagnostics", []))
     old = json.loads((out_dir / "evidence.json").read_text()) if (out_dir / "evidence.json").exists() else None
     rebuilt = build_evidence(old["meta"]["clip"] if old else out_dir.parent.name, frames, geom, tracks, cfg, out_dir,
-                             keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "")
+                             keyframes, old["meta"]["fallbacks"] if old else [], old["meta"].get("phrases_source", "") if old else "", replay_source="legacy_lossy_cache")
     if old:
         for key in ("source_video_sha256", "source_video_path"):
             if key in old["meta"]:

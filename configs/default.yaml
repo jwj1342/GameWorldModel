@@ -7,6 +7,7 @@ frames:
   geometry_frames: 48      # 几何后端使用的帧数上限
   geometry_width: 518      # VGGT 输入宽
 perception:
+  geometry_replay: false         # 可选无损诊断 sidecar；不改变几何或门禁，见 docs/geometry-replay.md
   geometry_backend: vggt          # vggt | static | gt（ViPE 与 SAM 3.1 见 docs/status.md 的待办）
   geometry_fallbacks: [static]
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
