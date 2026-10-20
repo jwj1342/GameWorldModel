@@ -10,6 +10,7 @@ from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
 from .ground_proximity import measure_ground_proximity
+from .ground_sampling import GroundSamplingPolicy, uses_sampling_roles
 from .registration import infer_articulation, looks_static, track_rigid
 
 
@@ -56,12 +57,13 @@ def rotation_aligning(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.eye(3) + vx + vx @ vx * (1 / (1 + c))
 
 # ---------------- world alignment ----------------
-def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: dict | None = None) -> tuple[np.ndarray, float, dict]:
+def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: dict | None = None, source_video_sha256: str | None = None) -> tuple[np.ndarray, float, dict]:
     """Find the ground plane from static pixels, return (T 4x4 applied to world points, scale, info).
     Candidate planes are extracted iteratively; the ground is the large, roughly horizontal plane below the camera
     that most object centres lie above (this rejects sky/far planes). Result world: y up, ground at y=0."""
     pc = cfg["perception"]
     W, H = geom.size()
+    sampling = GroundSamplingPolicy(tracks, geom.frame_indices, cfg, source_video_sha256=source_video_sha256)
     pts_all, obj_pts = [], []
     point_sources = []
     step = max(1, len(geom.frame_indices) // 6)
@@ -69,14 +71,13 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: 
         fi = geom.frame_indices[k]
         depth = geom.depth[k]; med = np.median(depth[depth > 1e-4]) if (depth > 1e-4).any() else 1.0
         near = (depth > 1e-4) & (depth < pc.get("far_depth_factor", 3.0) * med)   # drop sky / far garbage
-        static_mask = near.copy(); any_obj = np.zeros((H, W), bool)
-        for o in tracks.objects:
-            m = o.masks.get(fi)
-            if m is not None: mm = _resize_mask(m, (W, H)); static_mask &= ~mm; any_obj |= mm
+        any_obj, excluded, support = sampling.masks(tracks, fi, (W, H), _resize_mask)
+        static_mask = near & ~excluded
         if geom.dynamic_mask is not None: static_mask &= ~geom.dynamic_mask[k].astype(bool)
         if geom.depth_conf is not None:
             conf = geom.depth_conf[k]; thr = np.percentile(conf, 30)
             if conf.max() - conf.min() > 1e-6: static_mask &= conf >= thr   # skip the filter when confidence is constant (ground-truth backend)
+        sampling.record_frame(fi, any_obj, excluded, support, static_mask)
         pts_all.append(to_world(unproject(depth, geom.intrinsics[k], static_mask, stride=4), _fix(geom.cam_to_world[k])))
         if replay is not None:
             ys, xs = np.mgrid[0:H:4, 0:W:4]
@@ -96,6 +97,9 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: 
         replay.update({"static_point_sources": point_sources, "candidates": [],
                        "coordinate_space": "OpenCV world after _fix; before alignment and scale"})
     info = {"n_static_points": int(len(P)), "n_object_points": int(len(O))}
+    if sampling.enabled:
+        info["ground_sampling"] = sampling.audit
+        if replay is not None: replay["ground_sampling"] = sampling.audit
     up = np.array([0, 1.0, 0]); cam0 = _fix(geom.cam_to_world[0])[:3, 3]
     scene_scale = float(np.percentile(np.abs(P - P.mean(0)).max(1), 50)) if len(P) else 1.0
     thresh = max(scene_scale * pc["ground_ransac_thresh_m"], 1e-4)
@@ -104,6 +108,12 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: 
     cands, rest = [], P.copy()
     rest_ids = np.arange(len(P)) if replay is not None else None
     if replay is not None: replay["ransac_threshold"] = float(thresh)
+    if sampling.enabled and not any(f["eligible_support_stride4_before_cap"] for f in sampling.audit["frames"]):
+        sampling.warn("ground_sampling_no_support", "/meta/alignment/ground_sampling",
+                      "No observed support survived frame scope and filters; ground remains unknown.")
+        info.update(ground="not_found", ground_candidate_count=0, plane_candidates=[])
+        if replay is not None: replay.update(selected=None, T=T.tolist(), scale=1.0)
+        return T, 1.0, info
     for _ in range(4):
         if len(rest) < 200: break
         n, d, inl = fit_plane_ransac(rest, thresh=thresh, rng=rng)
@@ -232,8 +242,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     object_replay = []
     if record_replay and any((out / name).exists() for name in ("geometry_replay", "geometry_replay_v1")):
         raise FileExistsError("geometry replay already exists; use a fresh output directory")
-    if record_replay:
-        T, scale, align_info = align_world(geom, tracks, cfg, replay=alignment_replay)
+    align_kwargs = {"replay": alignment_replay} if record_replay else {}
+    if uses_sampling_roles(cfg):
+        from .geometry_replay import _resolve_video_hash
+        align_kwargs["source_video_sha256"] = _resolve_video_hash(frames, source_video_sha256)
+    if align_kwargs:
+        T, scale, align_info = align_world(geom, tracks, cfg, **align_kwargs)
     else:
         T, scale, align_info = align_world(geom, tracks, cfg)
     def wpt(pts_cam, k):  # camera points -> aligned, scaled world

@@ -43,6 +43,11 @@ The record contains:
   Available decoded source PTS, source frame indices and image hashes are retained
   without inventing missing values or persisting personal source-file paths.
 
+Optional [ground sampling roles](ground-sampling.md) are retained in config and
+alignment diagnostics. Their native-mask fingerprints must match the recorded
+arrays, and a source-bound replay must pass the recorded video SHA to alignment.
+The sampling policy source is included in the computation-source fingerprints.
+
 Extra storage is proportional to the original arrays, rather than the old
 float16 depth and width-480 masks. No fixed size estimate is claimed. Records
 are ignored by Git; retain them with the corresponding run artifacts.

@@ -82,7 +82,8 @@ def test_lossless_roundtrip_and_replay(tmp_path, optional):
     assert manifest["config"]["api_key"] == "<redacted>"
     assert "synthetic-secret" not in (out / "manifest.json").read_text()
     assert manifest["physical_ground_correctness"] == "unknown"
-    assert len(manifest["source_sha256"]) == 6
+    assert len(manifest["source_sha256"]) == 7
+    assert "ground_sampling.py" in manifest["source_sha256"]
 
 
 @pytest.mark.parametrize("object_depth,expected_branch", [(.7312345, "guard_rejected"), (.99, "applied")])
@@ -249,7 +250,8 @@ def test_legacy_record_directory_not_overwritten(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("legacy_rebuild", [False, True])
-def test_production_and_legacy_entrypoints_bind_video_source(tmp_path, monkeypatch, legacy_rebuild):
+@pytest.mark.parametrize("sampling_roles", [False, True])
+def test_production_and_legacy_entrypoints_bind_video_source(tmp_path, monkeypatch, legacy_rebuild, sampling_roles):
     from PIL import Image
     from gwm.perception import run, overlay
     from gwm.perception.provenance import file_sha256
@@ -273,10 +275,31 @@ def test_production_and_legacy_entrypoints_bind_video_source(tmp_path, monkeypat
     monkeypatch.setattr(run, "make_geometry_backend", lambda *a: SimpleNamespace(estimate=lambda *a: geom))
     monkeypatch.setattr(run, "make_segmentation_backend", lambda *a: SimpleNamespace(segment=lambda *a: tracks))
     monkeypatch.setattr(overlay, "render_overlay", lambda *a, **kw: None)
+    if sampling_roles:
+        from gwm.perception.ground_sampling import mask_sha256
+        cfg["perception"]["ground_sampling"] = {"mode": "reviewed_roles", "roles": [{
+            "object_id": tracks.objects[0].id, "role": "ground_support", "frame_indices": geom.frame_indices,
+            "source": {"kind": "provider", "reference": "synthetic-fixture", "video_sha256": video_hash},
+            "mask_sha256": {str(fi): mask_sha256(mask) for fi, mask in tracks.objects[0].masks.items()}}]}
     cfg["perception"]["geometry_replay"] = not legacy_rebuild
     out = tmp_path / "run"
     ev = run.run_perception(str(video), "synthetic", out, cfg, phrases=["box"])
     if legacy_rebuild:
+        if sampling_roles:
+            # Legacy caches are resized: an approval of native masks must not
+            # silently authorize the different masks loaded by rebuild_evidence.
+            cfg["perception"]["geometry_replay"] = True
+            previous_evidence = (out / "evidence.json").read_bytes()
+            with pytest.raises(ValueError, match="mask hash mismatch"):
+                run.rebuild_evidence(out, cfg)
+            assert (out / "evidence.json").read_bytes() == previous_evidence
+            assert not (out / "geometry_replay").exists()
+            # Explicit synthetic re-review of the loaded (lossy) masks: this is
+            # new approval, not automatic migration of native-mask approval.
+            loaded_masks = run.load_masks(out)[tracks.objects[0].id]
+            approved = cfg["perception"]["ground_sampling"]["roles"][0]
+            approved["mask_sha256"] = {str(fi): mask_sha256(mask) for fi, mask in loaded_masks.items()}
+            approved["source"]["reference"] = "synthetic-review-of-lossy-masks"
         cfg["perception"]["geometry_replay"] = True
         ev = run.rebuild_evidence(out, cfg)
     _, _, manifest = load_replay(out / "geometry_replay", expected_video_sha256=video_hash)

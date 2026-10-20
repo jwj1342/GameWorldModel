@@ -69,7 +69,7 @@ def save_replay(out, geom, tracks, frames, cfg, alignment, objects, source, *, s
     np.savez_compressed(out / "inputs.npz", **arrays)
     # Hash the whole computation chain used by alignment and OBB extraction.
     sources = [Path(__file__), *[Path(__file__).with_name(n) for n in
-               ("evidence.py", "base.py", "masks.py", "run.py")],
+               ("evidence.py", "base.py", "masks.py", "run.py", "ground_sampling.py")],
                Path(__file__).parents[1] / "config.py"]
     manifest = {
         "version": VERSION, "input_source": source,
