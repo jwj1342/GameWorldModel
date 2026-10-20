@@ -10,10 +10,13 @@ import { PlatformerTemplate } from './templates/platformer_3p.js';
 
 const params = new URLSearchParams(location.search);
 const HEADLESS = params.get('headless') === '1';
+// Explicit opt-in: inspect the authored scene without creating gameplay roles.
+const SCENE_ONLY = params.get('scene_only') === '1';
 const DT = 1 / 60;
 
 const game = {
-  readyState: 'loading', error: null, t: 0, frame: 0, modeName: HEADLESS ? 'replay' : 'play',
+  readyState: 'loading', error: null, t: 0, frame: 0, sceneOnly: SCENE_ONLY,
+  modeName: HEADLESS || SCENE_ONLY ? 'replay' : 'play',
   input: { keys: new Set(), move: null, jump: false },
 };
 window.__game = game;
@@ -41,14 +44,14 @@ async function boot() {
   const physics = new Physics(DT);
   for (const e of registry) physics.addEntry(e);
   const replay = makeReplayCamera(program.camera, W / H);
-  const template = new PlatformerTemplate({ program, scene, registry, physics, kernelCfg });
-  template.camera.aspect = W / H; template.camera.updateProjectionMatrix();
+  const template = SCENE_ONLY ? null : new PlatformerTemplate({ program, scene, registry, physics, kernelCfg });
+  if (template) { template.camera.aspect = W / H; template.camera.updateProjectionMatrix(); }
   const far = program.camera?.intrinsics?.far ?? 100;
 
   // 直接操纵：鼠标拖动场景里的物体。构造放在控制块之前，这样 tests/test_physics_runtime.mjs
   // 提取出来的那段代码只依赖 manipulator 这个对象本身，不依赖 Manipulator 这个类。
-  const manipulator = new Manipulator({ camera: template.camera, registry, physics, scene, dt: DT });
-  if (!HEADLESS) manipulator.attach(renderer.domElement);
+  const manipulator = new Manipulator({ camera: template?.camera ?? replay.camera, registry, physics, scene, dt: DT });
+  if (!HEADLESS && !SCENE_ONLY) manipulator.attach(renderer.domElement);
 
   const hasSimulated = registry.some(e => e.simulated);
 
@@ -62,7 +65,7 @@ async function boot() {
       physics.syncKinematic(e);
     }
   }
-  function activeCamera() { return game.modeName === 'replay' ? replay.camera : template.camera; }
+  function activeCamera() { return !template || game.modeName === 'replay' ? replay.camera : template.camera; }
   function updateCamera() { if (game.modeName === 'replay') replay.update(game.t); }
 
   Object.assign(game, {
@@ -75,14 +78,19 @@ async function boot() {
     // 切模式时要把操纵器的相机也换过去：画面用 activeCamera() 渲染，而鼠标拾取是
     // 从操纵器自己那台相机打射线的。两者不一致的话，在回放视角下点哪儿都打偏——
     // 看到的是视频的视角，射线却从玩家那台相机出发。
-    mode(m) { game.modeName = m === 'replay' ? 'replay' : 'play'; if (m === 'play') { template.playerMesh.visible = true; template.goalMesh.visible = true; } else { template.playerMesh.visible = false; template.goalMesh.visible = false; } updateCamera(); manipulator.camera = activeCamera(); return game.modeName; },
+    mode(m) {
+      if (!template && m !== 'replay') throw new Error('scene-only mode supports replay only');
+      game.modeName = m === 'replay' ? 'replay' : 'play';
+      if (template) { template.playerMesh.visible = m === 'play'; template.goalMesh.visible = m === 'play'; }
+      updateCamera(); manipulator.camera = activeCamera(); return game.modeName;
+    },
     step(dt = DT) {
       if (!Number.isFinite(dt) || dt <= 0) throw new Error('step needs a positive finite dt');
       if (hasSimulated && Math.abs(dt - DT) > 1e-12) throw new Error('dynamic step requires the fixed dt (1/60 s); use seek for sampling');
       game.frame++;
       game.t = hasSimulated ? game.frame * DT : game.t + dt;
       updateMotions(game.t);
-      if (game.modeName === 'play') template.update(game.input, game.t);
+      if (template && game.modeName === 'play') template.update(game.input, game.t);
       manipulator.update();
       physics.step();
       for (const e of registry) physics.syncSimulated(e);   // 仿真之后把位姿读回来
@@ -104,17 +112,18 @@ async function boot() {
     },
     render(pass = 'rgb') { return renderPass(renderer, scene, activeCamera(), registry, pass, { far }); },
     draw() { renderer.render(scene, activeCamera()); },
-    setSize(w, h) { renderer.setSize(w, h, false); replay.camera.aspect = w / h; replay.camera.updateProjectionMatrix(); template.camera.aspect = w / h; template.camera.updateProjectionMatrix(); },
+    setSize(w, h) { renderer.setSize(w, h, false); replay.camera.aspect = w / h; replay.camera.updateProjectionMatrix(); if (template) { template.camera.aspect = w / h; template.camera.updateProjectionMatrix(); } },
     setInput(i) { if (i.move !== undefined) game.input.move = i.move; if (i.jump !== undefined) game.input.jump = !!i.jump; if (i.keys) game.input.keys = new Set(i.keys.map(k => k.toLowerCase())); },
-    reset(seed = 0) { game.t = 0; game.frame = 0; for (const e of registry) { e.triggerTime = null; if (!e.visible) { e.visible = true; e.group.visible = true; physics.addEntry(e); } physics.respawnSimulated(e); } template.collected = 0; template.deaths = 0; template.won = false; template.wonAt = null; physics.teleportPlayer(template.spawn); updateMotions(0); updateCamera(); },
+    reset(seed = 0) { game.t = 0; game.frame = 0; for (const e of registry) { e.triggerTime = null; if (!e.visible) { e.visible = true; e.group.visible = true; physics.addEntry(e); } physics.respawnSimulated(e); } if (template) { template.collected = 0; template.deaths = 0; template.won = false; template.wonAt = null; physics.teleportPlayer(template.spawn); } updateMotions(0); updateCamera(); },
     state() {
-      return { t: game.t, frame: game.frame, mode: game.modeName, player: template.state(),
+      return { t: game.t, frame: game.frame, mode: game.modeName, player: template?.state() ?? null,
         objects: registry.map(e => ({ id: e.id, name: e.name, kind: e.kind, class: e.class, pos: e.group.position.toArray(), quat: e.group.quaternion.toArray(), visible: e.visible, dynamic: e.dynamic })) };
     },
     // 把场景放下来自己稳一稳：只动没有脚本运动的物体——它们的位姿完全来自感知，
     // 而感知给的是按可见表面拟合的包围盒中心，常常半悬空或者和别的物体穿插。
     // 有脚本运动的物体位姿由 pose(t) 决定，不参与。
     settle(seconds = 1.5, separateSeconds = 0) {
+      if (!template) throw new Error('settle is unavailable in scene-only mode');
       const movable = registry.filter(e => e.kind === 'object'
         && (!e.spec.motion || e.spec.motion.type === 'static'));
       const before = new Map(movable.map(e => [e.id, e.group.position.clone()]));
@@ -159,9 +168,9 @@ async function boot() {
     //                而试玩角色是固定尺寸的胶囊，比例会错得很离谱
     bindingInfo() {
       return {
-        template: program.binding?.template ?? null,
-        slot_source: template.slotSource ?? null,
-        inferred_slots: Object.entries(template.slotSource ?? {})
+        template: template ? program.binding?.template ?? null : null,
+        slot_source: template?.slotSource ?? null,
+        inferred_slots: Object.entries(template?.slotSource ?? {})
           .filter(([, v]) => v === 'inferred').map(([k]) => k),
         game_scale: program.meta?.game_scale ?? null,
       };
@@ -171,7 +180,7 @@ async function boot() {
   updateMotions(0); game.mode(game.modeName);
   game.readyState = 'ready'; log('ready', { objects: registry.length, headless: HEADLESS });
 
-  if (!HEADLESS) {
+  if (!HEADLESS && !SCENE_ONLY) {
     addEventListener('keydown', e => { game.input.keys.add(e.key.toLowerCase()); if (e.key === ' ') e.preventDefault(); if (e.key.toLowerCase() === 'r') game.mode(game.modeName === 'play' ? 'replay' : 'play'); });
     addEventListener('keyup', e => game.input.keys.delete(e.key.toLowerCase()));
     addEventListener('resize', () => game.setSize(innerWidth, innerHeight));
