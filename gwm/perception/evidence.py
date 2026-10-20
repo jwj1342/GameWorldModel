@@ -224,15 +224,18 @@ def smooth_series(x: np.ndarray, win: int) -> np.ndarray:
     return np.stack([np.convolve(xp[:, j], k, mode="valid") for j in range(x.shape[1])], 1) if x.ndim == 2 else np.convolve(xp, k, mode="valid")
 
 # ---------------- main ----------------
-def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "", *, replay_source: str = "in_memory_unspecified") -> dict:
+def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "", *, replay_source: str = "in_memory_unspecified", source_video_sha256: str | None = None) -> dict:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     W, H = geom.size()
     record_replay = bool(cfg["perception"].get("geometry_replay", False))
     alignment_replay = {} if record_replay else None
     object_replay = []
-    if record_replay and (out / "geometry_replay_v1").exists():
+    if record_replay and any((out / name).exists() for name in ("geometry_replay", "geometry_replay_v1")):
         raise FileExistsError("geometry replay already exists; use a fresh output directory")
-    T, scale, align_info = align_world(geom, tracks, cfg, replay=alignment_replay)
+    if record_replay:
+        T, scale, align_info = align_world(geom, tracks, cfg, replay=alignment_replay)
+    else:
+        T, scale, align_info = align_world(geom, tracks, cfg)
     def wpt(pts_cam, k):  # camera points -> aligned, scaled world
         return (to_world(pts_cam, _fix(geom.cam_to_world[k])) @ T[:3, :3].T + T[:3, 3]) * scale
     cam_poses = []
@@ -492,8 +495,9 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
     }
     if record_replay:
         from .geometry_replay import save_replay
-        save_replay(out / "geometry_replay_v1", geom, tracks, frames, cfg,
-                    alignment_replay, object_replay, replay_source)
+        save_replay(out / "geometry_replay", geom, tracks, frames, cfg,
+                    alignment_replay, object_replay, replay_source,
+                    source_video_sha256=source_video_sha256)
     (out / "evidence.json").write_text(json.dumps(evidence, indent=1))
     try:
         from .overlay import render_overlay

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 from pathlib import Path
 
 import numpy as np
@@ -24,12 +25,30 @@ def _sha(path):
     return digest.hexdigest()
 
 
-def save_replay(out, geom, tracks, frames, cfg, alignment, objects, source):
+def _video_hash(value):
+    if value is None or value == "unknown":
+        return "unknown"
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+        raise ValueError("invalid geometry replay source video SHA256")
+    return value.lower()
+
+
+def _resolve_video_hash(frames, declared=None):
+    known = {_video_hash(declared)}
+    known.update(_video_hash(f.get("video_sha256")) for f in frames)
+    known.discard("unknown")
+    if len(known) > 1:
+        raise ValueError("geometry replay source video mismatch between frames and declared source")
+    return next(iter(known), "unknown")
+
+
+def save_replay(out, geom, tracks, frames, cfg, alignment, objects, source, *, source_video_sha256=None):
     """Write once into a dedicated directory, without replacing prior evidence.
 
     Preserve each array's actual dtype/shape (including optional dynamic masks).
     Numeric keys avoid interpreting object IDs as archive member paths.
     """
+    video_hash = _resolve_video_hash(frames, source_video_sha256)
     out = Path(out)
     out.mkdir(exist_ok=False)
     arrays = {}
@@ -56,10 +75,13 @@ def save_replay(out, geom, tracks, frames, cfg, alignment, objects, source):
         "version": VERSION, "input_source": source,
         "historical_exactness": "unavailable" if source == "legacy_lossy_cache" else "recorded_inputs_only",
         "physical_ground_correctness": "unknown",
+        "source_video_sha256": video_hash,
         "runtime": {"python": platform.python_version(), "numpy": np.__version__,
                     "scipy": scipy.__version__},
         "frame_indices": [int(fi) for fi in geom.frame_indices],
-        "frames": [{"index": int(f["index"]), "t": float(f["t"])} for f in frames],
+        "frames": [{"index": int(f["index"]), "t": float(f["t"]),
+                    **{key: f[key] for key in ("source_pts_s", "source_frame_index", "video_sha256", "image_sha256")
+                       if key in f}} for f in frames],
         "geometry": {"scale": geom.scale, "backend": geom.backend,
                      "has_conf": geom.depth_conf is not None,
                      "has_dynamic_mask": geom.dynamic_mask is not None},
@@ -73,10 +95,10 @@ def save_replay(out, geom, tracks, frames, cfg, alignment, objects, source):
         if isinstance(value, np.ndarray): return value.tolist()
         if isinstance(value, np.generic): return value.item()
         raise TypeError(f"unsupported replay value: {type(value).__name__}")
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=numpy_json))
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=numpy_json), encoding="utf-8")
 
 
-def load_replay(out):
+def load_replay(out, *, expected_video_sha256=None):
     """Return inputs for CPU inspection; missing/legacy records are explicit.
 
     Does not invoke fitting, inference, evidence generation or a validator.
@@ -84,9 +106,17 @@ def load_replay(out):
     out = Path(out)
     if not (out / "manifest.json").exists():
         raise ValueError("geometry replay unavailable: historical record missing")
-    manifest = json.loads((out / "manifest.json").read_text())
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("version") != VERSION:
         raise ValueError("unsupported geometry replay version")
+    actual = _resolve_video_hash(manifest["frames"], manifest.get("source_video_sha256"))
+    manifest["source_video_sha256"] = actual
+    if expected_video_sha256 is not None:
+        expected = _video_hash(expected_video_sha256)
+        if expected == "unknown":
+            raise ValueError("expected geometry replay source video SHA256 must be known")
+        if actual != expected:
+            raise ValueError("geometry replay source video mismatch or unavailable")
     if _sha(out / "inputs.npz") != manifest["inputs_sha256"]:
         raise ValueError("geometry replay inputs hash mismatch")
     count = len(manifest["frame_indices"])

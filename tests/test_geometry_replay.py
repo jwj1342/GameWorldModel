@@ -1,4 +1,8 @@
 """CPU synthetic fixtures only; no historical artifacts, inference or rendering."""
+import copy
+import json
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -88,12 +92,12 @@ def test_build_records_raw_obb_without_changing_evidence(tmp_path, monkeypatch, 
     geom, tracks, frames, cfg = fixture()
     for depth in geom.depth: depth[24:56, 24:56] = np.float32(object_depth)
     a = build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path / "off", [], [])
-    assert not (tmp_path / "off" / "geometry_replay_v1").exists()
+    assert not (tmp_path / "off" / "geometry_replay").exists()
     cfg["perception"]["geometry_replay"] = True
     b = build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path / "on", [], [])
     a["meta"].pop("created_at"); b["meta"].pop("created_at")
     assert a == b  # Includes camera, geometry, motion and ground proximity.
-    g, tr, manifest = load_replay(tmp_path / "on" / "geometry_replay_v1")
+    g, tr, manifest = load_replay(tmp_path / "on" / "geometry_replay")
     T, scale, _ = align_world(g, tr, cfg)
     from gwm.perception.masks import resize_mask
     for sample in manifest["objects"]:
@@ -148,3 +152,135 @@ def test_subsampled_support_still_identifies_original_pixels():
     assert all(fi == 0 and y % 4 == x % 4 == 0 and 0 <= y < 1000 and 0 <= x < 1000
                for fi, y, x in sources)
     assert len(record["candidates"][record["selected"]]["inlier_point_indices"]) == 60000
+
+
+def test_disabled_recording_keeps_legacy_call_shape(tmp_path, monkeypatch):
+    from gwm.perception import evidence, overlay
+    geom, tracks, frames, cfg = fixture()
+    calls = []
+
+    def legacy_align(*args):
+        calls.append(len(args))
+        return np.eye(4), 1., {"ground": "not_found"}
+
+    monkeypatch.setattr(evidence, "align_world", legacy_align)
+    monkeypatch.setattr(overlay, "render_overlay", lambda *a, **kw: None)
+    evidence.build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path, [], [])
+    assert calls == [3]
+    assert not (tmp_path / "geometry_replay").exists()
+
+
+def test_source_identity_and_decoded_frame_fields_roundtrip(tmp_path):
+    geom, tracks, frames, cfg = fixture()
+    video_hash = "a" * 64
+    for f in frames:
+        f.update(video_sha256=video_hash, source_pts_s=f["t"] + .467,
+                 source_frame_index=14 + f["index"] * 3, image_sha256="b" * 64)
+    before = copy.deepcopy(frames)
+    save_replay(tmp_path / "replay", geom, tracks, frames, cfg, {}, [], "production_in_memory",
+                source_video_sha256=video_hash.upper())
+    _, _, m = load_replay(tmp_path / "replay", expected_video_sha256=video_hash)
+    assert m["source_video_sha256"] == video_hash
+    assert m["frames"] == frames
+    assert frames == before
+    with pytest.raises(ValueError, match="source video mismatch"):
+        load_replay(tmp_path / "replay", expected_video_sha256="c" * 64)
+
+
+@pytest.mark.parametrize("mode", ["different_frames", "different_declared", "invalid_hash"])
+def test_source_conflicts_rejected_before_writing(tmp_path, mode):
+    geom, tracks, frames, cfg = fixture()
+    for f in frames: f["video_sha256"] = "a" * 64
+    declared = None
+    if mode == "different_frames": frames[-1]["video_sha256"] = "b" * 64
+    elif mode == "different_declared": declared = "b" * 64
+    else: frames[0]["video_sha256"] = "not-a-sha256"
+    with pytest.raises(ValueError, match="source video"):
+        save_replay(tmp_path / "replay", geom, tracks, frames, cfg, {}, [], "production_in_memory",
+                    source_video_sha256=declared)
+    assert not (tmp_path / "replay").exists()
+
+
+def test_legacy_unknown_source_readable_but_not_matchable(tmp_path):
+    geom, tracks, frames, cfg = fixture()
+    out = tmp_path / "geometry_replay_v1"
+    save_replay(out, geom, tracks, frames, cfg, {}, [], "legacy_lossy_cache")
+    # Simulate an already-written archive without the additive provenance field.
+    path = out / "manifest.json"
+    m = json.loads(path.read_text(encoding="utf-8"))
+    m.pop("source_video_sha256")
+    path.write_text(json.dumps(m), encoding="utf-8")
+    _, _, loaded = load_replay(out)
+    assert loaded["source_video_sha256"] == "unknown"
+    assert loaded["historical_exactness"] == "unavailable"
+    assert all("source_pts_s" not in f for f in loaded["frames"])
+    with pytest.raises(ValueError, match="source video mismatch or unavailable"):
+        load_replay(out, expected_video_sha256="a" * 64)
+    with pytest.raises(ValueError, match="must be known"):
+        load_replay(out, expected_video_sha256="unknown")
+
+
+def test_loader_rejects_inconsistent_manifest_source(tmp_path):
+    geom, tracks, frames, cfg = fixture()
+    frames[0]["video_sha256"] = "a" * 64
+    out = tmp_path / "replay"
+    save_replay(out, geom, tracks, frames, cfg, {}, [], "production_in_memory")
+    path = out / "manifest.json"
+    m = json.loads(path.read_text(encoding="utf-8"))
+    m["source_video_sha256"] = "b" * 64
+    path.write_text(json.dumps(m), encoding="utf-8")
+    with pytest.raises(ValueError, match="source video mismatch"):
+        load_replay(out)
+
+
+def test_legacy_record_directory_not_overwritten(tmp_path, monkeypatch):
+    from gwm.perception import overlay
+    geom, tracks, frames, cfg = fixture()
+    cfg["perception"]["geometry_replay"] = True
+    legacy = tmp_path / "geometry_replay_v1"
+    legacy.mkdir()
+    marker = legacy / "marker.txt"
+    marker.write_text("keep")
+    monkeypatch.setattr(overlay, "render_overlay", lambda *a, **kw: None)
+    with pytest.raises(FileExistsError):
+        build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path, [], [])
+    assert marker.read_text() == "keep"
+    assert not (tmp_path / "geometry_replay").exists()
+
+
+@pytest.mark.parametrize("legacy_rebuild", [False, True])
+def test_production_and_legacy_entrypoints_bind_video_source(tmp_path, monkeypatch, legacy_rebuild):
+    from PIL import Image
+    from gwm.perception import run, overlay
+    from gwm.perception.provenance import file_sha256
+    geom, tracks, frames, cfg = fixture()
+    # Synthetic providers/extraction: this verifies entry-point wiring, not decoding.
+    video = tmp_path / "synthetic-source.bin"
+    video.write_bytes(b"synthetic source identity only, not an encoded video")
+    video_hash = file_sha256(video)
+    for f in frames:
+        path = tmp_path / f"frame_{f['index']}.png"
+        Image.new("RGB", (160, 160), "red").save(path)
+        f.update(file=str(path), video_sha256=video_hash, source_pts_s=f["t"] + .467,
+                 source_frame_index=14 + f["index"] * 3)
+    def extract(*args, **kwargs):
+        directory = args[1]
+        directory.mkdir(parents=True)
+        (directory / "frames.json").write_text(json.dumps({"frames": frames}))
+        return frames
+    monkeypatch.setattr(run, "extract_frames", extract)
+    monkeypatch.setattr(run, "prepare_geometry_frames", lambda *a: [f["file"] for f in frames])
+    monkeypatch.setattr(run, "make_geometry_backend", lambda *a: SimpleNamespace(estimate=lambda *a: geom))
+    monkeypatch.setattr(run, "make_segmentation_backend", lambda *a: SimpleNamespace(segment=lambda *a: tracks))
+    monkeypatch.setattr(overlay, "render_overlay", lambda *a, **kw: None)
+    cfg["perception"]["geometry_replay"] = not legacy_rebuild
+    out = tmp_path / "run"
+    ev = run.run_perception(str(video), "synthetic", out, cfg, phrases=["box"])
+    if legacy_rebuild:
+        cfg["perception"]["geometry_replay"] = True
+        ev = run.rebuild_evidence(out, cfg)
+    _, _, manifest = load_replay(out / "geometry_replay", expected_video_sha256=video_hash)
+    assert manifest["source_video_sha256"] == ev["meta"]["source_video_sha256"] == video_hash
+    assert manifest["frames"][0]["source_pts_s"] == .467
+    assert manifest["input_source"] == ("legacy_lossy_cache" if legacy_rebuild else "production_in_memory")
+    if legacy_rebuild: assert manifest["historical_exactness"] == "unavailable"

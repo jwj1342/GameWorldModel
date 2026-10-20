@@ -13,10 +13,15 @@ authorized future run. The default is false. This option does not invoke a model
 change plane ranking, add a geometry correction, change tolerances, or bypass a
 gate. No new real-video run is part of this implementation.
 
-`build_evidence` writes `geometry_replay_v1/inputs.npz` and `manifest.json` beside
+`build_evidence` writes `geometry_replay/inputs.npz` and `manifest.json` beside
 the ordinary Evidence. Existing sidecars are never overwritten; use a fresh
 output directory. A write failure fails the recording operation rather than
 claiming a complete record. Legacy cache writers/loaders remain unchanged.
+The semantic directory name is `geometry_replay`; the format version stays in
+the manifest. Older `geometry_replay_v1` archives remain readable when their
+directory is passed explicitly, and neither directory may be overwritten.
+When recording is disabled, the original three-argument alignment call is kept,
+including compatibility with existing test doubles and integrations.
 
 The record contains:
 
@@ -34,6 +39,9 @@ The record contains:
 - Redacted effective config, relevant computation-source hashes, input archive
   hash and Python/NumPy/SciPy versions. This identifies the recorded computation,
   not model weight provenance or independent physical ground truth.
+- `source_video_sha256`, cross-checked against known per-frame video hashes.
+  Available decoded source PTS, source frame indices and image hashes are retained
+  without inventing missing values or persisting personal source-file paths.
 
 Extra storage is proportional to the original arrays, rather than the old
 float16 depth and width-480 masks. No fixed size estimate is claimed. Records
@@ -45,6 +53,17 @@ are ignored by Git; retain them with the corresponding run artifacts.
 archive hash, then returns `(geometry, tracks, manifest)`. It does no fitting or
 inference and writes nothing. A missing record or unsupported version raises an
 explicit error; it never silently falls back to lossy caches.
+
+For source-bound use, call `load_replay(path, expected_video_sha256=video_hash)`.
+A mismatch or unknown recorded source is rejected; conflicting frame and archive
+video hashes are rejected even without an expected hash. For backward-compatible
+inspection only, omitting the expected hash permits old archives, with missing
+video identity explicitly returned as `unknown` (not verified). Production passes
+the actual source-file SHA; legacy rebuilds reuse existing recorded provenance,
+and cannot recover missing source PTS or prove physical ground correctness.
+Hash consistency is not a cryptographic signature or proof against deliberate
+metadata tampering. The video hash identifies the encoded file, not its semantic
+contents or the correctness of independently supplied timestamps.
 
 For an explicitly authorized CPU replay, pass the returned inputs and manifest
 config to `align_world(..., replay={})`, using the recorded RNG state if the
