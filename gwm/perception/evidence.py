@@ -283,6 +283,10 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         ground = {"kind": "ground", "normal": [0, 1, 0], "offset": 0.0, "coverage": 0.0, "conf": 0.2, "center_hint": [0, 0, 0], "extent_hint": [10, 0.2, 10]}
     # per object
     use_contact = bool(cfg["perception"].get("ground_contact_centers", True)) and align_info.get("ground") not in (None, "not_found")
+    # 包围盒定边界时两端各切多少。历史值 3（3/97），实测它是「重建出来的物体偏小」
+    # 的主因：同一批点只换这一个参数，最长边中位 3/97→1.000、1/99→1.130、0/100→1.321，
+    # 而跨帧汇聚只有 1.084。见 obb_from_points 的注释。
+    extent_pct = float(cfg["perception"].get("obb_extent_percentile", 3.0))
     def contact_center(mres, k, size_y):
         """xz of the object's ground-contact point: ray through the lowest mask pixel (median column) intersected with y=0."""
         ys, xs = np.where(mres)
@@ -345,7 +349,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             if m is None: continue
             mres = _resize_mask(m, (W, H)); area = float(mres.mean())
             pts = wpt(unproject(geom.depth[k], geom.intrinsics[k], mres, stride=2), k)
-            ob = obb_from_points(pts)
+            ob = obb_from_points(pts, extent_pct)
             if ob is None: continue
             if use_contact and not is_ground:
                 cc = contact_center(mres, k, ob["size"][1])
