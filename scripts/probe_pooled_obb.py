@@ -70,6 +70,38 @@ def fix(c2w):
     return F @ c2w
 
 
+def obb_size_at(P: np.ndarray, lo_hi: tuple[int, int], trim: bool) -> np.ndarray | None:
+    """复刻 obb_from_points 的尺寸计算，但百分位和那道稳健修剪可以换掉。
+
+    原实现有两道裁剪：先按「到中位点的偏差 > 90 分位 × 1.5」丢点，再取 3/97
+    百分位当边界。两道都会把包围盒往里收，而且对逐帧和汇聚一视同仁——所以
+    跨帧汇聚补不回它们裁掉的部分。把它们单独拎出来量，才知道「长维度被截断到
+    0.70」里有多少是可见面造成的、有多少是裁剪造成的。
+    """
+    if len(P) < 20:
+        return None
+    if trim:
+        med = np.median(P, 0)
+        dev = np.linalg.norm(P - med, axis=1)
+        P = P[dev < np.percentile(dev, 90) * 1.5 + 1e-6]
+        if len(P) < 20:
+            return None
+    lo_p, hi_p = lo_hi
+    xz = P[:, [0, 2]]
+    c = xz.mean(0)
+    cov = np.cov((xz - c).T)
+    _w, v = np.linalg.eigh(cov)
+    ax = v[:, 1]
+    yaw = math.atan2(ax[1], ax[0])
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    Rz = np.array([[cy, sy], [-sy, cy]])
+    loc = (xz - c) @ Rz.T
+    lo = np.percentile(loc, lo_p, axis=0)
+    hi = np.percentile(loc, hi_p, axis=0)
+    ylo, yhi = np.percentile(P[:, 1], lo_p), np.percentile(P[:, 1], hi_p)
+    return np.array([max(hi[0] - lo[0], 0.02), max(yhi - ylo, 0.02), max(hi[1] - lo[1], 0.02)])
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -83,6 +115,7 @@ def main(argv: list[str]) -> int:
     missing_keys: list[str] = []
     sample_keys: list[str] = []
     mismatch_examples: list[str] = []
+    percentile_variants: dict[str, list[float]] = {}
     long_grew: list[float] = []
     n_obj = n_still = n_clip = 0
     selfcheck_ok = selfcheck_bad = 0
@@ -177,12 +210,27 @@ def main(argv: list[str]) -> int:
                 if med.min() > 1e-9:
                     grew.append(float(np.prod(pl) / np.prod(med)) ** (1 / 3))
                     long_grew.append(float(pl.max() / med.max()))
+                # 另一个嫌疑人：`obb_from_points` 里的两道裁剪。先按偏差 90 分位 ×1.5
+                # 修一次，再取 3/97 百分位定边界。两道对逐帧和汇聚一视同仁，所以
+                # 汇聚补不回它们裁掉的部分。这里在**同一批汇聚点**上换百分位重算，
+                # 看它们各自吃掉多少——这是和「可见面」完全独立的另一条解释。
+                P_all = np.concatenate(pooled_pts, 0)
+                for tag, lo_hi, trim in (("3/97+修", (3, 97), True),
+                                         ("1/99+修", (1, 99), True),
+                                         ("0/100+修", (0, 100), True),
+                                         ("3/97 不修", (3, 97), False),
+                                         ("0/100 不修", (0, 100), False)):
+                    s = obb_size_at(P_all, lo_hi, trim)
+                    if s is not None and pl.max() > 1e-9:
+                        percentile_variants.setdefault(tag, []).append(float(s.max() / pl.max()))
     print("\n" + "=" * 70)
     if missing_keys:
         print(f"**masks.npz 里找不到 {len(missing_keys)} 个键**，例如 {missing_keys[:3]}，"
               f"而实际存在的形如 {sample_keys[:3]}。")
         print("  键的格式对不上，下面的数不可信——这种事会静默跳过，所以必须显式报出来。")
     print(f"自查：复算的逐帧包围盒和 evidence.json 对得上 {selfcheck_ok}，对不上 {selfcheck_bad}")
+    for e in mismatch_examples:                 # 对得上也打印几个，方便看残差从哪来
+        print(f"    对不上的例子：{e}")
     if selfcheck_bad > selfcheck_ok:
         print("  **对不上的比对得上的多，下面的数一个都不能信**——复算没复现现有做法。")
         for e in mismatch_examples:
@@ -194,6 +242,16 @@ def main(argv: list[str]) -> int:
               f"四分位 {np.percentile(grew, 25):.3f} / {np.percentile(grew, 75):.3f}")
         print(f"最长边之比：中位 {statistics.median(long_grew):.3f}，"
               f"四分位 {np.percentile(long_grew, 25):.3f} / {np.percentile(long_grew, 75):.3f}")
+    if percentile_variants:
+        print("\n  同一批汇聚点，换掉那两道裁剪之后最长边变成几倍（基准=现在的 3/97+修剪）：")
+        for tag in ("3/97+修", "1/99+修", "0/100+修", "3/97 不修", "0/100 不修"):
+            vs = percentile_variants.get(tag) or []
+            if vs:
+                print(f"    {tag:12s} 中位 {statistics.median(vs):.3f}   （{len(vs)} 个物体）")
+        print("    「3/97+修」该恰好是 1.000——它就是现在的做法，是这张表的自查。")
+        print("    这一列和「汇聚 vs 逐帧」是两条独立的解释：前者是裁剪吃掉的，")
+        print("    后者是可见面吃掉的。要补平 1.43，得看这两条各能出多少。")
+    if grew:
         print("""
 怎么读：
   明显大于 1  → 逐帧确实只看见一个面，汇聚补回了被截断的部分，**教师这条路有东西**；
