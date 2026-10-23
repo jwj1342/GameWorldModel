@@ -177,18 +177,33 @@ def _fix(c2w: np.ndarray) -> np.ndarray:
 from .masks import resize_mask as _resize_mask
 
 # ---------------- OBB per frame ----------------
-def obb_from_points(P: np.ndarray) -> dict | None:
+def obb_from_points(P: np.ndarray, extent_percentile: float = 3.0) -> dict | None:
+    """点云拟合一个轴对齐（xz 里按主轴转过）的包围盒。
+
+    `extent_percentile` 是定边界时两端各切掉多少，默认 3（也就是 3/97），这是历史值。
+    它是**重建出来的物体为什么偏小**的主要原因，比「每帧只看得见一个面」大得多：
+
+      同一批跨帧汇聚的点，只换这个参数，最长边变成（74 个静止物体的中位）——
+        3/97   1.000（基准，现在的做法）      1/99   1.130
+        0/100  1.321                          0/100 且不做稳健修剪  1.516
+      而同一批物体上，「跨帧汇聚 vs 逐帧」只带来 1.084。
+
+    长维度被截断到真值的 0.70（下四分位 0.19），补平需要 1.43——这个参数一个就够，
+    汇聚远远不够。所以它拿出来可配，好做 A/B。切掉两端是为了抗深度离群点，
+    但它吃掉的显然比离群点多得多。
+    """
     if len(P) < 20: return None
     # robust trim
     med = np.median(P, 0); dev = np.linalg.norm(P - med, axis=1); keep = dev < np.percentile(dev, 90) * 1.5 + 1e-6
     P = P[keep]
     if len(P) < 20: return None
+    lo_p = float(np.clip(extent_percentile, 0.0, 49.0)); hi_p = 100.0 - lo_p
     xz = P[:, [0, 2]]; c = xz.mean(0); cov = np.cov((xz - c).T)
     w, v = np.linalg.eigh(cov); ax = v[:, 1]; yaw = math.atan2(ax[1], ax[0])  # angle of principal axis in xz
     cy, sy = math.cos(yaw), math.sin(yaw)
     Rz = np.array([[cy, sy], [-sy, cy]]); loc = (xz - c) @ Rz.T
-    lo = np.percentile(loc, 3, axis=0); hi = np.percentile(loc, 97, axis=0)
-    ylo, yhi = np.percentile(P[:, 1], 3), np.percentile(P[:, 1], 97)
+    lo = np.percentile(loc, lo_p, axis=0); hi = np.percentile(loc, hi_p, axis=0)
+    ylo, yhi = np.percentile(P[:, 1], lo_p), np.percentile(P[:, 1], hi_p)
     center_loc = (lo + hi) / 2; center_xz = c + center_loc @ Rz
     size = np.array([max(hi[0] - lo[0], 0.02), max(yhi - ylo, 0.02), max(hi[1] - lo[1], 0.02)])
     quat = R.from_euler("y", -yaw).as_quat()  # rotation about y that maps local x axis to principal axis

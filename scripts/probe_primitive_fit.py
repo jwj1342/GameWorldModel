@@ -64,9 +64,22 @@ def to_world(P, c2w):
     return P @ M[:3, :3].T + M[:3, 3]
 
 
-def normalise(P: np.ndarray) -> np.ndarray:
-    """移到质心、按均方半径缩成 1。残差因此是无量纲的，物体之间可比。"""
+def normalise(P: np.ndarray, trim: float = 0.05) -> np.ndarray:
+    """移到质心、按均方半径缩成 1；可选先剪掉最外面一圈离群点。
+
+    残差因此是无量纲的，物体之间可比。
+
+    **为什么要剪。** 跨帧并起来的点云在这条链路上是被离群点污染的——`98a48da`
+    量过，并云拟合的位置误差 0.642 米，比现算的首帧 0.420 还差。所以直接在并云上
+    最小二乘，很可能是在拟合噪声而不是形状。这里按到质心的距离剪掉最远的一小撮，
+    并且下面会**同时在逐帧点云上拟合一遍做对照**——如果并云那一列明显更差，
+    那就说明形状分类也不该用并云。
+    """
     C = P - P.mean(0)
+    if 0 < trim < 0.5 and len(C) > 50:
+        d = np.linalg.norm(C, axis=1)
+        C = C[d <= np.percentile(d, 100 * (1 - trim))]
+        C = C - C.mean(0)
     r = float(np.sqrt((C ** 2).sum(1).mean()))
     return C / r if r > 1e-9 else C
 
@@ -122,10 +135,15 @@ RESIDUALS = {"box": residual_box, "sphere": residual_sphere,
              "cylinder": residual_cylinder, "cone": residual_cone}
 
 
-def fit_kind(P: np.ndarray) -> tuple[str, dict]:
-    Q = normalise(P)
+def fit_kind(P: np.ndarray, trim: float = 0.05) -> tuple[str, dict]:
+    Q = normalise(P, trim)
     res = {k: f(Q) for k, f in RESIDUALS.items()}
     return min(res, key=res.get), res
+
+
+def vote(kinds: list[str]) -> str | None:
+    """逐帧各拟合一次再投票。并云被离群点污染时，这一列才是能用的那个。"""
+    return Counter(kinds).most_common(1)[0][0] if kinds else None
 
 
 def gt_shapes(program: dict) -> dict[str, str]:
@@ -148,6 +166,7 @@ def main(argv: list[str]) -> int:
 
     truth: list[str] = []
     pred: list[str] = []
+    pred_voted: list[str] = []
     skipped = Counter()
     for spec in a.pair:
         report, _s, gt_root = spec.partition(":")
@@ -187,8 +206,15 @@ def main(argv: list[str]) -> int:
                 P_all = np.concatenate(pts, 0)
                 if len(P_all) < a.min_points:
                     skipped["点太少"] += 1; continue
-                kind, _res = fit_kind(P_all)
-                truth.append(shapes[node]); pred.append(kind)
+                # 两列：并云一次拟合，和逐帧各拟合再投票。并云在这条链路上被离群点
+                # 污染过（98a48da：并云位置 0.642 m，比现算首帧 0.420 还差），
+                # 所以不能只报并云那一列。
+                kind_pooled, _res = fit_kind(P_all)
+                per_frame_kinds = [fit_kind(p)[0] for p in pts if len(p) >= a.min_points // 4]
+                kind_voted = vote(per_frame_kinds) or kind_pooled
+                truth.append(shapes[node])
+                pred.append(kind_pooled)
+                pred_voted.append(kind_voted)
 
     print("=" * 72)
     if skipped:
@@ -204,24 +230,30 @@ def main(argv: list[str]) -> int:
     base = major_n / n
     acc = sum(1 for t, p in zip(truth, pred) if t == p) / n
     print(f"\n  恒答「{major}」的基线准确率   {base:.3f}")
-    print(f"  几何拟合的准确率            {acc:.3f}   （{'赢' if acc > base else '没赢'} 基线 "
-          f"{acc - base:+.3f}）")
+    acc_voted = sum(1 for t, p in zip(truth, pred_voted) if t == p) / n
+    print(f"  并云一次拟合的准确率        {acc:.3f}   "
+          f"（{'赢' if acc > base else '没赢'}基线 {acc - base:+.3f}）")
+    print(f"  逐帧拟合再投票的准确率      {acc_voted:.3f}   "
+          f"（{'赢' if acc_voted > base else '没赢'}基线 {acc_voted - base:+.3f}）")
+    print("    两列都要看。并云在这条链路上被离群点污染过——98a48da 量到并云拟合的")
+    print("    位置误差 0.642 米，比现算的首帧 0.420 还差——所以并云那一列明显更差的")
+    print("    话，形状分类也不该用并云。")
 
-    print("\n  逐类召回（总准确率会被 box 主导，这张表才看得出有没有真的在分类）：")
-    for k in KINDS:
-        tot = dist.get(k, 0)
-        if not tot:
-            continue
-        hit = sum(1 for t, p in zip(truth, pred) if t == k and p == k)
-        print(f"    {k:9s} {hit:3d}/{tot:3d} = {hit / tot:.3f}")
-
-    print("\n  混淆矩阵（行=真值，列=拟合给出的）：")
-    print("            " + "".join(f"{k:>10s}" for k in KINDS))
-    for t in KINDS:
-        if not dist.get(t):
-            continue
-        row = [sum(1 for tt, pp in zip(truth, pred) if tt == t and pp == p) for p in KINDS]
-        print(f"    {t:9s} " + "".join(f"{v:10d}" for v in row))
+    for label, P in (("并云一次拟合", pred), ("逐帧投票", pred_voted)):
+        print(f"\n  逐类召回（{label}）——总准确率会被 box 主导，这张表才看得出有没有真的在分类：")
+        for k in KINDS:
+            tot = dist.get(k, 0)
+            if not tot:
+                continue
+            hit = sum(1 for t, p in zip(truth, P) if t == k and p == k)
+            print(f"    {k:9s} {hit:3d}/{tot:3d} = {hit / tot:.3f}")
+        print(f"  混淆矩阵（{label}；行=真值，列=拟合给出的）：")
+        print("            " + "".join(f"{k:>10s}" for k in KINDS))
+        for t in KINDS:
+            if not dist.get(t):
+                continue
+            row = [sum(1 for tt, pp in zip(truth, P) if tt == t and pp == p) for p in KINDS]
+            print(f"    {t:9s} " + "".join(f"{v:10d}" for v in row))
 
     print("""
 怎么读：
