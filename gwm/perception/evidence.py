@@ -55,6 +55,39 @@ def rotation_aligning(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.eye(3) + vx + vx @ vx * (1 / (1 + c))
 
 # ---------------- world alignment ----------------
+def reject_planes_on_camera(ok: list[dict], min_ratio: float) -> tuple[list[dict], list[int]]:
+    """丢掉「压在相机上」的地平面候选，返回 (留下的, 被丢掉的 idx)。
+
+    为什么需要。`align_world` 对相机高度原来只有 `cam_height > 0` 一条约束，太松：
+    实测有候选只有 0.035（相对单位），相机离地三厘米在物理上不成立，那是另一个面被
+    当成了地面。而选择打分 `inliers * (0.5 + 0.5*frac_obj_above)` 只看内点数，
+    贴着相机的那个面往往内点最多——ab015fix/test_00000 上它有 11350 个内点，
+    而正确的候选只有 5296——所以必然选错。
+
+    后果不是「尺度估偏了」。地面选错了 1.39 个单位，再乘上为了把相机凑到 1.2 米而
+    解出的 15.6 倍，物体就落到地下二十多米，被下陷闸一个个丢光，**整条片段产出零个
+    物体**。在评测里它表现为「召回 0」，和「检测什么都没找到」长得一样（#84）。
+
+    判据必须**无量纲**：重建是相对尺度，绝对米制阈值在这里没有意义（这个坑踩过）。
+    所以拿候选自己的 `cam_height` 中位数当标尺。
+
+    实测（24 条片段，候选都记在 evidence.json 里，所以不重跑感知也能验）：
+    0.25 恰好改动那 3 条 `world_alignment_degenerate` 亮了的，其余 21 条一条不动；
+    「相对单位 ÷ 真值相机高度」这个本该在片段间一致的比值，极差从 24.9 倍收到 6.0 倍。
+    0.15 只修得动 2 条（极差还剩 20.0 倍），0.35 和 0.25 等效。
+
+    留不下任何候选时原样返回——宁可不改，也不要改瞎。
+    """
+    if not ok:
+        return ok, []
+    median_h = float(np.median([c["cam_height"] for c in ok]))
+    kept = [c for c in ok if c["cam_height"] >= min_ratio * median_h]
+    if not kept or len(kept) == len(ok):
+        return ok, []
+    kept_ids = {id(c) for c in kept}
+    return kept, [c["idx"] for c in ok if id(c) not in kept_ids]
+
+
 def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np.ndarray, float, dict]:
     """Find the ground plane from static pixels, return (T 4x4 applied to world points, scale, info).
     Candidate planes are extracted iteratively; the ground is the large, roughly horizontal plane below the camera
@@ -106,6 +139,21 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np
         for c in ok:  # orient the normal towards the camera so the camera ends up above the ground
             if c["cam_height"] < 0: c["n"], c["d"], c["cam_height"] = -c["n"], -c["d"], -c["cam_height"]
         if ok: info["ground_mode"] = "facing_camera"
+    # 丢掉压在相机上的候选。`cam_height > 0` 这一条太松：实测有候选只有 0.035，
+    # 相机离地三厘米在物理上不成立，那是另一个面被当成了地面。选择打分只看内点数，
+    # 而这种贴着相机的面往往内点最多（0.0768 那个有 11350 个内点，正确的那个只有
+    # 5296），于是必然选错。后果不是「尺度估偏了」：地面错了 1.39 个单位，
+    # 再乘上为了凑 1.2 米而解出的 15.6 倍，物体就落到地下二十多米，被 dropped_sunk
+    # 一个个丢光，整条片段产出零个物体（见 #84）。
+    #
+    # 判据必须**无量纲**——重建是相对尺度，绝对米制阈值在这里没有意义（这个坑踩过）。
+    # 所以拿候选自己的 cam_height 中位数当标尺。实测 24 条片段上恰好改动那 3 条
+    # 诊断亮了的，其余 21 条一条不动；而「相对单位 ÷ 真值相机高度」这个本该在片段间
+    # 一致的比值，极差从 24.9 倍收到 6.0 倍。
+    ok, rejected = reject_planes_on_camera(ok, pc.get("ground_plane_min_height_ratio", 0.25))
+    if rejected:
+        info["rejected_near_camera"] = rejected
+        info["near_camera_ratio"] = pc.get("ground_plane_min_height_ratio", 0.25)
     info["plane_candidates"] = [{k: v for k, v in c.items() if k not in ("n", "d")} for c in cands]
     if not ok:
         info["ground"] = "not_found"; return T, 1.0, info
