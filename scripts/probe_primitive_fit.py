@@ -89,55 +89,96 @@ def _axis_frame(P: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return P[:, 1], np.linalg.norm(P[:, [0, 2]] - P[:, [0, 2]].mean(0), axis=1)
 
 
-def residual_box(P):
-    """点到轴对齐盒子表面的距离。盒子用 2/98 百分位定，避免被离群点撑开。"""
+# —— 拟合与评估分开，这样可以做交叉验证 ——
+#
+# **朴素做法（各自拟合、直接比原始残差）实测是失败的**：输给「恒答 box」26 个点，
+# cylinder 0/22、cone 0/16 一个都没答对，混淆矩阵里 cone 那一列全是零。
+#
+# 原因不是拟合不准，是**不同自由度的模型的原始残差不可比**。盒子有三个半长可调、
+# 会「缩包」去贴任何点云；锥面只有一个斜率自由度。谁灵活谁的残差小，所以盒子几乎
+# 总赢。这是个**模型选择**问题，不是拟合问题。
+#
+# 交叉验证天然解决它：在一半点上拟合、在另一半上评。会缩包的模型在没见过的点上
+# 泛化更差，于是不需要人为设自由度惩罚。
+#
+# 每个 fit_* 返回一个闭包 `evaluate(Q) -> 平均距离`，参数只由训练那一半决定。
+
+
+def fit_box(P):
     lo, hi = np.percentile(P, 2, axis=0), np.percentile(P, 98, axis=0)
     c, h = (lo + hi) / 2, np.maximum((hi - lo) / 2, 1e-6)
-    q = np.abs(P - c) - h
-    outside = np.linalg.norm(np.maximum(q, 0), axis=1)
-    inside = np.minimum(np.max(q, axis=1), 0)
-    return float(np.mean(np.abs(outside + inside)))
+
+    def evaluate(Q):
+        q = np.abs(Q - c) - h
+        outside = np.linalg.norm(np.maximum(q, 0), axis=1)
+        inside = np.minimum(np.max(q, axis=1), 0)
+        return float(np.mean(np.abs(outside + inside)))
+    return evaluate
 
 
-def residual_sphere(P):
+def fit_sphere(P):
     """代数最小二乘球：|p|^2 = 2p·c + (r^2 - |c|^2)。"""
     A = np.hstack([2 * P, np.ones((len(P), 1))])
-    b = (P ** 2).sum(1)
-    sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+    sol, *_ = np.linalg.lstsq(A, (P ** 2).sum(1), rcond=None)
     c, t = sol[:3], sol[3]
     r2 = t + (c ** 2).sum()
     if r2 <= 0:
-        return float("inf")
+        return lambda Q: float("inf")
     r = math.sqrt(r2)
-    return float(np.mean(np.abs(np.linalg.norm(P - c, axis=1) - r)))
+    return lambda Q: float(np.mean(np.abs(np.linalg.norm(Q - c, axis=1) - r)))
 
 
-def residual_cylinder(P):
-    """轴取 y（世界已对齐到 y 朝上），半径取水平半径的中位数。"""
-    _y, rad = _axis_frame(P)
-    R = float(np.median(rad))
-    return float(np.mean(np.abs(rad - R)))
+def fit_cylinder(P):
+    """轴取 y（世界已对齐到 y 朝上），轴心和半径都由训练那一半定。
+
+    注意一个已知的弱点：部分可见的点云里，xz 质心是**偏的**（只看得见一侧），
+    所以轴心估不准。这也是朴素版本 cylinder 召回为零的原因之一，
+    真要做好得把轴心也一起解，而不是取质心。
+    """
+    axis = P[:, [0, 2]].mean(0)
+    R = float(np.median(np.linalg.norm(P[:, [0, 2]] - axis, axis=1)))
+    return lambda Q: float(np.mean(np.abs(np.linalg.norm(Q[:, [0, 2]] - axis, axis=1) - R)))
 
 
-def residual_cone(P):
-    """轴取 y，半径随高度线性收到顶点：R(y) = a·(y_top − y)。最小二乘解 a。"""
-    y, rad = _axis_frame(P)
+def fit_cone(P):
+    """轴取 y，半径随高度线性收到顶点：R(y) = a·(y_top − y)。"""
+    axis = P[:, [0, 2]].mean(0)
+    y = P[:, 1]
+    rad = np.linalg.norm(P[:, [0, 2]] - axis, axis=1)
     y_top = float(np.percentile(y, 98))
     t = np.maximum(y_top - y, 0.0)
     denom = float((t ** 2).sum())
     if denom < 1e-12:
-        return float("inf")
+        return lambda Q: float("inf")
     a = float((t * rad).sum() / denom)
-    return float(np.mean(np.abs(rad - a * t)))
+
+    def evaluate(Q):
+        tq = np.maximum(y_top - Q[:, 1], 0.0)
+        rq = np.linalg.norm(Q[:, [0, 2]] - axis, axis=1)
+        return float(np.mean(np.abs(rq - a * tq)))
+    return evaluate
 
 
-RESIDUALS = {"box": residual_box, "sphere": residual_sphere,
-             "cylinder": residual_cylinder, "cone": residual_cone}
+FITTERS = {"box": fit_box, "sphere": fit_sphere,
+           "cylinder": fit_cylinder, "cone": fit_cone}
 
 
-def fit_kind(P: np.ndarray, trim: float = 0.05) -> tuple[str, dict]:
+def fit_kind(P: np.ndarray, trim: float = 0.05, cross_validate: bool = True,
+             seed: int = 20261023) -> tuple[str, dict]:
+    """返回 (选中的种类, 各种类的残差)。
+
+    `cross_validate=False` 复刻朴素做法（在同一批点上拟合又评估），留着做对照——
+    两列一起报才看得出交叉验证到底有没有用。
+    """
     Q = normalise(P, trim)
-    res = {k: f(Q) for k, f in RESIDUALS.items()}
+    if not cross_validate or len(Q) < 40:
+        res = {k: f(Q)(Q) for k, f in FITTERS.items()}
+        return min(res, key=res.get), res
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(Q))
+    half = len(Q) // 2
+    train, test = Q[order[:half]], Q[order[half:]]
+    res = {k: f(train)(test) for k, f in FITTERS.items()}
     return min(res, key=res.get), res
 
 
@@ -167,6 +208,7 @@ def main(argv: list[str]) -> int:
     truth: list[str] = []
     pred: list[str] = []
     pred_voted: list[str] = []
+    pred_cv: list[str] = []
     skipped = Counter()
     for spec in a.pair:
         report, _s, gt_root = spec.partition(":")
@@ -206,15 +248,19 @@ def main(argv: list[str]) -> int:
                 P_all = np.concatenate(pts, 0)
                 if len(P_all) < a.min_points:
                     skipped["点太少"] += 1; continue
-                # 两列：并云一次拟合，和逐帧各拟合再投票。并云在这条链路上被离群点
-                # 污染过（98a48da：并云位置 0.642 m，比现算首帧 0.420 还差），
-                # 所以不能只报并云那一列。
-                kind_pooled, _res = fit_kind(P_all)
-                per_frame_kinds = [fit_kind(p)[0] for p in pts if len(p) >= a.min_points // 4]
-                kind_voted = vote(per_frame_kinds) or kind_pooled
+                # 三列。前两列是朴素做法（同一批点上拟合又评估）的两种点云来源，
+                # 第三列换成交叉验证。朴素那两列已经量过是失败的（输基线 26~31 个点，
+                # cylinder 和 cone 零召回），留着是为了看交叉验证到底改善了多少——
+                # 只报新方法不报它要赢的那个东西，是没法判断的。
+                kind_naive, _res = fit_kind(P_all, cross_validate=False)
+                per_frame_kinds = [fit_kind(p, cross_validate=False)[0]
+                                   for p in pts if len(p) >= a.min_points // 4]
+                kind_voted = vote(per_frame_kinds) or kind_naive
+                kind_cv, _res_cv = fit_kind(P_all, cross_validate=True)
                 truth.append(shapes[node])
-                pred.append(kind_pooled)
+                pred.append(kind_naive)
                 pred_voted.append(kind_voted)
+                pred_cv.append(kind_cv)
 
     print("=" * 72)
     if skipped:
@@ -231,15 +277,19 @@ def main(argv: list[str]) -> int:
     acc = sum(1 for t, p in zip(truth, pred) if t == p) / n
     print(f"\n  恒答「{major}」的基线准确率   {base:.3f}")
     acc_voted = sum(1 for t, p in zip(truth, pred_voted) if t == p) / n
-    print(f"  并云一次拟合的准确率        {acc:.3f}   "
+    acc_cv = sum(1 for t, p in zip(truth, pred_cv) if t == p) / n
+    print(f"  并云·朴素残差的准确率      {acc:.3f}   "
           f"（{'赢' if acc > base else '没赢'}基线 {acc - base:+.3f}）")
-    print(f"  逐帧拟合再投票的准确率      {acc_voted:.3f}   "
+    print(f"  逐帧·朴素残差投票的准确率  {acc_voted:.3f}   "
           f"（{'赢' if acc_voted > base else '没赢'}基线 {acc_voted - base:+.3f}）")
-    print("    两列都要看。并云在这条链路上被离群点污染过——98a48da 量到并云拟合的")
+    print(f"  并云·**交叉验证**残差      {acc_cv:.3f}   "
+          f"（{'赢' if acc_cv > base else '没赢'}基线 {acc_cv - base:+.3f}）")
+    print("    前两列是朴素做法，留着做对照——只报新方法不报它要赢的东西，没法判断。")
+    print("    并云在这条链路上被离群点污染过——98a48da 量到并云拟合的")
     print("    位置误差 0.642 米，比现算的首帧 0.420 还差——所以并云那一列明显更差的")
     print("    话，形状分类也不该用并云。")
 
-    for label, P in (("并云一次拟合", pred), ("逐帧投票", pred_voted)):
+    for label, P in (("并云·朴素", pred), ("逐帧·朴素投票", pred_voted), ("并云·交叉验证", pred_cv)):
         print(f"\n  逐类召回（{label}）——总准确率会被 box 主导，这张表才看得出有没有真的在分类：")
         for k in KINDS:
             tot = dist.get(k, 0)
