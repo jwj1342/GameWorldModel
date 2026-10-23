@@ -80,6 +80,8 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
 
     grew: list[float] = []
+    missing_keys: list[str] = []
+    sample_keys: list[str] = []
     long_grew: list[float] = []
     n_obj = n_still = n_clip = 0
     selfcheck_ok = selfcheck_bad = 0
@@ -95,6 +97,8 @@ def main(argv: list[str]) -> int:
             if n_clip == 0:
                 print(f"  geometry.npz 的键：{sorted(G.files)}")
                 print(f"  masks.npz 的键（前 3 个）：{sorted(M.files)[:3]}")
+            if not sample_keys:
+                sample_keys = sorted(M.files)[:3]
             n_clip += 1
             try:
                 depth, K, c2w = G["depth"], G["intrinsics"], G["cam_to_world"]
@@ -108,8 +112,13 @@ def main(argv: list[str]) -> int:
             for oid, meta in (idx.get("objects") or {}).items():
                 pooled_pts, per_frame = [], []
                 for fi in meta.get("frames", []):
-                    key = f"{oid}/{fi}" if f"{oid}/{fi}" in M.files else str(fi)
+                    # masks.npz 的键是 "<物体>__<帧号>"（双下划线）。第一版猜成了
+                    # "<物体>/<帧号>"，于是一个都匹配不上——而且是**静默跳过**，
+                    # 跑出来「物体 0 个」看起来像「没有可比的物体」，不像「键写错了」。
+                    # 所以这里匹配不上要记下来，最后出声。
+                    key = f"{oid}__{fi}"
                     if key not in M.files:
+                        missing_keys.append(key)
                         continue
                     try:
                         k = frame_order.index(fi)
@@ -150,6 +159,10 @@ def main(argv: list[str]) -> int:
                     grew.append(float(np.prod(pl) / np.prod(med)) ** (1 / 3))
                     long_grew.append(float(pl.max() / med.max()))
     print("\n" + "=" * 70)
+    if missing_keys:
+        print(f"**masks.npz 里找不到 {len(missing_keys)} 个键**，例如 {missing_keys[:3]}，"
+              f"而实际存在的形如 {sample_keys[:3]}。")
+        print("  键的格式对不上，下面的数不可信——这种事会静默跳过，所以必须显式报出来。")
     print(f"自查：复算的逐帧包围盒和 evidence.json 对得上 {selfcheck_ok}，对不上 {selfcheck_bad}")
     if selfcheck_bad > selfcheck_ok:
         print("  **对不上的比对得上的多，下面的数一个都不能信**——复算没复现现有做法。")
