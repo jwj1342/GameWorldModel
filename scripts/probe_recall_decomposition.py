@@ -18,11 +18,16 @@
 口径要说在前头：这三个桶是用**和召回同一个距离**定义的，所以它们和被测量当然相关
 ——这里做的是把召回拆开，不是拿一个独立的量去验证它。
 
-还有一个零假设必须一起报，否则「偏位」这一桶会骗人：**场景本来就密的话，最近邻
-本来就近**。随便往哪撒一个点，它到最近的真值节点也就那么远。所以每个漏掉的物体
-同时量两个距离——到最近的**预测**节点，和到最近的**另一个真值**节点（后者是这个
-场景的固有间距）。两者逐物体配对取比值，比值明显小于 1 才说明「那个预测确实是
-这个物体、只是放错了地方」；接近 1 就是巧合。
+还有零假设必须一起报，否则「偏位」这一桶会骗人：**场景里到处都是节点的话，
+随便哪个位置附近都有一个。** 报两个：
+
+甲（场景间距）每个漏掉的物体到最近的**另一个真值节点**有多远。洞在于这个比较把
+「我们预测了几个节点」也混了进来——预测得少，「最近的预测更远」就天然成立，
+跟放没放对无关，而这个偏差恰好朝着否定教师的方向。
+
+乙（密度匹配，**这个才是判据**）在真值场景的包围盒里均匀撒随机点，用**同一批**
+预测节点量它们的最近距离。预测的个数和位置一点没动，密度被自动匹配掉。漏掉的
+物体如果并不比随机点更靠近预测，那「附近有个预测节点」就说明不了任何事。
 
 自查（两条，任何一条不过，下面的数一个都不能信）：
   1. 本脚本复现出来的配对数，必须等于 `evaluate()` 自己报的 `by_mean_distance`；
@@ -146,10 +151,18 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
     null_distances: list[float] = []
     ratios: list[float] = []
     taken = {q for _g, q, _d in pairs if q is not None}
-    # 零假设。场景本来就密的话，「最近的预测节点在 1.4 米」可能纯属巧合——随便往
-    # 哪撒一个点，最近邻也就那么远。所以对每个漏掉的物体同时量它到**最近的另一个
-    # 真值节点**有多远，那是这个场景的固有间距。只有「到最近预测」明显小于它，
-    # 才谈得上「那个预测确实是这个物体，只是放错了地方」。
+    # 零假设，两个，因为第一个自己带着一个洞。
+    #
+    # 零假设甲（场景间距）：对每个漏掉的物体，量它到**最近的另一个真值节点**有多远。
+    # 那是这个场景的固有间距。
+    #   洞在这里：这个比较把「预测节点有多少个」也混了进去。我们预测的节点比真值
+    #   少的话，「最近的预测更远」纯粹是密度造成的，跟放没放对无关——而这个偏差
+    #   恰好是朝着「否定教师」的方向，所以不能只靠它下结论。
+    #
+    # 零假设乙（密度匹配，这个才是判据）：在真值场景的包围盒里**均匀撒随机点**，
+    # 用同一批预测节点量它们的最近距离。预测节点的个数和位置完全不变，所以密度
+    # 被自动匹配掉了。漏掉的物体如果并不比随机点更靠近预测，那就说明「附近有个
+    # 预测节点」只是场景里到处都有节点，不是「这个物体被检出来了只是放错地方」。
     gt_static_tr = tracks(gt_states, kinds=("static",))
     gt_all = ([(k, v) for k, v in prefix(gt_tr).items()]
               + [(f"static::{k}", v) for k, v in prefix(gt_static_tr).items()])
@@ -186,12 +199,37 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
         if best_kind == "static":
             nearest_is_static[tag] += 1
         _ = best_free
+
+    # —— 零假设乙：密度匹配的随机点 ——
+    # 在真值场景的包围盒里均匀撒点，用**同一批**预测节点量最近距离。预测的个数和
+    # 位置一点没动，所以密度被匹配掉了。种子写死，换次运行不该换结论。
+    rand_near: list[float] = []
+    ref_times = pair_times if len(pair_times) else obs_times
+    cand_pts = []
+    for _key, cand, _kind in candidates:
+        ts = _supported(ref_times, cand)
+        if len(ts):
+            cand_pts.append(_sample(cand, ts).mean(0))
+    gt_pts_all = []
+    for _key, other in gt_all:
+        ts = _supported(ref_times, other)
+        if len(ts):
+            gt_pts_all.append(_sample(other, ts).mean(0))
+    if cand_pts and len(gt_pts_all) >= 2:
+        C = np.vstack(cand_pts)
+        G = np.vstack(gt_pts_all)
+        lo, hi = G.min(0), G.max(0)
+        rng = np.random.default_rng(20261023)
+        draws = rng.uniform(lo, hi, size=(512, 3))
+        rand_near = [float(np.linalg.norm(C - p, axis=1).min()) for p in draws]
+
     return {"ok": True, "checks": checks, "n_gt": len(gt_tr), "n_matched": len(matched),
             "n_missed": len(gt_tr) - len(matched), "buckets": buckets,
             "nearest_is_static": nearest_is_static,
             "missed_distances": [round(d, 3) for d in distances],
             "null_distances": [round(d, 3) for d in null_distances],
             "pred_over_null": [round(r, 3) for r in ratios],
+            "random_point_nearest": [round(d, 3) for d in rand_near],
             "n_pred_objects": len(pred_tr), "n_pred_static": len(pred_static)}
 
 
@@ -221,6 +259,7 @@ def main(argv: list[str]) -> int:
     all_d: list[float] = []
     all_null: list[float] = []
     all_ratio: list[float] = []
+    all_rand: list[float] = []
     failed: list[str] = []
     for run in runs:
         manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
@@ -260,6 +299,7 @@ def main(argv: list[str]) -> int:
         n_gt += res["n_gt"]; n_matched += res["n_matched"]
         all_d += res["missed_distances"]
         all_null += res["null_distances"]; all_ratio += res["pred_over_null"]
+        all_rand += res["random_point_nearest"]
 
     print("\n" + "=" * 72)
     if failed:
@@ -290,10 +330,20 @@ def main(argv: list[str]) -> int:
               f"（场景的固有间距，这是零假设）")
     if fr:
         closer = sum(1 for r in fr if r < 1.0) / len(fr)
-        print(f"\n  逐物体配对比值（到最近预测 ÷ 到最近的另一个真值）："
+        print(f"\n  零假设甲（场景间距）比值（到最近预测 ÷ 到最近的另一个真值）："
               f"中位 {statistics.median(fr):.2f}，{closer:.1%} 的物体比值 < 1")
-        print("  比值明显小于 1，才说明那个预测确实是这个物体、只是放错了地方；")
-        print("  接近或大于 1 就是巧合，「偏位」这个桶不能当成教师能修的量。")
+        print("    注意这个比较把「我们预测了几个节点」也混了进来，预测得少就天然偏大。")
+    fd = [d for d in all_rand if np.isfinite(d)]
+    if fd and all_d:
+        finite = [d for d in all_d if np.isfinite(d)]
+        if finite:
+            m_obj, m_rand = statistics.median(finite), statistics.median(fd)
+            print(f"\n  零假设乙（密度匹配，**这个才是判据**）：")
+            print(f"    漏掉的物体  到最近预测 中位 {m_obj:.2f} m（{len(finite)} 个）")
+            print(f"    场景里随机点 到最近预测 中位 {m_rand:.2f} m（{len(fd)} 个，同一批预测节点）")
+            print(f"    比值 {m_obj / m_rand:.2f}" if m_rand > 1e-9 else "    随机点距离退化")
+            print("    明显小于 1 → 漏掉的物体附近确实有东西，是检出来了放错地方，教师能修；")
+            print("    接近或大于 1 → 「附近有预测节点」只是场景里到处都是节点，说明不了任何事。")
     print("""
 判读：
   「偏位」占比高  → 东西检出来了只是放错地方，**稠密三维重建（教师）修的正是这一类**；
@@ -301,8 +351,12 @@ def main(argv: list[str]) -> int:
   「占用」占比高  → 问题在一对一指派和碎片，和教师、和形状都无关。
 提醒一：这三个桶用的是和召回同一个距离，所以它们和被测量天然相关。
         这里做的是把召回拆开，不是拿独立的量去验证它。
-提醒二：**先看上面那个比值再读「偏位」。** 场景密的话最近邻本来就近，
-        「偏位」会被巧合撑起来。比值不明显小于 1 的话，这一桶说明不了任何事。""")
+提醒二：**先看零假设乙再读「偏位」。** 场景里到处都是节点的话，随便哪个位置
+        附近都有一个，「偏位」会被巧合撑起来。零假设乙不明显小于 1 的话，
+        这一桶说明不了任何事。
+提醒三：「缺席」里混着两类性质相反的东西——真的没检出来（教师修不了），
+        和检出来了算到地下于是被管线扔掉（教师正好能修）。
+        后者数在 `probe_ground_penetration.py` 的 dropped_sunk 里。""")
     return 0
 
 
