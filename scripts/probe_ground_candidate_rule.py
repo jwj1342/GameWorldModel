@@ -61,16 +61,23 @@ def new_pick(cands: list[dict], ratio: float) -> tuple[dict | None, bool]:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--report-dir", action="append", required=True)
-    ap.add_argument("--gt-root", action="append", default=[],
-                    help="对应的真值目录，用来报「缩放之后离真值相机高度差多少」")
+    ap.add_argument("--pair", action="append", required=True,
+                    help="产出目录和它对应的真值目录，用冒号分开：<report>:<gt_root>。"
+                         "必须配对给——两个数据集的片段同名（都是 test_000NN），"
+                         "按片段名索引真值会让后一个数据集覆盖前一个。")
     ap.add_argument("--ratio", type=float, default=0.25,
                     help="低于候选 cam_height 中位数这个比例的，判为平面压在相机上")
     ap.add_argument("--target", type=float, default=1.2, help="assumed_camera_height_m")
     a = ap.parse_args(argv)
 
-    gt_by_clip: dict[str, float] = {}
-    for root in a.gt_root:
+    def gt_heights(root: str) -> dict[str, float]:
+        """这个真值目录里每条片段的相机高度中位数。
+
+        **按 (真值目录, 片段名) 索引，不能只按片段名。** 两个数据集的片段都叫
+        test_000NN，只按名字索引的话后一个会把前一个覆盖掉，打印出来的真值就是
+        另一个数据集的——第一版就是这么错的。
+        """
+        out: dict[str, float] = {}
         for prog in sorted(Path(root).glob("test_*/program.json")):
             try:
                 program = json.loads(prog.read_text(encoding="utf-8"))
@@ -80,13 +87,24 @@ def main(argv: list[str]) -> int:
             hs = [float(k["pos"][1]) for k in keys
                   if isinstance(k.get("pos"), list) and len(k["pos"]) == 3]
             if hs:
-                gt_by_clip[prog.parent.name] = statistics.median(hs)
+                out[prog.parent.name] = statistics.median(hs)
+        return out
+
+    pairs = []
+    for spec in a.pair:
+        report, _sep, gt_root = spec.partition(":")
+        if not gt_root:
+            ap.error(f"--pair 要写成 <report>:<gt_root>，收到的是 {spec!r}")
+        pairs.append((report, gt_root))
 
     print(f"规则：cam_height < {a.ratio} × 候选中位数 的判为「平面压在相机上」，丢掉再挑\n")
     changed = total = 0
-    for d in a.report_dir:
+    units_old: list[float] = []
+    units_new: list[float] = []
+    for d, gt_root in pairs:
         root = Path(d)
-        print(f"########## {root.name} ##########")
+        gt_by_clip = gt_heights(gt_root)
+        print(f"########## {root.name}   真值 {Path(gt_root).name} ##########")
         for clip_dir in sorted(root.glob("test_*")):
             ev = clip_dir / "perception" / "evidence.json"
             if not ev.is_file():
@@ -105,14 +123,30 @@ def main(argv: list[str]) -> int:
                 continue
             gt = gt_by_clip.get(clip_dir.name)
             mark = "改了" if n["idx"] != o["idx"] else ("—" if not fired else "规则触发但没改")
-            gt_s = f"真值相机 {gt:.3f} m" if gt is not None else "无真值"
+            # 平面选对了的话，「相对单位高度 ÷ 真值高度」就是这段重建的任意单位，
+            # 各片段之间该是一致的。选错的会是离群点。这比「改了几条」更说明问题。
+            def unit(c):
+                return c["cam_height"] / gt if gt and gt > 1e-6 else None
+            uo, un = unit(o), unit(n)
+            if uo is not None:
+                units_old.append(uo)
+            if un is not None:
+                units_new.append(un)
+            gt_s = (f"真值 {gt:.3f} m  单位比 旧 {uo:.2f} → 新 {un:.2f}"
+                    if gt is not None and uo is not None and un is not None else "无真值")
             print(f"  {clip_dir.name:14s} 旧选 idx{o['idx']} h={o['cam_height']:.4f} "
                   f"(×{a.target / max(o['cam_height'], 1e-9):.2f})   "
                   f"新选 idx{n['idx']} h={n['cam_height']:.4f} "
-                  f"(×{a.target / max(n['cam_height'], 1e-9):.2f})   {mark:14s} {gt_s}")
+                  f"(×{a.target / max(n['cam_height'], 1e-9):.2f})   {mark:10s} {gt_s}")
             if n["idx"] != o["idx"]:
                 changed += 1
     print(f"\n合计 {total} 条片段，**{changed} 条选择发生变化**")
+    for label, units in (("旧规则", units_old), ("新规则", units_new)):
+        if len(units) >= 3:
+            lo, hi = min(units), max(units)
+            print(f"  {label} 的「相对单位 ÷ 真值高度」：中位 {statistics.median(units):.2f}，"
+                  f"范围 {lo:.2f}~{hi:.2f}，极差倍数 **{hi / lo:.1f}×**")
+    print("  平面选对了的话这个比值该集中（它就是重建的任意单位）；极差越小越好。")
     print("""
 怎么读：
   只有本来就选错的那几条该变，其余一条都不该变——否则这条规则在动好的片段。
