@@ -167,6 +167,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--runs-from", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--harness", default=str(REPO / "scripts" / "node_harness.sh"))
+    ap.add_argument("--gt-root", action="append", default=[],
+                    help="额外的真值根目录。合成数据集产在 $SCRATCH 上，不在仓库里，必须指进来。")
     ap.add_argument("--max-dist", type=float, default=3.0)
     ap.add_argument("--gauge", default="rigid", choices=["rigid", "similarity"])
     ap.add_argument("--match-on", default="mean", choices=["mean", "start"])
@@ -176,7 +178,8 @@ def main(argv: list[str]) -> int:
 
     runs = [Path(l.strip()) for l in Path(a.runs_from).read_text(encoding="utf-8").splitlines() if l.strip()]
     work = Path(a.work); work.mkdir(parents=True, exist_ok=True)
-    print(f"容差 {a.max_dist} m，规范 {a.gauge}，配对判据 {a.match_on}，{len(runs)} 个运行目录\n")
+    print(f"容差 {a.max_dist} m，规范 {a.gauge}，配对判据 {a.match_on}，{len(runs)} 个运行目录")
+    print(f"真值根目录：{a.gt_root or '（只有仓库内置的）'}\n")
 
     total = {"占用": 0, "偏位": 0, "缺席": 0}
     total_static = {"占用": 0, "偏位": 0, "缺席": 0}
@@ -186,9 +189,9 @@ def main(argv: list[str]) -> int:
     for run in runs:
         manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
         clip = manifest.get("clip", run.parent.name)
-        gt_path, _link, _cands = find_ground_truth(clip, [])
+        gt_path, _link, _cands = find_ground_truth(clip, a.gt_root)
         if gt_path is None:
-            failed.append(f"{clip}：没有真值程序"); continue
+            failed.append(f"{clip}：没有真值程序（找过 {a.gt_root or '仓库内置的 examples/ 和 data/ground_truth/'}）"); continue
         gt = json.loads(gt_path.read_text(encoding="utf-8"))
         duration = float(gt.get("meta", {}).get("duration") or 8.0)
         import hashlib
