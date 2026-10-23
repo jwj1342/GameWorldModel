@@ -116,8 +116,13 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
     matched = {g for g, q, _ in pairs if q is not None}
 
     # —— 自查 ——
-    want_pairs = official["matching"]["match_criterion"]["by_mean_distance"]
-    want_recall = official["full"]["objects"]["object_recall"]
+    objects = (official.get("full") or {}).get("objects") or {}
+    criterion = objects.get("match_criterion") or {}
+    want_pairs = criterion.get("by_mean_distance")
+    want_recall = objects.get("recall")
+    if want_pairs is None or want_recall is None:
+        return {"ok": False, "why": "evaluate() 没报 match_criterion/recall，键路径对不上，"
+                                    f"full.objects 的键是 {sorted(objects)[:12]}"}
     got_recall = len(matched) / len(gt_tr) if gt_tr else 0.0
     checks = {"pairs_mine": len(matched), "pairs_official": want_pairs,
               "recall_mine": round(got_recall, 6), "recall_official": round(float(want_recall), 6)}
@@ -203,9 +208,16 @@ def main(argv: list[str]) -> int:
                                     duration, a.harness)
         except Exception as exc:                                   # noqa: BLE001
             failed.append(f"{clip}：录制失败 {exc}"); continue
-        res = decompose(gt, json.loads((run / "program.json").read_text(encoding="utf-8")),
-                        gt_states, pred_states, a.holdout_frac, a.max_dist,
-                        a.n_samples, a.match_on, a.gauge)
+        try:
+            res = decompose(gt, json.loads((run / "program.json").read_text(encoding="utf-8")),
+                            gt_states, pred_states, a.holdout_frac, a.max_dist,
+                            a.n_samples, a.match_on, a.gauge)
+        except Exception as exc:                                   # noqa: BLE001
+            # 一条片段算不出来不该把整个配置带走，但也不能悄悄吞掉——记下类型和位置。
+            import traceback
+            tb = traceback.format_exc().strip().splitlines()
+            failed.append(f"{clip}：归因崩了 {type(exc).__name__}: {exc} @ {tb[-2].strip() if len(tb) > 1 else '?'}")
+            continue
         if not res.get("ok"):
             failed.append(f"{clip}：{res.get('why')} {res.get('checks', '')}"); continue
         b = res["buckets"]
