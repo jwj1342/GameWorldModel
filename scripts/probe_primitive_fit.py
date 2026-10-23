@@ -128,34 +128,55 @@ def fit_sphere(P):
     return lambda Q: float(np.mean(np.abs(np.linalg.norm(Q - c, axis=1) - r)))
 
 
-def fit_cylinder(P):
-    """轴取 y（世界已对齐到 y 朝上），轴心和半径都由训练那一半定。
+def circle_fit(xz: np.ndarray) -> tuple[np.ndarray, float]:
+    """代数圆拟合（Kåsa）：解 (圆心, 半径)，最小化 |p|² − 2p·c − (r²−|c|²)。
 
-    注意一个已知的弱点：部分可见的点云里，xz 质心是**偏的**（只看得见一侧），
-    所以轴心估不准。这也是朴素版本 cylinder 召回为零的原因之一，
-    真要做好得把轴心也一起解，而不是取质心。
+    **为什么必须解圆心，不能拿质心代替。** 第一版两个地方都用 `xz.mean(0)` 当轴心，
+    结果 cylinder 召回 0/22、cone 0/16，混淆矩阵里 cone 整列为零。原因是部分可见的
+    点云只覆盖物体的一侧，它的质心落在**表面上**而不是轴上；于是「到轴的距离」算出来
+    近处的点很小、远处的点很大，恒定半径的柱面模型当然拟合得极差。
+
+    圆拟合对**圆弧**同样良态（只要弧有足够曲率），所以部分可见不是问题——
+    偏心才是问题。
     """
-    axis = P[:, [0, 2]].mean(0)
-    R = float(np.median(np.linalg.norm(P[:, [0, 2]] - axis, axis=1)))
-    return lambda Q: float(np.mean(np.abs(np.linalg.norm(Q[:, [0, 2]] - axis, axis=1) - R)))
+    A = np.hstack([2 * xz, np.ones((len(xz), 1))])
+    sol, *_ = np.linalg.lstsq(A, (xz ** 2).sum(1), rcond=None)
+    c = sol[:2]
+    r2 = sol[2] + (c ** 2).sum()
+    return c, (math.sqrt(r2) if r2 > 0 else 0.0)
+
+
+def fit_cylinder(P):
+    """轴平行 y（世界已对齐到 y 朝上），轴心和半径由 xz 上的圆拟合解出。"""
+    c, R = circle_fit(P[:, [0, 2]])
+    if R <= 1e-9:
+        return lambda Q: float("inf")
+    return lambda Q: float(np.mean(np.abs(np.linalg.norm(Q[:, [0, 2]] - c, axis=1) - R)))
 
 
 def fit_cone(P):
-    """轴取 y，半径随高度线性收到顶点：R(y) = a·(y_top − y)。"""
-    axis = P[:, [0, 2]].mean(0)
+    """轴平行 y，半径随高度线性收到顶点：R(y) = a·(y_top − y)。
+
+    轴心同样用圆拟合解（取中段的点，那里半径变化小，圆拟合最稳），再在
+    (高度, 到轴的距离) 平面上解斜率和顶点高度。
+    """
     y = P[:, 1]
-    rad = np.linalg.norm(P[:, [0, 2]] - axis, axis=1)
-    y_top = float(np.percentile(y, 98))
-    t = np.maximum(y_top - y, 0.0)
-    denom = float((t ** 2).sum())
-    if denom < 1e-12:
+    lo, hi = np.percentile(y, 20), np.percentile(y, 60)
+    band = P[(y >= lo) & (y <= hi)]
+    c, _r = circle_fit(band[:, [0, 2]] if len(band) >= 10 else P[:, [0, 2]])
+    rad = np.linalg.norm(P[:, [0, 2]] - c, axis=1)
+    # 半径随高度线性：rad ≈ a·(y_top − y)。两个未知量一起解（斜率 a 和顶点 y_top），
+    # 写成 rad ≈ -a·y + b，再回推 y_top = b/a。
+    A = np.hstack([-y[:, None], np.ones((len(y), 1))])
+    sol, *_ = np.linalg.lstsq(A, rad, rcond=None)
+    a, b = float(sol[0]), float(sol[1])
+    if abs(a) < 1e-9:
         return lambda Q: float("inf")
-    a = float((t * rad).sum() / denom)
+    y_top = b / a
 
     def evaluate(Q):
-        tq = np.maximum(y_top - Q[:, 1], 0.0)
-        rq = np.linalg.norm(Q[:, [0, 2]] - axis, axis=1)
-        return float(np.mean(np.abs(rq - a * tq)))
+        rq = np.linalg.norm(Q[:, [0, 2]] - c, axis=1)
+        return float(np.mean(np.abs(rq - np.maximum(a * (y_top - Q[:, 1]), 0.0))))
     return evaluate
 
 
