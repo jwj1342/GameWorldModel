@@ -82,6 +82,7 @@ def main(argv: list[str]) -> int:
     grew: list[float] = []
     missing_keys: list[str] = []
     sample_keys: list[str] = []
+    mismatch_examples: list[str] = []
     long_grew: list[float] = []
     n_obj = n_still = n_clip = 0
     selfcheck_ok = selfcheck_bad = 0
@@ -107,6 +108,7 @@ def main(argv: list[str]) -> int:
             idx = json.loads((per / "masks_index.json").read_text(encoding="utf-8"))
             ev = json.loads((per / "evidence.json").read_text(encoding="utf-8"))
             stored = {o["id"]: o for o in ev.get("objects", [])}
+            scale_factor = float(((ev.get("meta") or {}).get("alignment") or {}).get("scale_factor") or 1.0)
             frame_order = list(G["frame_indices"]) if "frame_indices" in G.files else list(range(len(depth)))
             H, W = depth[0].shape
             for oid, meta in (idx.get("objects") or {}).items():
@@ -135,15 +137,32 @@ def main(argv: list[str]) -> int:
                 if len(per_frame) < 3:
                     continue
                 n_obj += 1
-                # 自查：复算的逐帧包围盒必须和 evidence.json 里存的对得上
+                # 自查：复算的逐帧包围盒必须和 evidence.json 里存的对得上。
+                #
+                # **要先把缩放折回去。** 管线是在世界对齐（T：把地面法向转到 y 轴
+                # 的旋转 + 一个 y 平移）并乘上 scale_factor 之后才拟合包围盒的，
+                # 而这里离线只做了相机到世界。第一版漏了这一步，53 个对上、219 个
+                # 对不上——自查挡住了，没出数。（同一个坑这个项目里踩过一次：
+                # 早先一个探针漏了 align_world 的平移，把 119/128 读成 0.93。）
+                #
+                # 折回去只需要 scale_factor（evidence.json 里有）；T 的旋转部分
+                # 没存（候选的法向被剥掉了），但这批片段的地面法向离 y 轴都在 7 度
+                # 以内，对**边长**的影响进不了 25% 的容差。
+                #
+                # 下面真正要报的量是**比值**（汇聚 ÷ 逐帧），相似变换对比值没有影响，
+                # 所以结论本身不依赖这一步——这一步只是为了让自查能做。
                 st = stored.get(oid)
                 if st and st.get("obb"):
-                    mine = np.asarray(per_frame[0]["size"])
+                    mine = np.asarray(per_frame[0]["size"]) * scale_factor
                     theirs = np.asarray(st["obb"][0]["size"])
                     if np.allclose(mine, theirs, rtol=0.25, atol=0.02):
                         selfcheck_ok += 1
                     else:
                         selfcheck_bad += 1
+                        if len(mismatch_examples) < 3:
+                            mismatch_examples.append(
+                                f"{clip_dir.name}/{oid} 复算×{scale_factor:.2f}="
+                                f"{np.round(mine, 3).tolist()} 存的={np.round(theirs, 3).tolist()}")
                 centres = np.asarray([o["center"] for o in per_frame])
                 diag = float(np.median([np.linalg.norm(o["size"]) for o in per_frame]))
                 spread = float(np.linalg.norm(centres - centres[0], axis=1).max())
@@ -166,6 +185,8 @@ def main(argv: list[str]) -> int:
     print(f"自查：复算的逐帧包围盒和 evidence.json 对得上 {selfcheck_ok}，对不上 {selfcheck_bad}")
     if selfcheck_bad > selfcheck_ok:
         print("  **对不上的比对得上的多，下面的数一个都不能信**——复算没复现现有做法。")
+        for e in mismatch_examples:
+            print(f"    {e}")
         return 1
     print(f"物体 {n_obj} 个，其中判为静止、参与比较的 {n_still} 个")
     if grew:
