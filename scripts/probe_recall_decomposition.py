@@ -18,6 +18,12 @@
 口径要说在前头：这三个桶是用**和召回同一个距离**定义的，所以它们和被测量当然相关
 ——这里做的是把召回拆开，不是拿一个独立的量去验证它。
 
+还有一个零假设必须一起报，否则「偏位」这一桶会骗人：**场景本来就密的话，最近邻
+本来就近**。随便往哪撒一个点，它到最近的真值节点也就那么远。所以每个漏掉的物体
+同时量两个距离——到最近的**预测**节点，和到最近的**另一个真值**节点（后者是这个
+场景的固有间距）。两者逐物体配对取比值，比值明显小于 1 才说明「那个预测确实是
+这个物体、只是放错了地方」；接近 1 就是巧合。
+
 自查（两条，任何一条不过，下面的数一个都不能信）：
   1. 本脚本复现出来的配对数，必须等于 `evaluate()` 自己报的 `by_mean_distance`；
   2. 本脚本算的召回，必须等于 `evaluate()` 报的 `object_recall`。
@@ -137,7 +143,16 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
     buckets: dict[str, int] = {"占用": 0, "偏位": 0, "缺席": 0}
     nearest_is_static = {"占用": 0, "偏位": 0, "缺席": 0}
     distances: list[float] = []
+    null_distances: list[float] = []
+    ratios: list[float] = []
     taken = {q for _g, q, _d in pairs if q is not None}
+    # 零假设。场景本来就密的话，「最近的预测节点在 1.4 米」可能纯属巧合——随便往
+    # 哪撒一个点，最近邻也就那么远。所以对每个漏掉的物体同时量它到**最近的另一个
+    # 真值节点**有多远，那是这个场景的固有间距。只有「到最近预测」明显小于它，
+    # 才谈得上「那个预测确实是这个物体，只是放错了地方」。
+    gt_static_tr = tracks(gt_states, kinds=("static",))
+    gt_all = ([(k, v) for k, v in prefix(gt_tr).items()]
+              + [(f"static::{k}", v) for k, v in prefix(gt_static_tr).items()])
     for g in sorted(set(gt_tr) - matched):
         gt_track = observed_gt.get(g) or gt_tr[g]
         best, best_kind, best_free = float("inf"), None, None
@@ -148,6 +163,18 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
             d = float(np.linalg.norm(_sample(gt_track, ts) - _sample(cand, ts), axis=1).mean())
             if d < best:
                 best, best_kind, best_free = d, kind, key not in taken
+        null = float("inf")
+        for key, other in gt_all:
+            if key == g:
+                continue
+            ts = _supported(pair_times if len(pair_times) else obs_times, gt_track, other)
+            if not len(ts):
+                continue
+            d = float(np.linalg.norm(_sample(gt_track, ts) - _sample(other, ts), axis=1).mean())
+            null = min(null, d)
+        null_distances.append(null)
+        if np.isfinite(best) and np.isfinite(null) and null > 1e-9:
+            ratios.append(best / null)
         distances.append(best)
         if best <= max_dist_m:
             tag = "占用"
@@ -163,6 +190,8 @@ def decompose(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_
             "n_missed": len(gt_tr) - len(matched), "buckets": buckets,
             "nearest_is_static": nearest_is_static,
             "missed_distances": [round(d, 3) for d in distances],
+            "null_distances": [round(d, 3) for d in null_distances],
+            "pred_over_null": [round(r, 3) for r in ratios],
             "n_pred_objects": len(pred_tr), "n_pred_static": len(pred_static)}
 
 
@@ -190,6 +219,8 @@ def main(argv: list[str]) -> int:
     total_static = {"占用": 0, "偏位": 0, "缺席": 0}
     n_gt = n_matched = 0
     all_d: list[float] = []
+    all_null: list[float] = []
+    all_ratio: list[float] = []
     failed: list[str] = []
     for run in runs:
         manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
@@ -228,6 +259,7 @@ def main(argv: list[str]) -> int:
             total[k] += b[k]; total_static[k] += res["nearest_is_static"][k]
         n_gt += res["n_gt"]; n_matched += res["n_matched"]
         all_d += res["missed_distances"]
+        all_null += res["null_distances"]; all_ratio += res["pred_over_null"]
 
     print("\n" + "=" * 72)
     if failed:
@@ -251,13 +283,26 @@ def main(argv: list[str]) -> int:
         if finite:
             print(f"\n  漏掉物体到最近预测节点的距离：中位 {statistics.median(finite):.2f} m，"
                   f"四分位 {np.percentile(finite, 25):.2f} / {np.percentile(finite, 75):.2f} m")
+    fn = [d for d in all_null if np.isfinite(d)]
+    fr = [r for r in all_ratio if np.isfinite(r)]
+    if fn:
+        print(f"  同一批物体到**最近的另一个真值节点**：中位 {statistics.median(fn):.2f} m"
+              f"（场景的固有间距，这是零假设）")
+    if fr:
+        closer = sum(1 for r in fr if r < 1.0) / len(fr)
+        print(f"\n  逐物体配对比值（到最近预测 ÷ 到最近的另一个真值）："
+              f"中位 {statistics.median(fr):.2f}，{closer:.1%} 的物体比值 < 1")
+        print("  比值明显小于 1，才说明那个预测确实是这个物体、只是放错了地方；")
+        print("  接近或大于 1 就是巧合，「偏位」这个桶不能当成教师能修的量。")
     print("""
 判读：
   「偏位」占比高  → 东西检出来了只是放错地方，**稠密三维重建（教师）修的正是这一类**；
   「缺席」占比高  → 那个位置根本没有候选，教师给不了语义，这条路修不到；
   「占用」占比高  → 问题在一对一指派和碎片，和教师、和形状都无关。
-提醒：这三个桶用的是和召回同一个距离，所以它们和被测量天然相关。
-      这里做的是把召回拆开，不是拿独立的量去验证它。""")
+提醒一：这三个桶用的是和召回同一个距离，所以它们和被测量天然相关。
+        这里做的是把召回拆开，不是拿独立的量去验证它。
+提醒二：**先看上面那个比值再读「偏位」。** 场景密的话最近邻本来就近，
+        「偏位」会被巧合撑起来。比值不明显小于 1 的话，这一桶说明不了任何事。""")
     return 0
 
 
