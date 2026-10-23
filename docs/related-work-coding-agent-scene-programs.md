@@ -186,3 +186,81 @@ visual realism"。
 - SceneCraft: An LLM Agent for Synthesizing 3D Scene as Blender Code — https://arxiv.org/pdf/2403.01248
 - GPT-6 Astra（发布时间线）— https://en.wikipedia.org/wiki/GPT-6_Astra
 - agent × real-to-sim-to-real 论文清单 — https://github.com/YanjieZe/agent-real2sim2real
+
+## 为什么在外观上比不过 3DGS，以及空白在哪
+
+这一节不是文献摘录，是上面那批材料加上我们自己测量之后的分析，供写 motivation 用。
+
+### 这是容量和结构的取舍，不是优化不够狠
+
+| | 3DGS / NeRF | 场景程序 |
+|---|---|---|
+| 自由参数 | 约 10⁶–10⁷（每个高斯：位置、协方差、不透明度、球谐）| 约 10²–10³（N 个物体 × 位姿 / 形状 / 材质）|
+| 优化目标 | **直接最小化与输入像素的光度误差** | 完全不碰像素 |
+| 假设空间 | 任意斑点场，**包含**真实场景 | 资产库 + 基本体，**不包含**大多数真实物体 |
+| 离散决策 | 没有 | 物体数、类别、基本体类型、关节类型，**全不可微** |
+
+最根本的是第三行：**不是我们优化得不够狠，是真实场景根本不在我们的假设空间里。**
+一个真实的笔记本不是盒子，资产库里也没有它。3DGS 不需要"认识"任何东西，
+它只要把斑点摆到降低像素误差的地方。
+
+第四行是第二重障碍：程序合成必须做离散选择，而这些选择不可微。
+"检索哪个资产""这是铰链还是滑轨"都没法反向传播。
+
+### 3DGS 正在从另一头走过来，撞上的墙正好是我们免费拥有的
+
+有一条活跃的线在给高斯加物理：DecoupledGaussian（CVPR 2025）、PhysSplat
+（ICCV 2025）、Scene-Level Heterogeneous Physics（arXiv 2606.21753）。
+他们自己写的困难：
+
+| 他们的难点 | 出处原话 | 我们这边 |
+|---|---|---|
+| 被遮挡 / 看不见的几何 | "no GS or NeRF method could restore objects **occluded by the scene** or missed due to object removal" | 直接给完整的几何体 |
+| 物体能否真正脱离表面 | 早期方法里物体 "remain **constrained to the contacted surface**" | 从一开始就是独立刚体 |
+| 从静态捕获推物理属性 | "extremely challenging task due to **limited supervisions**" | 表示里本来就有质量、摩擦这些槽位 |
+| 抽网格 | "Gaussians are **unorganized**" | 不存在这个问题 |
+| 接进物理引擎 | "physics engines **weren't designed for** Gaussian representations" | 本来就是为引擎生成的 |
+| 只能回放不能外推 | "**Replay-based methods only play back** captured or generated motion, so they **can't simulate new dynamics**" | 正是核心主张里的"可外推" |
+
+DecoupledGaussian 为了补一个物体的背面要用 Poisson 场填充加反复雕刻，
+而且作者明说这套**牺牲纹理保几何**。
+
+### 真正的不对称
+
+> **外观对我们是容量问题，结构对他们是表示问题。**
+
+容量问题可以买——更大的资产库、更深的组合、或者混合表示。
+表示问题买不到：没法通过"优化得更狠"从一团斑点里长出"这是一扇门，它绕这根轴转"。
+
+这是支撑本课题方向最硬的一条论据，而且它来自对方自己写的 limitation。
+
+### 我们自己最大的困难
+
+不是渲染不够真，是**假设空间不含内容，加上整条链路没有任何像素反馈**：
+
+- 资产检索成功率 45%（118 个物体检到 53 个），而且当前基准真值全是基本体，
+  **检索成功反而在形状种类上算错**
+- 形状种类准确率 0.300，超过一半的物体渲成盒子
+- **从感知到合成到编译，没有一处拿渲染结果和原视频比过**
+
+第三条最要命，因为它可以修。
+
+### 两个没人做的空白
+
+**一、把光度一致性当损失，而不是当分数。** LEGO-Bench 的外观分 `A` 是"重渲染后
+逐像素比"，但它只被当成评测指标。没有工作把它接成程序合成的**优化信号**
+（渲染程序 → 和原帧比 → 改程序 → 再比）。LEGO-Plugin 的 grounded refinement
+用 SAM 3 + Depth Anything 做显式残差，已经在摸这个边，但没有直接用像素。
+
+**二、3DGS 与场景程序的结合整体是空白。** 检索下来没有任何工作把两者放在一起。
+给高斯加物理的那一线，和让智能体写程序的那一线，目前互不引用。
+
+### 一个我们自己没用上的容量来源
+
+内核的 `kernel/scene.js` **已经支持 `kind: "composite"`**（带 `parts` 的组合体，
+见第 104、115 行），但它只能通过类名正则的兜底分支触达（`tree|plant|bush`、
+`train|car|cart|...`）。实测产出里 **70 个物体节点全部是 `asset`，一个组合体都没有**。
+
+也就是说：**提升假设空间容量的机制已经在代码里，只是从来没被用过。**
+用组合体加深结构，比引入非程序的残差更可取——因为组合体仍然是程序，
+仍然可编辑、可仿真、可外推。
