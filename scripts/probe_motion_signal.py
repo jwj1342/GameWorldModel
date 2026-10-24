@@ -972,11 +972,15 @@ def _gt_asset_refs() -> dict:
     return out
 
 
-def _asset_points_by_id(asset_id: str) -> np.ndarray | None:
-    """按**资产 id**取网格点云（检索那条是按类名查的，会查错）。"""
+def _asset_points_by_id(asset_id: str, samples: int = 3000) -> np.ndarray | None:
+    """按**资产 id**取网格点云（检索那条是按类名查的，会查错）。
+
+    `samples` 给轮廓那条用：96×96 的格子有 9216 个，3000 个点填不实，
+    轮廓会是散点而不是实心区域，IoU 同样失真。
+    """
     if not asset_id:
         return None
-    key = f"__id__{asset_id}"
+    key = f"__id__{asset_id}:{samples}"
     if key in _ASSET_CACHE:
         return _ASSET_CACHE[key]
     from gwm.assets.library import library_root, load_catalog
@@ -987,7 +991,7 @@ def _asset_points_by_id(asset_id: str) -> np.ndarray | None:
         _ASSET_CACHE[key] = None; return None
     catalog = _ASSET_CACHE.setdefault("__catalog__", load_catalog(root))
     match = next((a for a in catalog if a.id == asset_id), None)
-    pts = load_points(Path(root) / match.path, samples=3000) if match else None
+    pts = load_points(Path(root) / match.path, samples=samples) if match else None
     _ASSET_CACHE[key] = pts
     return pts
 
@@ -1834,7 +1838,7 @@ def _gt_other_ref(oid: str) -> str:
 
 
 def _project_silhouette(pts: np.ndarray, R_wc: np.ndarray, yaw: float,
-                        grid: int = 48) -> np.ndarray | None:
+                        grid: int = 96) -> np.ndarray | None:
     """把候选网格按偏航转一下、用**相机朝向**转进相机系、正交投影成二值轮廓。
 
     **这条路一点不碰深度。** 根因是深度误差沿相机视线（物体被压扁到最短轴的
@@ -1845,6 +1849,11 @@ def _project_silhouette(pts: np.ndarray, R_wc: np.ndarray, yaw: float,
 
     投影后按**二维包围盒**归一化到固定格子，所以和物体的像素大小无关，
     比的是纯形状。
+
+    **格子不能太粗。** 第一版用 48×48 = 2304 格，而网格点有 3000 个——平均每格
+    1.3 个点，几乎填满整个包围框，于是不同偏航的轮廓都成了差不多的实心块，
+    IoU 对角度不敏感（实测 margin 只有 1~2%，解位姿时偏航在整个圆周上乱跳）。
+    提到 96×96 = 9216 格，同时把采样点数提上去填实。
     """
     a = np.asarray(pts, float)
     c, sn = np.cos(yaw), np.sin(yaw)
@@ -1864,7 +1873,7 @@ def _project_silhouette(pts: np.ndarray, R_wc: np.ndarray, yaw: float,
     return out
 
 
-def _mask_to_grid(mask: np.ndarray, grid: int = 48) -> np.ndarray | None:
+def _mask_to_grid(mask: np.ndarray, grid: int = 96) -> np.ndarray | None:
     """观测掩码按它的二维包围盒等比归一化到同一个格子。"""
     m = np.asarray(mask, bool)
     ys, xs = np.nonzero(m)
@@ -1913,7 +1922,7 @@ def _render_pick_rate(per_frame: dict, frames: list, cams: dict, gt_ref: str,
     yaws = [2.0 * np.pi * j / n_yaw for j in range(n_yaw)]
     scored = []
     for aid in [gt_ref] + picked:
-        tpl = _asset_points_by_id(aid)
+        tpl = _asset_points_by_id(aid, samples=20000)
         if tpl is None or len(tpl) < 50:
             continue
         tpl = tpl - tpl.mean(0)
@@ -1957,7 +1966,7 @@ def _silhouette_yaw_series(per_frame: dict, frames: list, cams: dict,
     """
     if not asset_id:
         return np.array([])
-    tpl = _asset_points_by_id(asset_id)
+    tpl = _asset_points_by_id(asset_id, samples=20000)
     if tpl is None or len(tpl) < 50:
         return np.array([])
     tpl = tpl - tpl.mean(0)
