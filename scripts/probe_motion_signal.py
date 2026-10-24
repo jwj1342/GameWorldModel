@@ -310,15 +310,22 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         #
         # **这一段不能嵌在 vis 那个块里**——vis 失败时会把闸那几臂的转角也一起丢掉，
         # 而且丢得悄无声息。
-        if is_static:
-            arms = [("register", tracked), *gated_arms]
-            if vis.get("ok"):
-                arms.append(("visible", vis))
-            for tag, trk in arms:
-                rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
-                ang = float(np.degrees(np.arccos(
-                    np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
-                out.setdefault(f"rot_static/{tag}", []).append(ang)
+        # 静止物体**和**会转的物体都要记。只报「静止物体的假转动被压下去了」而不报
+        # 「真转动有没有被一起压住」，是只摆好处不摆代价——今天反复在提防的那类错误。
+        #
+        # 真值里带转动的类型：spin / revolute / periodic_rotate。平移类（linear、
+        # trajectory）不算，它们本来就不该解出转动。
+        gt_kind = kinds.get(oid, "static")
+        rotating = any(k in str(gt_kind) for k in ("spin", "revolute", "rotate"))
+        bucket = "rot_static" if is_static else ("rot_rotating" if rotating else "rot_translating")
+        arms = [("register", tracked), *gated_arms]
+        if vis.get("ok"):
+            arms.append(("visible", vis))
+        for tag, trk in arms:
+            rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
+            ang = float(np.degrees(np.arccos(
+                np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
+            out.setdefault(f"{bucket}/{tag}", []).append(ang)
 
         plane = track_rigid(clouds, point_to_plane=True)
         if plane["ok"] and len(plane["positions"]) == len(gt):
@@ -867,10 +874,14 @@ def main() -> int:
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
         # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
         # 而决策真正要的是**有多少比例低于铰链门槛 8 度**——高于门槛的会产出假关节。
-        if key.startswith("rot_static/"):
+        if key.startswith(("rot_static/", "rot_rotating/", "rot_translating/")):
+            # 门槛这条线对三个桶的含义是**相反的**：静止和纯平移的物体该低于门槛
+            # （高于就是假关节），而真在转的物体不该低于（低于就是真转动被压没了）。
+            # 所以这一列必须连着桶名一起读。
             below = sum(1 for v in values if v < 8.0) / len(values)
+            want = "该高" if key.startswith("rot_rotating/") else "该低"
             extra += (f"  均值 {statistics.mean(values):>6.2f}"
-                      f"  低于 8 度门槛 {below:.3f}")
+                      f"  低于 8 度门槛 {below:.3f}（{want}）")
         print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
     return 0
 
