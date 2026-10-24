@@ -195,6 +195,10 @@ def fit_kind(P: np.ndarray, trim: float = 0.05, cross_validate: bool = True,
     if not cross_validate or len(Q) < 40:
         res = {k: f(Q)(Q) for k, f in FITTERS.items()}
         return min(res, key=res.get), res
+    # 注：调用方除了 argmin 还会用整份 res 排序，看真值在不在前二。
+    # 理由是架构上的——**几何未必要当分类器，当个过滤器也有用**。
+    # 语义模型提候选、几何否决，比让几何从零做四分类容易得多，而且 NeoWorld-Pro
+    # 用物理做的正是这件事（「用物理去修」）。前二命中率高的话这条就成立。
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(Q))
     half = len(Q) // 2
@@ -250,6 +254,8 @@ def main(argv: list[str]) -> int:
     pred_cv: list[str] = []
     diags: list[float] = []
     npoints: list[int] = []
+    rank_naive: list[list[str]] = []
+    rank_cv: list[list[str]] = []
     skipped = Counter()
     for spec in a.pair:
         report, _s, gt_root = spec.partition(":")
@@ -297,7 +303,10 @@ def main(argv: list[str]) -> int:
                 per_frame_kinds = [fit_kind(p, cross_validate=False)[0]
                                    for p in pts if len(p) >= a.min_points // 4]
                 kind_voted = vote(per_frame_kinds) or kind_naive
-                kind_cv, _res_cv = fit_kind(P_all, cross_validate=True)
+                kind_cv, res_cv = fit_kind(P_all, cross_validate=True)
+                _kn, res_naive = fit_kind(P_all, cross_validate=False)
+                rank_naive.append([k for k in sorted(res_naive, key=res_naive.get)])
+                rank_cv.append([k for k in sorted(res_cv, key=res_cv.get)])
                 truth.append(shapes[node][0])
                 diags.append(shapes[node][1])
                 npoints.append(len(P_all))
@@ -347,6 +356,24 @@ def main(argv: list[str]) -> int:
                 continue
             row = [sum(1 for tt, pp in zip(truth, P) if tt == t and pp == p) for p in KINDS]
             print(f"    {t:9s} " + "".join(f"{v:10d}" for v in row))
+
+    # —— 几何当不了分类器，能不能当过滤器 ——
+    #
+    # 架构上这是另一条路：让语义模型提候选，几何**否决**，而不是让几何从零做四分类。
+    # 验证「这是不是柱体」的是非题比四选一容易得多，NeoWorld-Pro 用物理做的正是这件事。
+    # 判据就是真值在不在残差排序的前二。
+    #
+    # 必须跟**随机前二**比：四类里随便取两个，命中率是 0.5；非 box 物体上按真值分布
+    # 乱排也有个基线。不跟它比的前二命中率没有意义。
+    if rank_naive:
+        for label, ranks in (("朴素", rank_naive), ("交叉验证", rank_cv)):
+            top2 = sum(1 for t, r in zip(truth, ranks) if t in r[:2]) / len(ranks)
+            nb = [(t, r) for t, r in zip(truth, ranks) if t != "box"]
+            top2_nb = (sum(1 for t, r in nb if t in r[:2]) / len(nb)) if nb else float("nan")
+            print(f"\n  前二命中率（{label}）：全部 {top2:.3f}，非 box 的 {top2_nb:.3f}")
+        print("    随机取两类的命中率是 0.500。明显高于它，几何就能当过滤器——")
+        print("    让语义模型提候选、几何否决，而不是让几何从零分类。")
+        print("    不高于 0.500 的话，这条架构也不成立，排序里根本没有信号。")
 
     # —— 按物体尺寸分桶，看非 box 那几类的召回随尺寸怎么变 ——
     # 真值里的柱体是 radius 0.144 / height 0.210 这种扁柱，直径 0.287、高 0.210，
