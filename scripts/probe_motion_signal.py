@@ -849,14 +849,20 @@ def _anchored_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) 
     m0 = np.asarray(m0).astype(bool)
     if m0.shape != g0.shape:
         m0 = resize_mask(m0, (g0.shape[1], g0.shape[0])).astype(bool)
-    vs, us = np.nonzero(m0)
-    if len(vs) < 40:
+    if m0.sum() < 40:
         return np.array([])
-    step = max(1, len(vs) // 600)                    # 最多六百个点，够解也不慢
-    pts0 = np.stack([us[::step], vs[::step]], 1).astype(np.float32)
+    # **只跟角点，不跟所有掩码像素。** 前两版各带一个互补的毛病：稀疏版只跟角点
+    # 但物体只有 4 个角点（点太少）；第一版锚定跟掩码内所有像素，点够多但大部分是
+    # 平坦区域，LK 在那上面必然漂移（孔径问题）。正确的组合是角点 + 锚定。
+    # 质量阈值放松到 0.003，因为物体小、角点本来就少（普查：中位 4 个）。
+    corners = cv2.goodFeaturesToTrack(g0, maxCorners=600, qualityLevel=0.003,
+                                      minDistance=2, mask=m0.astype(np.uint8))
+    if corners is None or len(corners) < 6:
+        return np.array([])
+    pts0 = corners.reshape(-1, 2).astype(np.float32)
     P0 = _lift(geom, k0, pts0)
     alive = np.isfinite(P0).all(1)
-    if alive.sum() < 20:
+    if alive.sum() < 6:
         return np.array([])
     lk = dict(winSize=(15, 15), maxLevel=3,
               criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
@@ -873,18 +879,18 @@ def _anchored_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) 
         nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_img, gi, cur, None, **lk)
         alive = alive & (st.ravel() == 1)
         cur, prev_img, prev_k = nxt, gi, ki
-        if alive.sum() < 20:
+        if alive.sum() < 6:
             out.append(out[-1]); continue
         Pk = _lift(geom, ki, cur.reshape(-1, 2))
         good = alive & np.isfinite(Pk).all(1)
-        if good.sum() < 20:
+        if good.sum() < 6:
             out.append(out[-1]); continue
         # **锚点在第 0 帧**：每次都从直接对应关系解一次，不累加旋转
         A, B = P0[good], Pk[good]
         rot, t = kabsch(B, A)
         res = np.linalg.norm(B @ np.asarray(rot, float).T + t - A, axis=1)
         keep = res <= np.percentile(res, 75)
-        if keep.sum() >= 20:
+        if keep.sum() >= 6:
             rot, _t = kabsch(B[keep], A[keep])
         out.append(float(np.degrees(R.from_matrix(np.asarray(rot, float)).magnitude())))
     return np.asarray(out)
