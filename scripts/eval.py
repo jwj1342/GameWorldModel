@@ -183,7 +183,8 @@ def work_dir(work: Path, tag: str, identity: str) -> Path:
 
 
 def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | None = None,
-             max_dist_m: float | None = None, match_on: str | None = None) -> dict:
+             max_dist_m: float | None = None, match_on: str | None = None,
+             gauge: str | None = None) -> dict:
     manifest = json.loads((run / "run.json").read_text(encoding="utf-8"))
     clip = manifest.get("clip", run.parent.name)
     configs = (manifest.get("args") or {}).get("config") or []
@@ -219,11 +220,15 @@ def eval_one(run: Path, work: Path, harness: str, gt_roots_extra: list[str] | No
     # 条件——运动判错的物体配不上，于是既算漏检又被踢出运动准确率的分母。详见 #7。
     if match_on is not None:
         extra["match_on"] = match_on
+    if gauge is not None:
+        extra["gauge"] = gauge
     row["metrics"] = evaluate(gt, json.loads(pred_bytes), gt_states, pred_states, **extra)
     if max_dist_m is not None:
         row["max_dist_m"] = float(max_dist_m)
     if match_on is not None:
         row["match_on"] = match_on
+    if gauge is not None:
+        row["gauge"] = gauge
     return row
 
 
@@ -259,6 +264,13 @@ def main(argv: list[str]) -> int:
                          "距离的平均；它把被评测的量写进了配对条件——运动判错的物体配不上，"
                          "于是既算漏检、又被踢出运动准确率的分母（实测这是个闭环，见 #7）。"
                          "start 只看观察窗起点的位置，和运动无关。")
+    ap.add_argument("--gauge", choices=["rigid", "similarity"], default=None,
+                    help="规范对齐做到哪一步。rigid（默认）只对齐偏航和水平平移，尺度要罚——"
+                         "因为尺度由 assumed_camera_height_m 定死，原则上可观测。"
+                         "similarity 多对齐一个整体尺度，回答的是另一个问题：「把尺度这一条"
+                         "刨掉之后还剩多少误差」。实测那个假设是个常数而取景不是（ab015 真值"
+                         "相机高度 0.62–3.89 米，41.7% 在两米以上），俯拍那批被压小三到八倍，"
+                         "于是「尺度错了」被记成「检测不出来」。两个口径要并排看，rigid 仍是主口径。")
     ap.add_argument("--max-dist", type=float, default=None,
                     help="物体配对的距离容差（米），默认 3.0。它是绝对量，所以跨尺度"
                          "比较时必须按场景尺度一起缩，否则小场景里等于「什么都能配上」。")
@@ -284,6 +296,8 @@ def main(argv: list[str]) -> int:
             tol = {} if a.max_dist is None else {"max_dist_m": a.max_dist}
             if a.match_on is not None:
                 tol["match_on"] = a.match_on
+            if a.gauge is not None:
+                tol["gauge"] = a.gauge
             row = eval_one(r, work, a.harness, a.gt_root, **tol)
         except Exception as e:
             failed.append({"run": str(r), "error": repr(e)[:300]}); continue

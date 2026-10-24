@@ -39,7 +39,8 @@ def _git_commit() -> str:
 
 
 def build_specs(split: str, count: int, seed: int, duration: float, fps: int,
-                pairs: int, stage_scale: float = 1.0) -> list[SceneSpec]:
+                pairs: int, stage_scale: float = 1.0,
+                asset_cfg: dict | None = None) -> list[SceneSpec]:
     families = TRAIN_FAMILIES if split == "train" else TEST_FAMILIES
     profile = "train" if split == "train" else "test"
     rng = random.Random(seed)
@@ -49,7 +50,7 @@ def build_specs(split: str, count: int, seed: int, duration: float, fps: int,
                                behavior_seed=rng.randrange(2 ** 31), style_seed=rng.randrange(2 ** 31),
                                camera_seed=rng.randrange(2 ** 31), profile=profile,
                                duration=duration, fps=fps, tags=("base",),
-                               stage_scale=stage_scale))
+                               stage_scale=stage_scale, asset_cfg=asset_cfg))
     # 配对从前 `pairs` 条派生：一条只换样式，一条只换行为。
     for i in range(min(pairs, len(specs))):
         base = specs[i]
@@ -73,11 +74,23 @@ def main() -> int:
                          "这个假设，两者差六到十二倍，见 #68。0.15 左右把场景缩到房间/"
                          "桌面尺度，和目标输入（手持拍卧室、桌子）对上。缩放是相似变换，"
                          "场景内部的相对结构不变。")
+    ap.add_argument("--use-assets", action="store_true",
+                    help="真值场景用资产库搭，而不是随机名字 + 独立挑的基本体。"
+                         "现在的真值让「该挑哪个资产」没有标准答案（实测换掉 64%% 的"
+                         "资产，所有指标逐字节不动），而且类名和形状脱钩导致 "
+                         "class_accuracy 恒等于噪声。改从同一个库里挑，两件事一起修好："
+                         "资产 id 可以直接比对，类名从资产文件名来所以和网格绑定。"
+                         "库不可用时自动退回基本体。")
     a = ap.parse_args()
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    specs = build_specs(a.split, a.count, a.seed, a.duration, a.fps, a.pairs, a.stage_scale)
+    _acfg = None
+    if a.use_assets:
+        from gwm.config import load_config
+        _acfg = {**load_config(), "dataset": {"use_assets": True}}
+    specs = build_specs(a.split, a.count, a.seed, a.duration, a.fps, a.pairs, a.stage_scale,
+                        asset_cfg=_acfg)
 
     rows, failures = [], []
     for spec in specs:

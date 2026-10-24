@@ -56,6 +56,21 @@ def scale_program(program: dict, k: float) -> dict:
                 _scale_num(part, key, k)
         for inst in node.get("instances") or []:
             _scale_vec(inst, "pos", k)
+        # **轨迹的逐个关键帧**。上面那层循环只扫到 motion 这个字典本身，
+        # 而 keyframes 是一串字典，位置藏在每个关键帧里面，扫不到。
+        #
+        # 漏掉的后果不是「小一点」，是**自相矛盾**：pose.pos 被缩了、关键帧没缩，
+        # 同一个物体的起点和它轨迹的第一帧差着 1/k 倍。实测 stage_scale=0.15 的三批
+        # 数据里，所有带轨迹关键帧的物体都中招（ab015 5 个、hold015 2 个、
+        # pair015 3 个），它们在真值里就是坏的——预测再准也配不上，白占召回的分母。
+        #
+        # 相机那边是对的（下面单独扫了 camera.keyframes），geom.parts 和 instances
+        # 也都单独扫了，唯独物体的运动关键帧漏了。
+        for frame in (node.get("motion") or {}).get("keyframes") or []:
+            for key in _VECTOR_KEYS:
+                _scale_vec(frame, key, k)
+            for key in _SCALAR_KEYS:
+                _scale_num(frame, key, k)
         # 滑轨行程和铰链限位：前者是长度要缩，后者是角度不能缩
         interaction = node.get("interaction") or {}
         mode = interaction.get("grab")

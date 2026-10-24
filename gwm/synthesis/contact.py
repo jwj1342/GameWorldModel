@@ -54,3 +54,45 @@ def settle_on_ground(program: dict, max_lift_m: float = 2.0) -> list[dict]:
         pose["pos"][1] = float(pose["pos"][1]) + lift
         moves.append({"id": node["id"], "lift_m": round(lift, 4), "applied": True})
     return moves
+
+
+def drop_sunk(program: dict, below_height_mult: float = 2.0) -> list[dict]:
+    """丢掉**接触装配之后仍然**陷在地面以下很深的物体。
+
+    一个底面在地平面下方好几倍自身高度的「物体」，要么是深度把一片背景推到了地下，
+    要么是掩码糊到了地面以外，两种都不是可以拿起来的东西。
+
+    **顺序是这条规则的全部要害，必须跑在 `settle_on_ground` 之后。** 我第一版把它
+    放在 `direct.py` 里程序刚生成的时候，离线估算说「砍掉 6 个、全是假阳性、一个
+    命中不丢、精确率 0.214 -> 0.227」，实际接进链路跑出来是**砍掉 57 个、召回
+    0.500 -> 0.268**。
+
+    原因是顺序：接触装配本来就负责把陷在地里的物体抬上来，而我在它之前把那些物体
+    丢掉了——**丢的正是它要修的那一批**。而我离线估算时用的是**最终程序**（装配
+    已经跑过、物体都抬上来了），所以只看到还剩 6 个。
+
+    教训很具体：**拿「处理后的数据」去估算「处理前的闸」会砍掉多少，估的是另一个
+    分布。** 要估一个闸的代价，得在它实际会看到的那个管线位置上取数据。
+    """
+    import numpy as np
+
+    dropped = []
+    keep = []
+    for node in program.get("objects") or []:
+        ext = (node.get("geom") or {}).get("extent")
+        pos = (node.get("pose") or {}).get("pos")
+        if not (isinstance(ext, list) and len(ext) == 3 and isinstance(pos, list) and len(pos) == 3):
+            keep.append(node); continue
+        height = float(ext[1])
+        bottom = float(pos[1]) - height / 2
+        if height > 1e-6 and bottom < -below_height_mult * height:
+            dropped.append({"id": node["id"], "class": node.get("class"),
+                            "bottom_over_height": round(bottom / max(height, 1e-6), 2)})
+        else:
+            keep.append(node)
+    if dropped:
+        program["objects"] = keep
+        # 留痕放 meta：程序 schema 顶层是 additionalProperties: false，加顶层键会让
+        # 整个程序编译不过（这个坑踩过一次）。meta 的 additionalProperties 是 true。
+        program.setdefault("meta", {})["dropped_sunk"] = dropped
+    return dropped

@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import re
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from gwm.config import load_config
@@ -65,6 +67,142 @@ def motion_types(program: dict) -> dict[str, str]:
     return {o["id"]: (o.get("motion") or {}).get("type", "static") for o in program.get("objects", [])}
 
 
+def class_names(program: dict) -> dict[str, str]:
+    return {o["id"]: str(o.get("class", "")).strip().lower() for o in program.get("objects", [])}
+
+
+def node_extent(node: dict) -> np.ndarray | None:
+    """节点的长宽高，不管它是基本体还是资产。
+
+    真值程序用的是基本体（sphere/box/cylinder/cone），我们产出的是带 extent 的
+    资产节点，两边的形状描述方式不一样，所以统一折成三个边长再比。
+    """
+    g = node.get("geom") or {}
+    shape = g.get("shape")
+    if shape == "sphere":
+        d = 2.0 * float(g.get("radius", 0.0))
+        return np.array([d, d, d]) if d > 0 else None
+    if shape in ("cylinder", "cone"):
+        d = 2.0 * float(g.get("radius", 0.0))
+        h = float(g.get("height", d))
+        return np.array([d, h, d]) if d > 0 and h > 0 else None
+    ext = g.get("extent")
+    if isinstance(ext, list) and len(ext) == 3:
+        e = np.asarray(ext, float)
+        return e if np.all(e > 0) else None
+    return None
+
+
+# 内核 `kernel/scene.js` 的 `fallbackForClass` 按**类名正则**挑基本体。这里复刻一份，
+# 因为要量「最终渲出来的是什么形状」就必须知道这个映射，而程序里并不记录它
+# ——节点写的是 `kind: "asset"`，真正渲什么由内核在运行时决定。
+#
+# **这是跨语言重复一份逻辑，是个明确的债。** 留着是因为没有它就量不了形状种类，
+# 而量不了就改不动（#56）。哪天把有效形状写进程序，这段就该删掉，
+# 有一条测试盯着两边保持一致。
+_FALLBACK_SHAPE: tuple[tuple[str, str], ...] = (
+    (r"coin|disc|ring|wheel", "cylinder"),
+    (r"ball|sphere|orb|marble", "sphere"),
+    (r"tree|plant|bush", "composite"),
+    (r"train|car|cart|vehicle|truck|bus|locomotive", "composite"),
+    (r"door|gate|panel", "box"),
+)
+
+
+def effective_shape(node: dict) -> str | None:
+    """这个节点**最终会渲成什么形状**。
+
+    `kind: "primitive"` 直接读 shape。`kind: "asset"` 要分两种：解析到了资产
+    （有 `ref`）就是那个网格，这里记成 "mesh"；没解析到就走内核的类名兜底。
+    """
+    geom = node.get("geom") or {}
+    kind = geom.get("kind")
+    if kind == "primitive":
+        return str(geom.get("shape") or "box")
+    if kind == "composite":
+        return "composite"
+    if kind in ("asset", "generated"):
+        if geom.get("ref"):
+            return "mesh"
+        name = str(node.get("class") or geom.get("query") or "").lower()
+        for pattern, shape in _FALLBACK_SHAPE:
+            if re.search(pattern, name):
+                return shape
+        return "box"          # 内核的默认分支
+    return None
+
+
+_ASSET_SHAPES: dict | None = None
+
+
+def _asset_shape_table() -> dict:
+    """资产 id → 边长比例（三边排序后除以最长边）。由
+    `scripts/build_asset_shape_cache.py` 预计算，路径从 `assets.shape_cache` 或
+    环境变量 `GWM_ASSET_SHAPES` 读。没有缓存就返回空，相关指标报 None。"""
+    global _ASSET_SHAPES
+    if _ASSET_SHAPES is None:
+        import os
+        path = (load_config().get("assets") or {}).get("shape_cache") or \
+            os.environ.get("GWM_ASSET_SHAPES")
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8")) if path else {}
+        except (OSError, ValueError, TypeError):
+            data = {}
+        _ASSET_SHAPES = {k: v for k, v in data.items()
+                         if isinstance(v, list) and len(v) == 3}
+    return _ASSET_SHAPES
+
+
+def asset_shape_error(gt_node: dict, pred_node: dict) -> float | None:
+    """**选中的那个资产网格**，形状和真值差多少。没有资产或没有缓存就返回 None。
+
+    为什么必须单独有这一项。实测：把资产检索的重排改掉，**选中的资产确实变了**
+    （`minigolf/ball-blue` → `food/rice-ball`、`car/debris-door` → `castle/door`），
+    而**每一个现有指标都逐字节相同**。查下来整个评测对「挑了哪个资产」是盲的——
+
+      `shape_kind_accuracy`  资产节点一律记成 "mesh"，所以恒零；
+      `shape_ok` / `scale_ok` / `shape_error`  读的是节点的 `extent`，
+          而资产节点的 extent 来自**观测**，不是来自网格；
+      `object_recall` / `precision`  只看位置；
+      `class_accuracy`  只看类名。
+
+    **没有任何一个指标看得见网格本身**，而资产决定了场景实际长什么样。这一整块
+    一直没被量过，所以「换个更好的检索」在表上永远是零变化。
+
+    这一项补上那个缺口：拿**资产自己的**边长比例和真值节点的比。口径和
+    `shape_scale_agreement` 一致（排序后除以最长边、平均绝对差），所以两个数可以并排读
+    ——一个说「我们把这个物体画成了多大多扁」，一个说「我们挑的那个网格本身多扁」。
+    """
+    geom = (pred_node or {}).get("geom") or {}
+    ref = geom.get("ref")
+    if geom.get("kind") not in ("asset", "generated") or not ref:
+        return None
+    ratios = _asset_shape_table().get(str(ref))
+    gt_ext = node_extent(gt_node)
+    if ratios is None or gt_ext is None or gt_ext.max() <= 1e-9:
+        return None
+    gt_ratio = np.sort(np.asarray(gt_ext, float))[::-1] / gt_ext.max()
+    return float(np.abs(np.asarray(ratios, float) - gt_ratio).mean())
+
+def shape_scale_agreement(gt_node: dict, pred_node: dict) -> tuple[float, float] | None:
+    """(形状差, 尺度比)。形状差 0 是完美，尺度比 1 是完美。
+
+    形状差 = 把两边的边长各自归一化成「占最长边的比例」再算平均绝对差。这样它
+    **对整体缩放不敏感**，只问长宽高的比例对不对——一个细长的东西被重建成细长的，
+    哪怕大小差一倍，形状这一项也是对的。尺度单独报。
+
+    为什么不比类名：这个合成数据集的类名和形状是**脱钩的**（生成器从词表挑名字、
+    再独立配一个基本体，`girder` 是个球、`coin` 是个盒子、`crate` 用过三种形状）。
+    所以类名准确率在这里量的是一个原理上测不出来的量，而形状和尺寸是有视觉意义的。
+    """
+    a, b = node_extent(gt_node), node_extent(pred_node)
+    if a is None or b is None:
+        return None
+    ga = np.sort(a)[::-1] / a.max()
+    pa = np.sort(b)[::-1] / b.max()
+    return float(np.abs(ga - pa).mean()), float(b.max() / a.max())
+
+
 def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     """Interpolate within measured support only; never clamp outside endpoints."""
     if not len(times) or times.min() < track["t"][0] or times.max() > track["t"][-1]:
@@ -72,8 +210,101 @@ def _sample(track: dict, times: np.ndarray) -> np.ndarray:
     return np.column_stack([np.interp(times, track["t"], track["pos"][:, k]) for k in range(3)])
 
 
-def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """估计把预测对齐到真值的水平平移加绕 y 轴旋转，返回 (R, t)。
+def _rms_radius(pts: np.ndarray) -> float:
+    return float(np.sqrt(((pts - pts.mean(0)) ** 2).sum(1).mean())) if len(pts) >= 2 else 0.0
+
+
+def gauge_scale_hint(gt_pts: np.ndarray, pred_pts: np.ndarray) -> float:
+    """不靠任何对应关系估一个整体尺度：两边点集相对各自质心的均方半径之比。
+
+    粗对齐那一步还没有任何配对，而尺度差上三倍的时候，按绝对米制阈值投票一对都投
+    不出来——阈值不是尺度不变的。均方半径只用到点集自身的铺开程度，不需要知道谁对
+    应谁。
+
+    **但拿物体质心来算是不行的，实测过。** 这个链路的过检很重（112 个预测物体里
+    只有 21.4% 配上真值），预测那一边的点集大部分是噪声，它的铺开程度跟真实场景
+    没什么关系。用它去估尺度，解出来的倍数是 1.00、2.03、2.27、8.26、20.15 这种
+    数，比不估还差：配对 24 掉到 19，召回 0.464 掉到 0.226。
+    所以这个函数只是兜底，优先用 `camera_scale_hint`。
+    """
+    g, q = _rms_radius(gt_pts), _rms_radius(pred_pts)
+    return g / q if q > 1e-9 and g > 0 else 1.0
+
+
+def camera_scale_hint(gt_states: list[dict], pred_states: list[dict],
+                      gt_pts: np.ndarray | None = None,
+                      pred_pts: np.ndarray | None = None) -> tuple[float, dict]:
+    """用**相机轨迹**估尺度，返回 (倍数, 诊断)。
+
+    相机是这条链路上唯一天然一一对应的东西：真值和预测各只有一条相机轨迹，不存在
+    检错、漏检、配错的问题。而物体那一边七成八是噪声，用它估尺度只会把噪声放大
+    （见 `gauge_scale_hint` 的注释）。
+
+    用均方半径之比而不是路径长度：路径长度对逐帧抖动敏感，重建出来的相机轨迹抖动
+    比真值大得多，会把尺度系统性地估大。
+
+    **相机不怎么动的时候这个估计不成立**，必须退回去。判据是无量纲的：相机轨迹的
+    均方半径要和物体点云的铺开程度可比，低于十分之一就认为相机基本是钉住的，这时
+    返回 1.0 并在诊断里说明——宁可不估，也不要用一个噪声主导的倍数去缩放整个场景。
+    """
+    def cam(states):
+        times, positions = [], []
+        for s in states:
+            c = (s.get("camera") or {}).get("pos") if isinstance(s, dict) else None
+            t = s.get("t") if isinstance(s, dict) else None
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(t):
+                continue
+            try:
+                pos = np.asarray(c, float)
+            except (TypeError, ValueError):
+                continue
+            if pos.shape == (3,) and np.isfinite(pos).all():
+                times.append(float(t)); positions.append(pos)
+        return {"t": np.asarray(times), "pos": np.asarray(positions).reshape(-1, 3)}
+
+    gt_cam, pred_cam = cam(gt_states), cam(pred_states)
+    info = {"gt_frames": len(gt_cam["t"]), "pred_frames": len(pred_cam["t"])}
+    if len(gt_cam["t"]) < 2 or len(pred_cam["t"]) < 2:
+        return 1.0, {**info, "used": "none", "why": "相机轨迹点不够"}
+    if any(np.any(np.diff(c["t"]) <= 0) for c in (gt_cam, pred_cam)):
+        return 1.0, {**info, "used": "none", "why": "相机时间不严格递增"}
+    lo, hi = max(gt_cam["t"][0], pred_cam["t"][0]), min(gt_cam["t"][-1], pred_cam["t"][-1])
+    if hi <= lo:
+        return 1.0, {**info, "used": "none", "why": "相机没有共同时间跨度"}
+    # Compare the same times, not independently sampled path radii. The caller
+    # has already removed every source frame after the observation cut, so even
+    # interpolation cannot reach into the holdout segment. Never extrapolate.
+    times = np.linspace(lo, hi, 120)
+    g_cam, p_cam = _sample(gt_cam, times), _sample(pred_cam, times)
+    info.update({"window_s": [float(lo), float(hi)], "samples": len(times)})
+    g_r, p_r = _rms_radius(g_cam), _rms_radius(p_cam)
+    info.update({"gt_radius": round(g_r, 4), "pred_radius": round(p_r, 4)})
+    for pts, radius, side in ((gt_pts, g_r, "gt"), (pred_pts, p_r, "pred")):
+        spread = _rms_radius(pts) if pts is not None and len(pts) else 0.0
+        if spread > 0 and radius < 0.1 * spread:
+            return 1.0, {**info, "used": "none",
+                         "why": f"{side} 相机基本没动（轨迹半径 {radius:.3f} 不到场景铺开 {spread:.3f} 的十分之一）"}
+    if p_r <= 1e-9 or g_r <= 0:
+        return 1.0, {**info, "used": "none", "why": "轨迹半径退化"}
+    return g_r / p_r, {**info, "used": "camera", "scale": round(g_r / p_r, 4)}
+
+
+def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray,
+                with_scale: bool = False) -> tuple[np.ndarray, np.ndarray, float]:
+    """估计把预测对齐到真值的水平平移加绕 y 轴旋转，返回 (R, t, s)。
+
+    `with_scale=False`（默认）时 s 恒为 1.0，行为和以前完全一样。开了之后多估一个
+    各向同性的整体尺度，也就是从刚性变换换成相似变换。
+
+    **为什么要有这个开关。** 尺度本来不算规范自由度：它由 `assumed_camera_height_m`
+    定死，所以是可观测的、该被罚的。但实测发现这个假设是个常数而取景不是——ab015
+    这一批真值相机高度从 0.62 米到 3.89 米，41.7% 的片段在两米以上，而假设恒为
+    1.2 米，于是俯拍那批被压小三到八倍（#68）。配对容差是 0.45 米的绝对值，在这个
+    尺度下它们根本配不上，于是「尺度错了」被记成了「检测不出来」，其它所有指标都
+    跟着不可解释。
+    
+    开了尺度之后报出来的数**不是**更好的成绩，是另一个问题的答案：「把尺度这一条
+    刨掉之后，还剩多少误差」。两者要并排看，刚性那一列仍然是主口径。
 
     单目视频确定不了世界原点的水平位置，也确定不了整体朝向——那是规范自由度，
     任何一个选择都同样合法。感知那边 align_world 只把地面压到 y=0，
@@ -88,7 +319,8 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
     尺度也不对齐：那由假设的相机高度定死，算可观测。
     """
     if len(gt_pts) < 2:
-        return np.eye(3), (gt_pts.mean(0) - pred_pts.mean(0)) * [1, 0, 1] if len(gt_pts) else np.zeros(3)
+        t = (gt_pts.mean(0) - pred_pts.mean(0)) * [1, 0, 1] if len(gt_pts) else np.zeros(3)
+        return np.eye(3), t, 1.0
     gc, pc = gt_pts.mean(0), pred_pts.mean(0)
     g, q = gt_pts - gc, pred_pts - pc
     # 只在水平面上求最佳偏航，用 Kabsch 的二维特例
@@ -97,9 +329,20 @@ def align_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray) -> tuple[np.ndarray, n
     d = np.sign(np.linalg.det(Vt.T @ U.T))
     R2 = Vt.T @ np.diag([1.0, d]) @ U.T
     R = np.eye(3); R[0, 0], R[0, 2], R[2, 0], R[2, 2] = R2[0, 0], R2[0, 1], R2[1, 0], R2[1, 1]
-    t = gc - R @ pc
-    t[1] = 0.0                      # 高度不动，它是可观测的
-    return R, t
+    # 尺度和旋转一起解（Umeyama）：先把旋转定下来，再取「对齐后的内积」比「预测的
+    # 平方和」。注意高度也参与——尺度是各向同性的，只在水平面上估会和 y 方向打架。
+    s = 1.0
+    if with_scale:
+        denom = float((q ** 2).sum())
+        if denom > 1e-12:
+            s = float((g * (q @ R.T)).sum() / denom)
+        if not np.isfinite(s) or s <= 1e-6:
+            s = 1.0
+    t = gc - s * (R @ pc)
+    # 高度不参与对齐，开不开尺度都一样：两边的地面都已经在 y=0，预测整体乘上 s
+    # 之后地面还在 y=0，不需要再平移。放开 t[1] 会把真实的高度误差吸收掉。
+    t[1] = 0.0
+    return R, t, s
 
 
 _AXIS_YAWS_DEG = (0.0, 90.0, 180.0, 270.0)
@@ -110,7 +353,9 @@ def _rot_y(deg: float) -> np.ndarray:
     return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
 
 
-def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) -> tuple[np.ndarray, np.ndarray, dict]:
+def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float,
+                 with_scale: bool = False,
+                 scale_hint: float | None = None) -> tuple[np.ndarray, np.ndarray, float, dict]:
     """粗对齐：枚举四个轴向偏航，再拿单对物体的隐含平移去投票，取对上最多的那个。
 
     拿两边质心之差做粗对齐有两个毛病。一是多一个假物体、或者少检出一个真物体，
@@ -125,7 +370,16 @@ def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) ->
     """
     best_R, best_t, best_in, best_cost = np.eye(3), np.zeros(3), -1, np.inf
     if not len(gt_pts) or not len(pred_pts):
-        return best_R, best_t, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
+        return best_R, best_t, 1.0, {"yaw_deg": 0.0, "inliers": 0, "candidates": 0}
+    # 阈值不是尺度不变的：尺度差上三倍，按绝对米制投票一对都投不出来，后面估偏航
+    # 那步根本启动不了。所以开了尺度之后先用不需要对应关系的均方半径之比垫一脚。
+    if not with_scale:
+        s0 = 1.0
+    elif scale_hint is not None and np.isfinite(scale_hint) and scale_hint > 0:
+        s0 = float(scale_hint)
+    else:
+        s0 = gauge_scale_hint(gt_pts, pred_pts)
+    pred_pts = pred_pts * s0
     for yaw in _AXIS_YAWS_DEG:
         R = _rot_y(yaw)
         rotated = pred_pts @ R.T
@@ -139,8 +393,9 @@ def coarse_gauge(gt_pts: np.ndarray, pred_pts: np.ndarray, max_dist_m: float) ->
                 cost = float(nearest[inside].sum()) if inliers else np.inf
                 if (inliers, -cost) > (best_in, -best_cost):
                     best_R, best_t, best_in, best_cost = R, t.copy(), inliers, cost
-    return best_R, best_t, {"yaw_deg": round(float(np.degrees(np.arctan2(best_R[0, 2], best_R[0, 0]))), 2),
-                            "inliers": best_in, "candidates": len(_AXIS_YAWS_DEG) * len(gt_pts) * len(pred_pts)}
+    return best_R, best_t, s0, {"yaw_deg": round(float(np.degrees(np.arctan2(best_R[0, 2], best_R[0, 0]))), 2),
+                                "inliers": best_in, "scale_hint": round(float(s0), 4),
+                                "candidates": len(_AXIS_YAWS_DEG) * len(gt_pts) * len(pred_pts)}
 
 
 def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray, max_dist_m: float) -> list[tuple]:
@@ -176,7 +431,7 @@ def match_objects(gt: dict[str, dict], pred: dict[str, dict], times: np.ndarray,
 
 def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_states: list[dict],
              holdout_frac: float = 0.2, max_dist_m: float = 3.0, n_samples: int = 120,
-             match_on: str = "mean",
+             match_on: str = "mean", gauge: str = "rigid",
              min_time_coverage: float | None = None) -> dict:
     """Keep existing metric keys, using a GT window and frozen prefix identities."""
     if min_time_coverage is None:
@@ -184,18 +439,26 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     if (isinstance(min_time_coverage, bool) or not isinstance(min_time_coverage, (int, float))
             or not np.isfinite(min_time_coverage) or not 0 <= min_time_coverage <= 1):
         raise ValueError("min_time_coverage must be finite and within [0, 1]")
+    if gauge not in ("rigid", "similarity"):
+        raise ValueError('gauge must be "rigid" or "similarity"')
     if match_on not in ("mean", "start"):
         raise ValueError("match_on must be 'mean' or 'start'")
     if not 0 < holdout_frac < 1 or n_samples < 2 or not np.isfinite(max_dist_m) or max_dist_m < 0:
         raise ValueError("invalid metric configuration")
     try:
         gt_tr, pred_tr = tracks(gt_states), tracks(pred_states)
+        # 静态结构单独再取一份。**这批真值里 static 占 69 个、object 占 59 个**
+        # ——超过一半的几何体从来没有被评测过，一个正确落在结构件上的检出至今被
+        # 记成假阳性。见下面的 "scene" 一节。
+        gt_static = tracks(gt_states, kinds=("static",))
+        pred_static = tracks(pred_states, kinds=("static",))
     except (ValueError, TypeError, KeyError) as exc:
         return {"error": str(exc), "status": "invalid_states"}
     if not gt_tr:
         return {"error": "真值里没有可比的物体"}
 
     gt_motion, pred_motion = motion_types(gt_program), motion_types(pred_program)
+    gt_class, pred_class = class_names(gt_program), class_names(pred_program)
     for side, source, labels in (("gt", gt_tr, gt_motion), ("pred", pred_tr, pred_motion)):
         unknown = sorted({track["object_id"] for track in source.values()} - labels.keys())
         if unknown:
@@ -226,15 +489,23 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     # 规范自由度，不先对齐掉，整体差着 8 米时一对都配不上；而配对已经冻在观察段，
     # 对齐就不能再留在 window() 里按窗口各算各的——那样留出段会重新拟合，
     # 把末段的共同偏移当成规范差异吸收掉。
-    R0, t0v, coarse = np.eye(3), np.zeros(3), {"inliers": 0, "candidates": 0, "yaw_deg": 0.0}
+    R0, t0v, s0 = np.eye(3), np.zeros(3), 1.0
+    coarse = {"inliers": 0, "candidates": 0, "yaw_deg": 0.0}
+    with_scale = gauge == "similarity"
     if observed_pred:
         def centroid(track):
             ts = _supported(obs_times, track)
             return _sample(track, ts).mean(0) if len(ts) else track["pos"].mean(0)
         gt_c = np.vstack([centroid(d) for d in observed_gt.values()])
         pred_c = np.vstack([centroid(d) for d in observed_pred.values()])
-        R0, t0v, coarse = coarse_gauge(gt_c, pred_c, max_dist_m)
-        rough = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in observed_pred.items()}
+        hint, hint_info = ((None, {"used": "off"}) if not with_scale else
+                           camera_scale_hint([s for s in gt_states if t_start <= s["t"] <= cut],
+                                             [s for s in pred_states if t_start <= s["t"] <= cut],
+                                             gt_c, pred_c))
+        R0, t0v, s0, coarse = coarse_gauge(gt_c, pred_c, max_dist_m, with_scale,
+                                           hint if hint and hint != 1.0 else None)
+        coarse["scale_source"] = hint_info
+        rough = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in observed_pred.items()}
         gp, pp = [], []
         for g, q, _ in match_objects(observed_gt, rough, obs_times, max_dist_m):
             if q is None: continue
@@ -242,8 +513,13 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
             if len(ts):
                 gp.append(_sample(observed_gt[g], ts)); pp.append(_sample(observed_pred[q], ts))
         if gp:
-            R0, t0v = align_gauge(np.vstack(gp), np.vstack(pp))
-    aligned = {k: {**d, "pos": d["pos"] @ R0.T + t0v} for k, d in pred_tr.items()}
+            # 精对齐**不再自由解尺度**：配对集是在 s0 这个尺度下筛出来的（容差 0.45 米
+            # 是绝对量），在它上面再解一次尺度就是用结论挑样本再在样本上算结论。
+            # s0 由相机轨迹定下来之后就冻住，这和平移、偏航冻在观察段是同一个道理。
+            # 注意要喂**已经乘过 s0 的**预测点：最终应用的是 s0*(p@R.T)+t，
+            # 在未缩放的点上解 R、t 会和它差一个 s0。
+            R0, t0v, _s = align_gauge(np.vstack(gp), s0 * np.vstack(pp), with_scale=False)
+    aligned = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in pred_tr.items()}
 
     # 配对判据。默认 "mean"（观察窗内逐时刻距离的平均）是历史口径，但它**把被评测的量
     # 写进了配对条件**：一个真值里走了几米的物体，如果我们把它的运动写成 static，
@@ -289,6 +565,98 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                 "only_by_start_position 里的是「位置对上了但运动没对上」的那些。",
     }
 
+    # 场景几何：object + static 一起算。
+    #
+    # 为什么要有这一档。`objects` 那一档的分母只有真值 objects，而这批数据的真值里
+    # static 有 69 个、object 只有 59 个——**54% 的几何体从来没进过任何指标**。
+    # 后果是一个正确落在结构件上的检出被记成假阳性：实测 112 个预测物体里有 22.3%
+    # 落在真值 static 上（验过是碎片不是误分类），它们在 `objects` 的精确率里全部
+    # 算错（见 #56）。
+    #
+    # 规范变换**沿用 objects 那一档拟合出来的**，不重新拟合：重新拟合会让两档的
+    # 数不可比，而且 static 点多，会把对齐往结构件上拉，`objects` 的历史数就变了。
+    # 这一档是纯增量，不动任何既有的数。
+    aligned_static = {k: {**d, "pos": s0 * (d["pos"] @ R0.T) + t0v} for k, d in pred_static.items()}
+    scene_gt = {**gt_tr, **{f"static::{k}": v for k, v in gt_static.items()}}
+    scene_pred = {**aligned, **{f"static::{k}": v for k, v in aligned_static.items()}}
+    try:
+        scene_pairs = match_objects(prefix(scene_gt), prefix(scene_pred), pair_times, max_dist_m)
+    except ValueError:
+        try:
+            scene_pairs = match_objects(prefix(scene_gt), prefix(scene_pred), obs_times, max_dist_m)
+        except ValueError:
+            scene_pairs = []
+    scene_matched = [(g, q) for g, q, _ in scene_pairs if q is not None]
+    n_scene_gt, n_scene_pred = len(scene_gt), len(scene_pred)
+
+    # 结构件 / 可动物体 这个二分判对了没有。
+    #
+    # 位置配上了之后才谈得上「归错列表」，所以只在配上的对子里统计。整批真值里
+    # static 占 54%，而我们产出的节点里 static 只占 18%——该进 static 的东西大部分
+    # 被写进了 objects。这个矩阵是去改 direct.py 那条结构件判据之前要先拿到的数。
+    def kind_of(key: str) -> str:
+        return "static" if key.startswith("static::") else "object"
+
+    kind_confusion: dict[str, int] = {}
+    for g, q in scene_matched:
+        key = f"{kind_of(g)}->{kind_of(q)}"
+        kind_confusion[key] = kind_confusion.get(key, 0) + 1
+
+    def same_class(gt_id: str, pred_id: str) -> bool:
+        a, b = gt_class.get(gt_id, ""), pred_class.get(pred_id, "")
+        return bool(a) and bool(b) and (a == b or a in b or b in a)
+
+    class_correct = sum(1 for g, q, _ in matched
+                        if same_class(gt_tr[g]["object_id"], pred_tr[q]["object_id"]))
+
+    gt_nodes = {o["id"]: o for o in gt_program.get("objects", [])}
+    pred_nodes = {o["id"]: o for o in pred_program.get("objects", [])}
+    shape_errs, scale_ratios = [], []
+    geometry_per_object = {}
+    # 形状**种类**判对了没有。这和 shape_scale_agreement 是两件事：后者比的是三条边
+    # 的比例，一个该是球、却渲成同样尺寸盒子的物体在它上面是满分。
+    # 实测基线（2026-10-19，两批数据）：
+    #
+    #   ab015    判对 6 / 20 = 0.300   box->mesh 7、box->box 6、sphere->mesh 4、
+    #                                  cylinder->mesh 1、cone->mesh 1、sphere->box 1
+    #   hold015  判对 2 / 11 = 0.182   cylinder->box 3、box->box 2、cone->mesh 2、
+    #                                  cylinder->mesh 2、box->mesh 2
+    #
+    # **这是整张表里最差的一个数**，而且构成很说明问题：真值**全是基本体**
+    # （objects 28 box / 16 sphere / 9 cone / 6 cylinder，static 69 box），而我们
+    # 检索成功的那些渲成网格（mesh）——在这个基准上**网格永远是错的**。
+    #
+    # 也就是说：**资产检索成功反而让形状种类变差。** 两批上「一律用盒子」能拿到
+    # 0.650 和 0.364，都比现状高一倍以上。这不是说该改成一律用盒子——那是在往一个
+    # 只有基本体的基准上过拟合——而是说**这个基准没有能力奖励资产检索**，
+    # 这件事得在数据集那一层解决（见 #5、#9）。见 #56。
+    shape_kind_hits = shape_kind_total = 0
+    asset_shape_errs: list[float] = []
+    shape_kind_confusion: dict[str, int] = {}
+    for g, q, _ in matched:
+        gt_node = gt_nodes[gt_tr[g]["object_id"]]
+        pred_node = pred_nodes[pred_tr[q]["object_id"]]
+        pair = shape_scale_agreement(gt_node, pred_node)
+        geometry_per_object[g] = {"pred_id": q,
+                                  "shape_error": pair[0] if pair else None,
+                                  "scale_ratio": pair[1] if pair else None,
+                                  "status": "measured" if pair else "missing_geometry"}
+        if pair:
+            shape_errs.append(pair[0]); scale_ratios.append(pair[1])
+        # 选中的那个**网格本身**和真值差多少。现有指标全看不见资产（见
+        # asset_shape_error 的注释），所以换检索在表上永远是零变化。
+        ase = asset_shape_error(gt_node, pred_node)
+        if ase is not None:
+            asset_shape_errs.append(ase)
+            geometry_per_object[g]["asset_shape_error"] = round(ase, 4)
+        want = effective_shape(gt_node)
+        got = effective_shape(pred_node)
+        if want and got:
+            shape_kind_total += 1
+            shape_kind_hits += want == got
+            key = f"{want}->{got}"
+            shape_kind_confusion[key] = shape_kind_confusion.get(key, 0) + 1
+
     def window(t0: float, t1: float) -> dict:
         distances, unavailable, coverage, evaluated_windows = {}, {}, {}, {}
         for g, p, _ in pairs:
@@ -333,6 +701,8 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
         return {
             "gauge_alignment": {"yaw_deg": round(float(np.degrees(np.arctan2(R0[0, 2], R0[0, 0]))), 2),
                                 "translation_xz_m": [round(float(t0v[0]), 3), round(float(t0v[2]), 3)],
+                                "mode": gauge, "scale": round(float(s0), 4),
+                                "scale_source": coarse.get("scale_source", {"used": "off"}),
                                 "fitted_on_s": [round(t_start, 3), round(cut, 3)], "coarse": coarse,
                                 "note": "水平平移和偏航是视频观测不到的规范自由度，算指标前先对齐掉，"
                                         "否则是在罚一个确定不了的量。变换与身份对应都在观察段定死后冻住，"
@@ -340,9 +710,62 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                                         "只做刚性对齐，相对结构错了仍会暴露。"},
             "trajectory": traj,
             "motion_type": {"accuracy": acc, "n": len(hits), "confusion": confusion},
+            "scene": {"gt": n_scene_gt, "pred": n_scene_pred, "matched": len(scene_matched),
+                      "recall": len(scene_matched) / n_scene_gt if n_scene_gt else None,
+                      "precision": len(scene_matched) / n_scene_pred if n_scene_pred else None,
+                      "gt_static": len(gt_static), "pred_static": len(pred_static),
+                      "kind_confusion": kind_confusion,
+                      # 配上的对子本身也留下来：要查「我们凭什么该把这个节点判成
+                      # 结构件」，得能把预测节点的几何属性和它配上的真值类别连起来。
+                      # 键是真值节点，值是预测节点，static 的两边都带 "static::" 前缀。
+                      "pairs": {g: q for g, q, _ in scene_pairs},
+                      "kind_note": "只在位置配上的对子里统计「结构件还是可动物体」判对了没有。"
+                                   "键是「真值->预测」。位置都没配上就谈不上归错列表。",
+                      "note": "object + static 一起算。objects 那一档的分母只有真值 objects，"
+                              "而这批真值里 static 比 object 还多（69 对 59），超过一半的几何体"
+                              "从来没进过指标——一个正确落在结构件上的检出被记成假阳性。"
+                              "规范变换沿用 objects 那一档的，不重新拟合，所以这一档是纯增量。"},
+            "shape_kind": {"n": shape_kind_total, "correct": shape_kind_hits,
+                           "accuracy": (shape_kind_hits / shape_kind_total
+                                        if shape_kind_total else None),
+                           "confusion": shape_kind_confusion,
+                           "note": "最终渲出来的基本体种类判对了没有。和 shape_ok 不是一回事"
+                                   "——那个比的是三条边的比例，该是球却渲成同尺寸盒子在它上面"
+                                   "是满分。节点写 kind:\"asset\" 时，没有 ref 的走内核按类名"
+                                   "的兜底，这里复刻了那段映射（见 effective_shape）。"},
             "objects": {"gt": n_gt, "pred": n_pred, "matched": len(matched),
                         "recall": len(matched) / n_gt if n_gt else None,
                         "precision": len(matched) / n_pred if n_pred else None,
+                        # 配对只看位置，**不看类名**——一个叫 "cardboard box" 的东西
+                        # 摆在真值 marble 的位置上，在召回和精确率里算命中。所以
+                        # 「召回 0.500」的意思是「一半的真值物体位置上有东西」，
+                        # 不是「一半的物体被正确重建了」。
+                        #
+                        # 这不是小事：类名决定检索哪个资产，资产决定场景长什么样。
+                        # 实测即使把场景里确切存在的类名直接喂给检测器，配对上的 24 个
+                        # 里也只有 3 个（12.5%）贴对了标签；换成一组完全不相干的通用
+                        # 词表，配对数和精确率几乎不变（30 个 / 0.218 对 24 个 / 0.226），
+                        # 而类名准确率是 0（见 #56）。
+                        "class_correct": class_correct,
+                        "class_accuracy": (class_correct / len(matched)) if matched else None,
+                        # 形状和尺度才是「复原得像不像」该报的数。类名在当前这个
+                        # 合成数据集上和形状脱钩（生成器从词表挑名字、再独立配一个
+                        # 基本体），所以 class_accuracy 在这里恒等于噪声，别拿它
+                        # 当成绩也别拿它调参——换成类名有语义的数据集时它才有意义。
+                        "shape_error": (float(np.median(shape_errs)) if shape_errs else None),
+                        # 选中的资产网格本身的形状误差。现有指标全看不见资产，
+                        # 所以这一项是唯一能反映「检索挑得对不对」的数。
+                        "asset_shape_error": (float(np.median(asset_shape_errs))
+                                              if asset_shape_errs else None),
+                        "asset_shape_n": len(asset_shape_errs),
+                        "geometry_n": len(shape_errs),
+                        "geometry_per_object": geometry_per_object,
+                        "shape_ok_frac": (float(np.mean(np.asarray(shape_errs) <= 0.2))
+                                          if shape_errs else None),
+                        "scale_ratio": (float(np.median(scale_ratios)) if scale_ratios else None),
+                        "scale_ok_frac": (float(np.mean((np.asarray(scale_ratios) >= 0.8)
+                                                        & (np.asarray(scale_ratios) <= 1.25)))
+                                          if scale_ratios else None),
                         "match_criterion": match_criterion},
             "window_s": [round(t0, 3), round(t1, 3)],
         }

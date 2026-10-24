@@ -137,9 +137,43 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         area_cap = float((cfg or {}).get("synthesis", {}).get("max_object_area_frac", 0.35))
         too_large = float(o.get("mask_area_frac") or 0.0) >= area_cap
         is_ground = is_ground_class(cls)
-        if too_large or is_ground or (o["motion_guess"].get("type") == "static" and is_static_class(cls, cfg)):
+        # 类名像结构件（墙、地板、轨道、传送带）的，只要**没有证据表明它会动**，就按
+        # 结构件处理。
+        #
+        # 原来这里要求的是运动分类**肯定地说**它静止（`type == "static"`），那是个
+        # 坏掉的默认：运动分类 85% 的时候返回 `unknown`，而这一轮量清楚了它的贡献
+        # 精确为零——七个配置的准确率等于「恒答 static」常数基线，161 个配对物体里
+        # 一次都没判对过任何一个会动的（#7）。实测后果：类名含 rail/block 的 61 个
+        # 检测里只有 4 个满足这个与条件，其余全默认进了 objects，在评测里变成假阳性
+        # ——哪怕检测本身完全正确、位置也摆对了。真值里 rail 有 45 个，全在 static。
+        #
+        # 换成 `moves`：它绕开七分类的两道闸单独算「会不会动」，真值感知上查全 0.925，
+        # 是我们唯一验证过有信息的运动信号。语义也更对——「没有信息」不该被当成
+        # 「它会动」，对一个名字叫 rail/wall/floor 的东西尤其不该。
+        guess = o["motion_guess"]
+        # Legacy Evidence has no `moves` field. A known motion type is positive
+        # evidence too; even a conflicting binary flag must not erase it.
+        has_motion = guess.get("moves") is True or guess.get("type") in {
+            "prismatic", "trajectory", "revolute", "spin", "periodic_translate", "periodic_rotate"}
+        looks_structural = is_static_class(cls, cfg) and not has_motion
+        if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
-            cs = np.median(np.asarray([b["center"] for b in o["obb"]]), 0); sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
+            #
+            # **位置取首帧，不取逐帧中位。** 逐帧包围盒中心不是在真值附近抖，是在
+            # 整段视频里**单调漂移**——拿真值结构件（位置恒定，靶子不动）量，逐帧
+            # 误差中位是 0.366 / 0.419 / 0.511 / 0.578 米，一路走高。取中位等于把
+            # 估计往漂移里拖。四种估计量在真值结构件上的对照（15 个）：
+            #
+            #   首帧         离真值中位 0.277 m，容差 0.45 内 0.867
+            #   逐帧中位     离真值中位 0.458 m，容差 0.45 内 0.467
+            #   best_frame   离真值中位 0.427 m，容差 0.45 内 0.667
+            #   最高 conf 帧 离真值中位 0.401 m，容差 0.45 内 0.600
+            #
+            # 尺寸仍然取逐帧中位：那是另一个量，而且之前量过中位更好（#64）。
+            centers = np.asarray([b["center"] for b in o["obb"]], float)
+            cs = (centers[0].copy() if (cfg or {}).get("synthesis", {}).get("structure_pos_first_frame", True)
+                  else np.median(centers, 0))
+            sz = np.median(np.asarray([b["size"] for b in o["obb"]]), 0)
             sz = [float(max(v, 0.05)) for v in sz]
             if any(k in cls for k in ("floor", "ground", "lawn", "grass", "carpet", "mat", "road")): sz[1] = min(sz[1], 0.3); cs[1] = -sz[1] / 2 + 0.0  # thin slab flush with the ground plane
             static_node = {"id": slug(o["id"]), "class": cls[:40], "geom": {"kind": "primitive", "shape": "box", "extent": sz}, "pose": {"pos": [float(v) for v in cs], "quat": [float(v) for v in o["obb"][0]["quat"]]},
