@@ -622,9 +622,24 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 这条曲线是任何未来几何后端的**指标**，比「再试一个后端」有用。
             # **轮廓判据**：绕开已坐实的根因（深度误差沿视线，轮廓是二维的）。
             for _c in (32, 128):
-                _sil = _silhouette_pick_rate(per_frame, frames, _gt_ref, _c, n_views=7)
+                _st: dict = {}
+                _sil = _silhouette_pick_rate(per_frame, frames, _gt_ref, _c,
+                                             n_views=7, stats=_st)
                 if _sil is not None:
                     out.setdefault(f"{kind}/silpick_cands{_c + 1}", []).append(_sil)
+                    # 自检：实际打分的候选数该等于 _c+1；margin 是第一名和第二名的
+                    # 相对差，太大也可疑（说明真值那条有别人没有的东西）。
+                    out.setdefault(f"{kind}/sil_n_scored{_c + 1}",
+                                   []).append(float(_st.get("n_scored", 0)))
+                    out.setdefault(f"{kind}/sil_margin{_c + 1}",
+                                   []).append(float(_st.get("margin", 0.0)))
+            # **错配零假设**：拿这个物体的掩码去配**另一个**物体的候选集。
+            # 挑对率该掉到随机；掉不下去就说明判据里有泄漏。
+            _other = _gt_other_ref(oid)
+            if _other:
+                _bad = _silhouette_pick_rate(per_frame, frames, _other, 32, n_views=7)
+                if _bad is not None:
+                    out.setdefault(f"{kind}/silpick_mismatched", []).append(_bad)
             # 把压扁补偿掉：沿最短主轴拉 1/0.526≈1.9 倍。1.0 是对照。
             for _uf in (1.0, 1.5, 1.9, 2.5):
                 _u = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
@@ -1727,12 +1742,15 @@ def _asset_silhouettes(asset_id: str) -> list:
 
 
 def _silhouette_pick_rate(per_frame: dict, frames: list, gt_ref: str,
-                          n_distract: int, n_views: int = 7) -> float | None:
+                          n_distract: int, n_views: int = 7,
+                          stats: dict | None = None) -> float | None:
     """**用轮廓挑资产**：观测掩码的 Hu 矩对候选资产缩略图轮廓的 Hu 矩。
 
     协议和残差那条对齐：同样的形状最接近干扰项、同样的候选数和视角数，
     唯一的变量是判据——一个比三维表面（被深度误差毁掉），一个比二维轮廓（不碰深度）。
     """
+    if stats is None:
+        stats = {}
     if not gt_ref or not per_frame:
         return None
     picked = _hard_distractors(gt_ref, n_distract)
@@ -1748,7 +1766,7 @@ def _silhouette_pick_rate(per_frame: dict, frames: list, gt_ref: str,
            if d is not None]
     if not obs:
         return None
-    best_id, best_d = None, float("inf")
+    scored = []
     for aid in [gt_ref] + picked:
         sils = _asset_silhouettes(aid)
         if not sils:
@@ -1756,12 +1774,29 @@ def _silhouette_pick_rate(per_frame: dict, frames: list, gt_ref: str,
         # 每一帧对该资产的 4 个视角取最近的那个，再对帧取中位——和残差那条
         # 同样的聚合方式（中位不取均值，单帧掩码漏一块不会拖垮）。
         per = [min(float(np.abs(o - t).sum()) for t in sils) for o in obs]
-        d = float(np.median(per))
-        if d < best_d:
-            best_d, best_id = d, aid
-    if best_id is None:
+        scored.append((float(np.median(per)), aid))
+    # **自检。** 第一版给出 74/74 全对，而残差在同一批候选上（而且是干净几何）
+    # 才 0.297——这种整齐的数先查是不是某道门把候选全挡了。
+    # 实际参与打分的候选数该是 n_distract+1；少于这个说明有候选被静默跳过。
+    if len(scored) < 2:
         return None
-    return 1.0 if best_id == gt_ref else 0.0
+    scored.sort()
+    stats["n_scored"] = len(scored)
+    stats["margin"] = (scored[1][0] - scored[0][0]) / max(scored[0][0], 1e-9)
+    return 1.0 if scored[0][1] == gt_ref else 0.0
+
+
+def _gt_other_ref(oid: str) -> str:
+    """同一片段里**另一个**物体的真值资产 id，用来做错配零假设。
+
+    拿 A 的掩码去配「A 的真值 + 它的 32 个形状最近邻」这个候选集，挑对率该掉到
+    随机；掉不下去就说明判据里有泄漏，而不是真的在比形状。
+    """
+    refs = _gt_asset_refs()
+    others = sorted(v for k, v in refs.items() if k != oid)
+    if not others:
+        return ""
+    return others[hash(oid) % len(others)]
 
 
 def _shape_distance(a_id: str, b_id: str) -> float | None:
@@ -2312,13 +2347,15 @@ def main() -> int:
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
                 or "/respick_cands" in key or "/d2pick_cands" in key
                 or "/respick33" in key or "/respick_noise" in key
-                or "/respick_unflat" in key or "/silpick_cands" in key):
+                or "/respick_unflat" in key or "/silpick_cands" in key
+                or key.endswith("/silpick_mismatched")):
             n_plus = (33 if "_hard_33" in key
                       else 33 if (key.endswith("/respick33") or "/respick_noise" in key
                                   or "/respick_unflat" in key)
                       else int(key.rsplit("cands", 1)[-1])
                       if ("respick_cands" in key or "d2pick_cands" in key
                           or "silpick_cands" in key)
+                      else 33 if key.endswith("/silpick_mismatched")
                       else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
