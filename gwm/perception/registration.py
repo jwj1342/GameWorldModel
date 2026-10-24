@@ -202,11 +202,15 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
         # 提前返回的路上也要留下**为什么**。第一版这里直接 return free，于是上层拿到
         # 的 rotation_gain 是 None，看起来像「闸没生效」，实际是「闸根本没运行」。
         # 两件事要做的处理完全不同，不能靠猜。
-        out = dict(free)
-        out["rotation_accepted"] = None
-        out["rotation_gate_skipped"] = (
-            "free_rmse_none" if r_free is None else
-            "fixed_rmse_none" if r_fixed is None else "fixed_rmse_degenerate")
+        why = ("free_rmse_none" if r_free is None else
+               "fixed_rmse_none" if r_fixed is None else "fixed_rmse_degenerate")
+        # 残差退化那一条要返回 **fixed**，不是 free。
+        # `r_fixed <= 1e-9` 的意思是「只用平移就把数据解释干净了」——那正是最强的
+        # 「不需要转动」的证据，这时候再把带转动的解交出去是反的。第一版返回 free，
+        # 于是纯平移的用例拿到了自由 ICP 解出的那点数值残余转动。
+        out = dict(fixed if why == "fixed_rmse_degenerate" else free)
+        out["rotation_accepted"] = False if why == "fixed_rmse_degenerate" else None
+        out["rotation_gate_skipped"] = why
         return out
     gain = (r_fixed - r_free) / r_fixed
     # **相对增益还不够，要有绝对下限。** 只有平移的那一档如果残差本来就在噪声水平，
