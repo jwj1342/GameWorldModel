@@ -538,6 +538,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 第八条：稠密光流。稀疏角点在这个物体尺度上拿不到足够的点（掩码中位
         # 264 像素、角点中位 4 个，而阈值是 8），稠密给的是每个掩码像素一个对应。
         dense_deg = _dense_flow_rotation_deg(run, geom, frames, per_frame)
+        # 第九条，也是对应关系这条路的**公平版**：锚点固定在第 0 帧，累积对应关系
+        # 而不是累积旋转。前两条光流臂都在逐帧串，而 ICP 那侧用的是累积模型——
+        # 两边基准设定不同，那组对比不公平。
+        anchor_deg = _anchored_flow_rotation_deg(run, geom, frames, per_frame)
         _shapes = _gt_shapes_and_extents(CURRENT_CLIP_DIR) if CURRENT_CLIP_DIR else {}
         _node = oid if oid in _shapes else oid.rsplit("_", 1)[0]
         analytic_deg = np.array([])
@@ -562,6 +566,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         _bucket = ("小 <200px" if _med_area < 200 else
                    "中 200~600px" if _med_area < 600 else "大 >600px")
         out.setdefault(f"area/{_bucket}", []).append(_med_area)
+        if len(anchor_deg) == len(true_deg):
+            out.setdefault(f"{kind}/anchor_range_deg", []).append(float(np.ptp(anchor_deg)))
+            out.setdefault(f"{kind}/anchor_rmse_deg", []).append(
+                float(np.sqrt(np.mean((anchor_deg - true_deg) ** 2))))
         if len(dense_deg) == len(true_deg):
             out.setdefault(f"bysize/{_bucket}/dense_rmse_deg", []).append(
                 float(np.sqrt(np.mean((dense_deg - true_deg) ** 2))))
@@ -802,6 +810,84 @@ def _flow_correspondence_rotation_deg(run, geom, clouds: list, frames: list,
 
 
 
+
+
+
+def _anchored_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> np.ndarray:
+    """跨帧对应的**公平版**：累积对应关系，不累积旋转。
+
+    之前那两条光流臂（稀疏、稠密）都是逐帧链式累积旋转 `R_acc = rot @ R_acc`。
+    而 `track_rigid` 的 docstring 早就写明——
+
+        **不逐帧链式配准**。实测链式每步残差只有 0.026 m，轨迹误差却比包围盒中心
+        还大——每步的小误差沿三十帧累积起来就盖过了信号。
+
+    仓库已经查明链式不行并改成了「对累积模型配准」，而我给光流臂写的正是链式。
+    `dense_range_deg` 稳定在 170°（几乎跑满量程）就是累积漂移的典型征兆。
+    **所以那组对比不公平**：ICP 那侧用累积模型，光流这侧在串。
+
+    这一版把锚点固定在第 0 帧：点从第 0 帧一路跟下去（跟踪本身是逐帧的，没办法），
+    但到第 k 帧时拿**第 0 帧的三维点和第 k 帧的三维点直接解一次 Kabsch**。
+    旋转每次都是从直接对应关系新解的，不沿帧累加——这才是和 ICP 可比的设定。
+
+    跟丢的点会越来越多，所以同时返回「还剩多少点」，点太少时后面的数不可信。
+    """
+    import cv2
+    from gwm.perception.masks import resize_mask
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    k0 = idx_of.get(frames[0])
+    m0 = masks_per_frame.get(frames[0])
+    if k0 is None or k0 >= len(files) or m0 is None:
+        return np.array([])
+    g0 = cv2.imread(str(files[k0]), cv2.IMREAD_GRAYSCALE)
+    if g0 is None:
+        return np.array([])
+    m0 = np.asarray(m0).astype(bool)
+    if m0.shape != g0.shape:
+        m0 = resize_mask(m0, (g0.shape[1], g0.shape[0])).astype(bool)
+    vs, us = np.nonzero(m0)
+    if len(vs) < 40:
+        return np.array([])
+    step = max(1, len(vs) // 600)                    # 最多六百个点，够解也不慢
+    pts0 = np.stack([us[::step], vs[::step]], 1).astype(np.float32)
+    P0 = _lift(geom, k0, pts0)
+    alive = np.isfinite(P0).all(1)
+    if alive.sum() < 20:
+        return np.array([])
+    lk = dict(winSize=(15, 15), maxLevel=3,
+              criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+    cur = pts0.reshape(-1, 1, 2).copy()
+    prev_img, prev_k = g0, k0
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ki = idx_of.get(frames[i])
+        if ki is None or ki >= len(files):
+            out.append(out[-1]); continue
+        gi = cv2.imread(str(files[ki]), cv2.IMREAD_GRAYSCALE)
+        if gi is None:
+            out.append(out[-1]); continue
+        nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_img, gi, cur, None, **lk)
+        alive = alive & (st.ravel() == 1)
+        cur, prev_img, prev_k = nxt, gi, ki
+        if alive.sum() < 20:
+            out.append(out[-1]); continue
+        Pk = _lift(geom, ki, cur.reshape(-1, 2))
+        good = alive & np.isfinite(Pk).all(1)
+        if good.sum() < 20:
+            out.append(out[-1]); continue
+        # **锚点在第 0 帧**：每次都从直接对应关系解一次，不累加旋转
+        A, B = P0[good], Pk[good]
+        rot, t = kabsch(B, A)
+        res = np.linalg.norm(B @ np.asarray(rot, float).T + t - A, axis=1)
+        keep = res <= np.percentile(res, 75)
+        if keep.sum() >= 20:
+            rot, _t = kabsch(B[keep], A[keep])
+        out.append(float(np.degrees(R.from_matrix(np.asarray(rot, float)).magnitude())))
+    return np.asarray(out)
 
 def _dense_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> np.ndarray:
     """**稠密光流**的跨帧对应 + Kabsch。稀疏角点在这个物体尺度上不够用。
