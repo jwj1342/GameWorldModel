@@ -208,13 +208,31 @@ def vote(kinds: list[str]) -> str | None:
     return Counter(kinds).most_common(1)[0][0] if kinds else None
 
 
-def gt_shapes(program: dict) -> dict[str, str]:
-    """真值节点 id → 基本体种类。"""
-    out = {}
+def gt_shapes(program: dict) -> dict[str, tuple[str, float]]:
+    """真值节点 id → (基本体种类, 物体对角线长度，米)。
+
+    为什么要带尺寸。实测 cylinder 零召回，而真值里的柱体是 radius 0.144 / height
+    0.210 这种**扁柱**——直径 0.287、高 0.210，长宽高接近，部分可见时和盒子几乎分不开。
+    更要紧的是绝对尺度：这些物体只有二三十厘米，在 518 像素宽的深度图里可能只占几十
+    个像素，而半径 0.14 的柱面可见半边的弧高只有约 4 厘米，**很可能小于深度噪声**。
+
+    所以把尺寸一起带出来，按它分桶看非 box 那几类的召回——大物体上能分对的话，
+    这就是分辨率问题，不是方法问题，两者要做的事完全不同。
+    """
+    out: dict[str, tuple[str, float]] = {}
     for node in (program.get("objects") or []) + (program.get("static") or []):
         geom = node.get("geom") or {}
-        if geom.get("kind") == "primitive" and geom.get("shape") in KINDS:
-            out[str(node.get("id"))] = geom["shape"]
+        shape = geom.get("shape")
+        if geom.get("kind") != "primitive" or shape not in KINDS:
+            continue
+        ext = geom.get("extent")
+        if isinstance(ext, list) and len(ext) == 3:
+            diag = float(np.linalg.norm(np.asarray(ext, float)))
+        else:                       # 柱 / 锥 / 球 用 radius+height 描述，不给 extent
+            r = float(geom.get("radius") or 0.0)
+            h = float(geom.get("height") or (2 * r))
+            diag = float(math.sqrt((2 * r) ** 2 + h ** 2 + (2 * r) ** 2))
+        out[str(node.get("id"))] = (shape, diag)
     return out
 
 
@@ -230,6 +248,8 @@ def main(argv: list[str]) -> int:
     pred: list[str] = []
     pred_voted: list[str] = []
     pred_cv: list[str] = []
+    diags: list[float] = []
+    npoints: list[int] = []
     skipped = Counter()
     for spec in a.pair:
         report, _s, gt_root = spec.partition(":")
@@ -278,7 +298,9 @@ def main(argv: list[str]) -> int:
                                    for p in pts if len(p) >= a.min_points // 4]
                 kind_voted = vote(per_frame_kinds) or kind_naive
                 kind_cv, _res_cv = fit_kind(P_all, cross_validate=True)
-                truth.append(shapes[node])
+                truth.append(shapes[node][0])
+                diags.append(shapes[node][1])
+                npoints.append(len(P_all))
                 pred.append(kind_naive)
                 pred_voted.append(kind_voted)
                 pred_cv.append(kind_cv)
@@ -325,6 +347,31 @@ def main(argv: list[str]) -> int:
                 continue
             row = [sum(1 for tt, pp in zip(truth, P) if tt == t and pp == p) for p in KINDS]
             print(f"    {t:9s} " + "".join(f"{v:10d}" for v in row))
+
+    # —— 按物体尺寸分桶，看非 box 那几类的召回随尺寸怎么变 ——
+    # 真值里的柱体是 radius 0.144 / height 0.210 这种扁柱，直径 0.287、高 0.210，
+    # 部分可见时和盒子几乎分不开；而且只有二三十厘米，在 518 像素宽的深度图里只占
+    # 几十个像素，半径 0.14 的柱面可见半边弧高只有约 4 厘米，很可能小于深度噪声。
+    # 大物体上能分对的话，这就是**分辨率**问题，不是方法问题——两者要做的事完全不同。
+    if diags:
+        edges = [0.0, 0.3, 0.5, 0.8, 1.5, float("inf")]
+        print("\n  按真值物体对角线分桶（只看非 box 的三类，box 会把一切主导掉）：")
+        print(f"    {'尺寸区间 (m)':<16s}{'物体数':>8s}{'非box数':>9s}"
+              f"{'非box召回·朴素':>16s}{'非box召回·交叉':>16s}{'中位点数':>10s}")
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            sel = [i for i, d in enumerate(diags) if lo <= d < hi]
+            if not sel:
+                continue
+            nb = [i for i in sel if truth[i] != "box"]
+
+            def rec(P, nb=nb):
+                return (sum(1 for i in nb if truth[i] == P[i]) / len(nb)) if nb else float("nan")
+            label = f"{lo:.1f} ~ {hi:.1f}" if hi != float("inf") else f"{lo:.1f} 以上"
+            mp = int(statistics.median([npoints[i] for i in sel]))
+            print(f"    {label:<16s}{len(sel):>8d}{len(nb):>9d}"
+                  f"{rec(pred):>16.3f}{rec(pred_cv):>16.3f}{mp:>10d}")
+        print("    非 box 召回随尺寸明显上升 → 分辨率问题（物体太小，曲率淹在深度噪声里）；")
+        print("    各档都接近零 → 方法问题，换大物体也救不了。")
 
     print("""
 怎么读：
