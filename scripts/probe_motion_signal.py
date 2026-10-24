@@ -269,21 +269,26 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 位置那两个数已经被时间平滑治住了（0.045→0.028、0.077→0.039），
         # **平滑不影响转动**，所以 rot_static 才是现在挡住第三档的那一个数。
         gated_arms = []
-        for gain in (0.02, 0.05, 0.10):
+        for gain in (0.05, 0.10, 0.15, 0.20, 0.30):
             g = track_rigid(clouds, rotation_min_gain=gain)
             if g["ok"] and len(g["positions"]) == len(gt):
                 tag = f"gate{int(gain * 100):02d}"
                 gp = np.array(g["positions"], float)
                 out.setdefault(f"step/{tag}", []).extend(
                     np.linalg.norm((gp - gp[0]) - gt_rel, axis=1).tolist())
-                sm = smooth_series(gp, 15) if len(gp) >= 15 else gp
-                out.setdefault(f"step/{tag}_smooth15", []).extend(
-                    np.linalg.norm((sm - sm[0]) - gt_rel, axis=1).tolist())
+                # 和上面 smooth15 那一臂**同样的条件**：长度不够就不算，不要退回
+                # 不平滑。否则两边的样本population 不同（848 对 1008），横着比是
+                # 在比口径不是比方法。
+                sm = smooth_series(gp, 15) if len(gp) >= 15 else None
+                if sm is not None:
+                    out.setdefault(f"step/{tag}_smooth15", []).extend(
+                        np.linalg.norm((sm - sm[0]) - gt_rel, axis=1).tolist())
                 if is_static:
                     out.setdefault(f"drift_static/{tag}", []).append(
                         float(np.linalg.norm(gp.max(0) - gp.min(0))))
-                    out.setdefault(f"drift_static/{tag}_smooth15", []).append(
-                        float(np.linalg.norm(sm.max(0) - sm.min(0))))
+                    if sm is not None:
+                        out.setdefault(f"drift_static/{tag}_smooth15", []).append(
+                            float(np.linalg.norm(sm.max(0) - sm.min(0))))
                 gated_arms.append((tag, g))     # 转角那一段在外面统一记，这里只收集
                 # 闸到底放行了多少步。三个门槛给出完全相同的 rot_static，说明增益
                 # 分布离它们都很远——「几乎总放行」还是「几乎总拦住」不能靠猜。
