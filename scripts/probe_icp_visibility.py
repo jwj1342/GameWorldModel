@@ -146,8 +146,47 @@ def make_clouds(motion: str, visibility: str, n_frames: int = 24) -> list[np.nda
     return clouds
 
 
+def make_template(kind: str) -> np.ndarray:
+    """退化模板。模板的作用是提供一组**不随相机动的完整点**——它需不需要是
+    *正确*的那个资产？
+
+    这个问题一直被默认成「需要」（`solved_rotation_against_template` 的注释里写的是
+    「我们已经有这个形状——资产检索给每个物体配了网格」），于是点二被挂在点一
+    后面等着。但检索现在是 0/71 全错，这个前提必须单独验。
+
+    三类退化，对应三种现实情况：
+      比例错 —— 检索挑到同类但款式不同的资产（库里 box-large 对 box-long）
+      形状错 —— 检索整个挑错（挑到球、挑到柱）
+      尺寸错 —— 网格缩放没对上。实践里尺寸是按观测包围盒定的、不由资产定，
+                所以这一档是对照，不是现实风险，放进来是为了说明「错在哪一维」
+                不是等价的。
+    """
+    base = (0.6, 0.4, 0.3)
+    if kind == "perfect":
+        return box_surface(base)[0]
+    if kind == "aspect":                       # 比例错：长宽高各歪 30% 左右
+        return box_surface((0.78, 0.34, 0.33))[0]
+    if kind == "cube":                         # 比例全丢，体积保持
+        e = float(np.prod(base)) ** (1 / 3)
+        return box_surface((e, e, e))[0]
+    if kind == "scale":                        # 整体大 1.5 倍
+        return box_surface(tuple(v * 1.5 for v in base))[0]
+    rng = np.random.default_rng(0)
+    if kind == "sphere":                       # 等体积的球
+        r = (3 * float(np.prod(base)) / (4 * np.pi)) ** (1 / 3)
+        v = rng.normal(size=(5400, 3))
+        return v / np.linalg.norm(v, axis=1, keepdims=True) * r
+    if kind == "cylinder":                     # 等体积的柱，轴沿 y
+        r = (float(np.prod(base)) / (np.pi * base[1])) ** 0.5
+        a = rng.uniform(0, 2 * np.pi, 5400)
+        y = rng.uniform(-base[1] / 2, base[1] / 2, 5400)
+        return np.stack([r * np.cos(a), y, r * np.sin(a)], axis=1)
+    raise ValueError(kind)
+
+
 def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24,
-                                     warm_start: bool = False) -> float:
+                                     warm_start: bool = False,
+                                     template_kind: str = "perfect") -> float:
     """把**完整模板**配到每一帧的局部观测上，而不是让局部观测互相配。
 
     受控实验里「完整点云」那一行是全对的（静止 0.3°、转 90° 解出 89.9°），而所有出错
@@ -161,7 +200,7 @@ def solved_rotation_against_template(motion: str, visibility: str, n_frames: int
     这里比的是整段的转角**范围**，取逆不改变大小，所以可以直接比。
     """
     from gwm.perception.registration import icp
-    template, _ = box_surface()
+    template = make_template(template_kind)
     clouds = make_clouds(motion, visibility, n_frames)
     angles = []
     warm_R, warm_t = np.eye(3), np.zeros(3)      # 上一帧解出的位姿，当这一帧的初值
@@ -284,8 +323,28 @@ def main() -> int:
         cold = solved_rotation_against_template(motion, "orbit_grid", n)
         warm = solved_rotation_against_template(motion, "orbit_grid", n, warm_start=True)
         print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{cold:>16.1f}°{warm:>15.1f}°")
-    print("  （被配准的两边只要有一边是钉死的完整形状，采样就不再跟着相机跑。")
-    print("   我们已经有这个形状——#60 的资产检索给每个物体都配了网格。）")
+    print("  （被配准的两边只要有一边是钉死的完整形状，采样就不再跟着相机跑。）")
+    print()
+    print("—— 模板得有多对？ ——")
+    print("  上面那一行用的是**生成点云的那个盒子本身**，完美模板，所以是上限不是现实值。")
+    print("  现实里模板来自资产检索，而检索现在 0/71 全错。所以要单独问：")
+    print("  模板错到什么程度还压得住假转动。静止那一行的数就是假转动本身。")
+    print(f"{'模板':<22}{'静止(该 0°)':>13}{'转 90°(该 90°)':>16}{'说明':>6}")
+    kinds = [("perfect", "完美：就是那个盒子"), ("aspect", "比例错 30%"),
+             ("cube", "正方体（比例全丢）"), ("sphere", "球（形状全错）"),
+             ("cylinder", "圆柱（形状全错）"), ("scale", "形状对、大 1.5 倍")]
+    for kind, label in kinds:
+        st = solved_rotation_against_template("static", "orbit_grid", n,
+                                              warm_start=True, template_kind=kind)
+        rt = solved_rotation_against_template("rotate", "orbit_grid", n,
+                                              warm_start=True, template_kind=kind)
+        print(f"{label:<22}{st:>12.1f}°{rt:>15.1f}°")
+    print("  对照：两边都是局部观测、谁都不钉死 —— 静止解出 26.6°（上表第四行）。")
+    print()
+    print("  怎么读。**只要有一档退化模板的静止值明显低于 26.6°，点二就不用等点一**——")
+    print("  因为那说明模板的作用是「提供一组不随相机动的点」，而不是「提供正确的形状」，")
+    print("  那么一个按观测包围盒搭的盒子就够用，不需要检索挑对。")
+    print("  反过来，只有完美模板那一档压得住的话，点二确实卡在检索上。")
     print()
     print("「正反不一致」这个自检信号**失败了**：出错的那几行也是 0.00°。ICP 自洽地错——")
     print("相邻两帧采到的确实是差一个小旋转的两块表面，它如实报告了，问题在问题本身。")
