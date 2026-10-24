@@ -303,7 +303,7 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
     if not obs:
         return None, None
     yaws = [2.0 * _np.pi * j / n_yaw for j in range(n_yaw)]
-    best, best_iou = None, -1.0
+    scored = []
     for asset in (candidates[:top] if top > 0 else candidates):
         try:
             tpl = load_points(Path(root) / asset.path, samples=20000)
@@ -323,9 +323,26 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
                     hi = max(hi, float(_np.logical_and(sil, g).sum()) / union)
             per.append(hi)
         if per:
-            score = float(_np.median(per))
-            if score > best_iou:
-                best_iou, best = score, asset
+            scored.append((float(_np.median(per)), asset))
+    if not scored:
+        return None, None
+    # **倒数名次融合**，不是只按 IoU 挑。
+    #
+    # 候选是图像检索排出来的（正确资产在静止物体上中位排第 36），而只按 IoU 重排
+    # 等于把那个排序信息整个扔掉。两个信号都弱但**独立**：图像分看外观，轮廓看
+    # 二维形状。RRF 无参数，而且对两边的分数量纲都不敏感——今天量过文字分和图像分
+    # 的量纲其实可比，但 IoU 和余弦相似度不可比，所以按名次融合比按分数融合稳。
+    #
+    # k=60 是 RRF 的常用值；名次从 1 起算。
+    by_iou = {a.id: i for i, (_v, a) in enumerate(sorted(scored, key=lambda t: -t[0]))}
+    order_in = {a.id: i for i, a in enumerate(candidates[:top] if top > 0 else candidates)}
+    best, best_rrf, best_iou = None, -1.0, None
+    for iou, asset in scored:
+        r1 = by_iou.get(asset.id, len(scored)) + 1
+        r2 = order_in.get(asset.id, len(order_in)) + 1
+        rrf = 1.0 / (60.0 + r1) + 1.0 / (60.0 + r2)
+        if rrf > best_rrf:
+            best_rrf, best, best_iou = rrf, asset, iou
     return best, (best_iou if best is not None else None)
 
 
