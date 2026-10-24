@@ -12,6 +12,11 @@ import json
 import sys
 from pathlib import Path
 
+# 比例型的指标：逐片段的比例汇总之后是一串 0/1 附近的数，中位数恒等于 0 或 1，
+# 看起来像「没动」其实是统计量选错。这几列报均值，表里打星号标出来。
+FRACTIONS = {"shape_kind_accuracy", "shape_ok", "scale_ok", "motion_type_accuracy",
+             "object_recall", "object_precision", "scene_recall", "scene_precision"}
+
 COLS = ["object_recall", "object_precision", "scene_recall", "scene_precision",
         "shape_kind_accuracy", "shape_ok", "scale_ok", "scale_ratio",
         "motion_type_accuracy", "trajectory_m"]
@@ -52,9 +57,19 @@ def main(argv: list[str]) -> int:
         cells = []
         for c in COLS:
             v = agg.get(c)
-            cells.append(f"{v['median']:.4f}" if isinstance(v, dict) and v.get("median") is not None else "—")
+            if not (isinstance(v, dict) and v.get("median") is not None):
+                cells.append("—"); continue
+            # **比例型的指标要看均值，不能看中位数。** 逐片段的比例汇总之后是一串
+            # 0 和 1 附近的数，中位数很容易恒等于 0.0000 或 1.0000，看起来像「这个
+            # 指标没动」，其实是统计量选错了。这个坑这个项目里踩过——三个消融档位的
+            # 真实值是 0.182/0.158/0.200，表里全印成 0.000。
+            if c in FRACTIONS and v.get("mean") is not None:
+                cells.append(f"{v['mean']:.4f}*")
+            else:
+                cells.append(f"{v['median']:.4f}")
         print(f"{label:<12s}" + "".join(f"{v:>22s}" for v in cells))
-    print("\n片段数：" + "，".join(f"{k} {v}" for k, v in n_runs.items()) +
+    print("\n带 * 的是**均值**（比例型指标，中位数会恒等于 0 或 1）；其余是中位数。")
+    print("片段数：" + "，".join(f"{k} {v}" for k, v in n_runs.items()) +
           "   （不一样就别横着比，少掉的往往是最差的那条）")
     extra = sorted(k for k in seen_keys - set(COLS)
                    if isinstance(k, str) and not k.startswith(("confusion", "window")))
