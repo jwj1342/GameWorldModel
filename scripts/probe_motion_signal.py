@@ -555,10 +555,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                     out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
             # 密度匹配的难干扰项：形状最接近真值的那 32 个。随机干扰项太好认，
             # 而真实方法面对的候选集个个都像。这一行才是可引用的数。
-            for _v in (7, 15, 0):      # 0 = 全部帧
-                _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True, n_views=_v)
+            # 视角数固定在 7（已验到顶），扫初始偏航个数。
+            for _y in (1, 4, 8):
+                _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
+                                            n_views=7, n_yaw=_y)
                 if _hard is not None:
-                    out.setdefault(f"{kind}/residual_pick_hard_33_v{_v}", []).append(_hard)
+                    out.setdefault(f"{kind}/respick_yaw{_y}", []).append(_hard)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         # **形状第 k 近的邻居当模板。** 不用「管线实际选中的那个」是因为管线的物体
@@ -1438,7 +1440,7 @@ def _hard_distractors(gt_ref: str, n: int) -> list[str]:
 
 def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
                         seed: int = 0, hard: bool = False,
-                        n_views: int = 1) -> float | None:
+                        n_views: int = 1, n_yaw: int = 1) -> float | None:
     """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
 
     这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
@@ -1503,11 +1505,31 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
         if tpl_diag <= 1e-9:
             continue
         model = (tpl - tpl.mean(0)) * (obs_diag / tpl_diag)
+        # **多个初始偏航各配一次取最好。** 资产网格有自己的规范朝向，而观测到的
+        # 物体偏航是任意的；ICP 从质心对齐起手只做局部搜索，朝向差太多就停在局部
+        # 极小。视角数那条杠杆已经到顶（7 帧之后不动），这是下一个最可能的瓶颈，
+        # 而且它正好解释了为什么转动类全军覆没（periodic_rotate 挑对 0.000）。
+        #
+        # 只绕竖轴转：场景里的物体基本都立在地面上，俯仰和翻滚的自由度实际用不上，
+        # 而每多一个初值就多一次 ICP。
+        variants = [model]
+        for j in range(1, max(1, n_yaw)):
+            ang = 2.0 * np.pi * j / n_yaw
+            c, sn = np.cos(ang), np.sin(ang)
+            rot = np.array([[c, 0.0, sn], [0.0, 1.0, 0.0], [-sn, 0.0, c]])
+            variants.append(model @ rot.T)
         rs = []
         for q in queries:
-            step = icp(q, model)
-            if step["ok"] and step["rmse"] is not None:
-                rs.append(float(step["rmse"]))
+            # 每一帧在所有初值里取**最小**残差：这一帧最好能解释成什么样。
+            best_q = None
+            for m in variants:
+                step = icp(q, m)
+                if step["ok"] and step["rmse"] is not None:
+                    v = float(step["rmse"])
+                    if best_q is None or v < best_q:
+                        best_q = v
+            if best_q is not None:
+                rs.append(best_q)
         if not rs:
             continue
         # 取中位数不取均值：某一帧掩码漏了一块就会拉出一个离谱的残差，
@@ -1879,8 +1901,9 @@ def main() -> int:
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
         # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
         # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
-        if "/residual_pick_of_" in key or "/residual_pick_hard_" in key:
-            n_plus = 33 if "_hard_33" in key else int(key.rsplit("_", 1)[-1])
+        if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
+                or "/respick_yaw" in key):
+            n_plus = 33 if ("_hard_33" in key or "respick_yaw" in key) else int(key.rsplit("_", 1)[-1])
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
         # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
