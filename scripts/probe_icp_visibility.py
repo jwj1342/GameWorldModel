@@ -108,6 +108,13 @@ def pose_at(motion: str, k: int, n: int) -> tuple[np.ndarray, np.ndarray]:
         return np.eye(3), np.array([1.2 * frac, 0.0, 0.0])
     if motion == "rotate":
         return R.from_euler("y", 90.0 * frac, degrees=True).as_matrix(), np.zeros(3)
+    if motion == "rotate50":
+        # **90° 这个测试角有问题：它正好是长方体的转动对称周期。**
+        # 真实数据上修好尺寸之后的盒子模板把 spin 的真转 114° 解成了 10.65°
+        # （对 90° 取模是 24°），而合成实验里真转 90° 却「保住」89.7°——混叠正好
+        # 绕回真值。所以那一行很可能是巧合，不是模板保住了真转动。
+        # 50° 不是任何长方体对称元的整数倍，用它重验。
+        return R.from_euler("y", 50.0 * frac, degrees=True).as_matrix(), np.zeros(3)
     raise ValueError(motion)
 
 
@@ -417,11 +424,14 @@ def main() -> int:
               f"{template_mismatch(shape):.3f} 倍——这是开关的候选判据，推理时算得出来）")
         # 冷热两列都报。暖启动把每帧的解累积下去，模板一旦不好，早期的一点偏差
         # 会被滚大——不分开看的话「模板差」和「暖启动放大了它」分不开。
-        print(f"  {'模板':<24}{'静止·冷':>10}{'静止·暖':>10}{'转90°·冷':>11}{'转90°·暖':>11}")
+        # **转 50° 这一列是关键。** 90° 正好是长方体模板的转动对称周期，混叠会把
+        # 解绕回真值，于是「真转动保住了」可能是巧合。50° 不是任何对称元的整数倍。
+        print(f"  {'模板':<24}{'静止·冷':>10}{'静止·暖':>10}{'转90°·暖':>11}{'转50°·暖':>11}")
         for kind, label in kinds:
             row = [solved_rotation_against_template(m, "orbit_grid", n, warm_start=w,
                                                     template_kind=kind, shape=shape)
-                   for m in ("static", "rotate") for w in (False, True)]
+                   for m, w in (("static", False), ("static", True),
+                                ("rotate", True), ("rotate50", True))]
             print(f"  {label:<24}{row[0]:>9.1f}°{row[1]:>9.1f}°{row[2]:>10.1f}°{row[3]:>10.1f}°")
     print()
     print("—— 包围盒要估得多准 ——")
