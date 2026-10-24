@@ -72,6 +72,7 @@ def object_clouds(out: Path, masks: dict, max_frames: int = 9) -> dict:
     尺度必须用**逐帧**包围盒的中位值，不能用所有帧并起来的——并帧点云随视角扫动，
     实测比逐帧中位大 1.89 倍，而模板相对点云大 1.2 倍就越过对照、1.3 倍崩掉。
     """
+    import numpy as np                      # 这个模块没有模块级的 numpy
     from gwm.perception.evidence import to_world, unproject
     from gwm.perception.masks import resize_mask
     from gwm.perception.run import load_geometry
