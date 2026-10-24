@@ -226,6 +226,23 @@ def make_template(kind: str, shape: str = "box") -> np.ndarray:
     raise ValueError(kind)
 
 
+def template_mismatch(shape: str) -> float:
+    """包围盒盒子的表面离物体表面有多远（中位距离 / 包围盒对角线）。
+
+    这条修法要带个开关：T 形上包围盒模板比不用模板还糟，因为它的立鳍在正中间，
+    包围盒里绝大部分是空的，盒子表面离物体表面很远，ICP 条件数极差。而 L 形的
+    立板在边角上，盒子的角正好对上。
+
+    开关必须**在推理时算得出来**——这个量就是：模板是包围盒（观测直接给），
+    物体点是观测到的点云，不需要任何真值。
+    """
+    truth = compound_surface(SHAPES[shape])[0]
+    box = make_template("obb", shape=shape)
+    diag = float(np.linalg.norm(np.ptp(truth, axis=0)))
+    d = np.linalg.norm(box[:, None, :] - truth[None, ::7, :], axis=2).min(axis=1)
+    return float(np.median(d) / diag) if diag else float("nan")
+
+
 def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24,
                                      warm_start: bool = False,
                                      template_kind: str = "perfect",
@@ -384,20 +401,23 @@ def main() -> int:
         none_tmpl = float(np.ptp(solved)) if len(solved) > 1 else float("nan")
         print(f"\n  ### 源形状：{slabel} ###   对照：不用模板、两边都是局部观测 —— "
               f"静止解出 {none_tmpl:.1f}°")
-        print(f"  {'模板':<24}{'静止(该 0°)':>13}{'转 90°(该 90°)':>16}")
+        print(f"  （包围盒盒子的表面离物体表面：中位距离是包围盒对角线的 "
+              f"{template_mismatch(shape):.3f} 倍——这是开关的候选判据，推理时算得出来）")
+        # 冷热两列都报。暖启动把每帧的解累积下去，模板一旦不好，早期的一点偏差
+        # 会被滚大——不分开看的话「模板差」和「暖启动放大了它」分不开。
+        print(f"  {'模板':<24}{'静止·冷':>10}{'静止·暖':>10}{'转90°·冷':>11}{'转90°·暖':>11}")
         for kind, label in kinds:
-            st = solved_rotation_against_template("static", "orbit_grid", n,
-                                                  warm_start=True, template_kind=kind,
-                                                  shape=shape)
-            rt = solved_rotation_against_template("rotate", "orbit_grid", n,
-                                                  warm_start=True, template_kind=kind,
-                                                  shape=shape)
-            print(f"  {label:<24}{st:>12.1f}°{rt:>15.1f}°")
+            row = [solved_rotation_against_template(m, "orbit_grid", n, warm_start=w,
+                                                    template_kind=kind, shape=shape)
+                   for m in ("static", "rotate") for w in (False, True)]
+            print(f"  {label:<24}{row[0]:>9.1f}°{row[1]:>9.1f}°{row[2]:>10.1f}°{row[3]:>10.1f}°")
     print()
-    print("  怎么读。**「按观测包围盒搭的盒子」这一档在三个源形状上都明显低于对照**，")
-    print("  点二就不用等点一——那说明模板的作用是「提供一组不随相机动的点」，而不是")
-    print("  「提供正确的形状」，而包围盒不需要检索挑对，观测直接就有。")
-    print("  反过来，只有在长方体那一组上成立的话，那是源形状和模板撞在一起的假象。")
+    print("  怎么读。要的不是「模板档比完美档好」，而是**「按观测包围盒搭的盒子」比")
+    print("  「不用模板」的对照低多少**——低，才说明不需要检索挑对资产；")
+    print("  比对照还高，说明这个形状上这条修法是负作用，得有个开关挡住它。")
+    print("  一并看对照那一列本身：它是形状相关的，平面大特征少的凸形状最容易滑移，")
+    print("  而那恰恰也是包围盒模板最管用的地方；特征丰富的形状逐帧配准本来就不坏，")
+    print("  再套一个空心的包围盒反而把条件数搞坏。所以这条修法该按**填充率**开关。")
     print()
     print("「正反不一致」这个自检信号**失败了**：出错的那几行也是 0.00°。ICP 自洽地错——")
     print("相邻两帧采到的确实是差一个小旋转的两块表面，它如实报告了，问题在问题本身。")
