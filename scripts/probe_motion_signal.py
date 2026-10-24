@@ -548,6 +548,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         _cam_corr = _camera_step_correlation(tracked, cam_list)
         if _cam_corr is not None and np.isfinite(_cam_corr):
             out.setdefault(f"{kind}/cam_step_corr", []).append(float(_cam_corr))
+        # 量具自检：每步相机转角本身变不变。太小的话上面那个相关系数是噪声。
+        _cam_spread = _camera_step_spread(cam_list)
+        if _cam_spread is not None and np.isfinite(_cam_spread):
+            out.setdefault(f"{kind}/cam_step_spread", []).append(float(_cam_spread))
         # 第六条：同样裁公共可见区，但可见性用**真值基本体的解析法向**算。
         # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
         # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
@@ -1321,6 +1325,34 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _camera_step_spread(cam_list: list) -> float | None:
+    """每步相机转角的**变异程度**（四分位距 / 中位数）。量具的自检。
+
+    相关系数的分母是两列的标准差。如果每步角步长近似常数，这个相关系数算出来的是
+    噪声，不是证据——合成探针里我为此特意给相机加了非匀速，注释写得很清楚：
+    「均匀的话每步角步长是常数，和任何东西的相关系数都算不出来（分母是零方差）」。
+
+    而真实数据的相机档里 `orbit` 的角度就是 u 的线性函数，角步长近似常数。
+    所以报相关系数之前必须先报这个数：它太小的话，上面那一列不能当否定结论用。
+    """
+    if len(cam_list) < 4:
+        return None
+    steps = []
+    for a, b in zip(cam_list[:-1], cam_list[1:]):
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        na, nb = np.linalg.norm(a), np.linalg.norm(b)
+        if na < 1e-9 or nb < 1e-9:
+            continue
+        steps.append(float(np.degrees(np.arccos(
+            np.clip(float(a @ b) / (na * nb), -1.0, 1.0)))))
+    if len(steps) < 3:
+        return None
+    med = float(np.median(steps))
+    if med < 1e-6:
+        return None
+    return float((np.percentile(steps, 75) - np.percentile(steps, 25)) / med)
 
 
 def _camera_step_correlation(tracked: dict, cam_list: list) -> float | None:
