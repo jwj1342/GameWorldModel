@@ -555,9 +555,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                     out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
             # 密度匹配的难干扰项：形状最接近真值的那 32 个。随机干扰项太好认，
             # 而真实方法面对的候选集个个都像。这一行才是可引用的数。
-            _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True)
-            if _hard is not None:
-                out.setdefault(f"{kind}/residual_pick_hard_33", []).append(_hard)
+            for _v in (1, 3, 7):
+                _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True, n_views=_v)
+                if _hard is not None:
+                    out.setdefault(f"{kind}/residual_pick_hard_33_v{_v}", []).append(_hard)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         # **形状第 k 近的邻居当模板。** 不用「管线实际选中的那个」是因为管线的物体
@@ -1436,7 +1437,8 @@ def _hard_distractors(gt_ref: str, n: int) -> list[str]:
 
 
 def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
-                        seed: int = 0, hard: bool = False) -> float | None:
+                        seed: int = 0, hard: bool = False,
+                        n_views: int = 1) -> float | None:
     """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
 
     这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
@@ -1479,8 +1481,17 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
     if not per_frame:
         return None
     obs_diag = float(np.median(per_frame))
-    # 拿中间那一帧的点云当查询：首帧的可见面最偏，末帧也是；中间那帧最有代表性。
-    query = np.asarray(clouds[len(clouds) // 2], float)
+    # **用几帧，不是一帧。** 第一版只拿中间那一帧当查询，而一帧只是一个局部视角——
+    # 同一个包围盒比例下完全不同的物体，在单个视角上可能都配得差不多。多取几帧
+    # （均匀抽），每帧各配一次取残差中位数，不同视角的证据就叠起来了。
+    # 代价是线性增加 ICP 次数，而 ICP 在三千点上很便宜。
+    picks = clouds
+    if len(clouds) > n_views:
+        step = max(1, len(clouds) // n_views)
+        picks = clouds[::step][:n_views]
+    queries = [np.asarray(c, float) for c in picks if len(np.asarray(c, float)) >= 30]
+    if not queries:
+        return None
     best_id, best_rmse = None, float("inf")
     for aid in ids:
         tpl = _asset_points_by_id(aid)
@@ -1490,9 +1501,18 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
         if tpl_diag <= 1e-9:
             continue
         model = (tpl - tpl.mean(0)) * (obs_diag / tpl_diag)
-        step = icp(query, model)
-        if step["ok"] and step["rmse"] is not None and float(step["rmse"]) < best_rmse:
-            best_rmse, best_id = float(step["rmse"]), aid
+        rs = []
+        for q in queries:
+            step = icp(q, model)
+            if step["ok"] and step["rmse"] is not None:
+                rs.append(float(step["rmse"]))
+        if not rs:
+            continue
+        # 取中位数不取均值：某一帧掩码漏了一块就会拉出一个离谱的残差，
+        # 而中位数不受单帧拖累。
+        score = float(np.median(rs))
+        if score < best_rmse:
+            best_rmse, best_id = score, aid
     if best_id is None:
         return None
     return 1.0 if best_id == gt_ref else 0.0
@@ -1858,7 +1878,7 @@ def main() -> int:
         # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
         # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
         if "/residual_pick_of_" in key or "/residual_pick_hard_" in key:
-            n_plus = int(key.rsplit("_", 1)[-1])
+            n_plus = 33 if "_hard_33" in key else int(key.rsplit("_", 1)[-1])
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
         # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
