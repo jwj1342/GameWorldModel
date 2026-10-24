@@ -539,6 +539,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         centres = {f: _p[f][0] for f in frames if f in _p}
         common_deg = (_common_visible_rotation_deg(clouds, frames, cam_list, centres)
                       if len(cam_list) == len(clouds) else np.array([]))
+        # 唯一还没试过、而且直指机制的判别子：解出的转角跟不跟着相机的角步长走。
+        _cam_corr = _camera_step_correlation(tracked, cam_list)
+        if _cam_corr is not None and np.isfinite(_cam_corr):
+            out.setdefault(f"{kind}/cam_step_corr", []).append(float(_cam_corr))
         # 第六条：同样裁公共可见区，但可见性用**真值基本体的解析法向**算。
         # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
         # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
@@ -1226,6 +1230,41 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _camera_step_correlation(tracked: dict, cam_list: list) -> float | None:
+    """逐步解出的转角，和相机这一步转了多少，相关到什么程度。
+
+    **为什么轮到它。** 伪造转动的机制已经坐实：采样格子钉在图像上 × 相机在动，
+    相邻两帧采到的不是同一批物理点。十二条排除清单里「相机位姿」那一条指的是
+    把相机位姿**用进配准**（每帧只对它看得见的那部分模型配），不是拿它**当判别子**。
+    后者没试过，而它直接长在机制上：假转动由相机扫过物体表面造成，应该跟着相机的
+    角步长走；物体自身的转动不该。合成实验里这个相关系数在出错的那几行是
+    +0.333~+0.446，真转动那几行算不出来（分母零方差）或接近零。
+
+    **这是个不需要真值的量**，所以如果两类分得开，可以逐物体逐帧当门用——而现在
+    那道门用的是足迹长短边比，已经量过分不开（排除清单第十二条）。
+
+    模板那条路今天走到头了：所有模板变体都是**均匀阻尼**，真假转动一起压，判别比
+    从基线的 3.7 倍掉到 0.5 倍，倒挂。所以方向不是「换更好的模板」，是「更好的闸」。
+    """
+    steps = tracked.get("step_transforms") or []
+    if len(steps) < 3 or len(cam_list) < len(steps) + 1:
+        return None
+    cam_step, obj_step = [], []
+    for k, (rot, _t) in enumerate(steps):
+        a = np.asarray(cam_list[k], float)
+        b = np.asarray(cam_list[k + 1], float)
+        na, nb = np.linalg.norm(a), np.linalg.norm(b)
+        if na < 1e-9 or nb < 1e-9:
+            continue
+        cam_step.append(float(np.degrees(np.arccos(
+            np.clip(float(a @ b) / (na * nb), -1.0, 1.0)))))
+        ang = (np.trace(np.asarray(rot, float)) - 1.0) / 2.0
+        obj_step.append(float(np.degrees(np.arccos(np.clip(ang, -1.0, 1.0)))))
+    if len(cam_step) < 3 or np.ptp(cam_step) < 1e-9 or np.ptp(obj_step) < 1e-12:
+        return None
+    return float(np.corrcoef(cam_step, obj_step)[0, 1])
 
 
 def _per_frame_box_points(clouds: list, n: int = 4000,
