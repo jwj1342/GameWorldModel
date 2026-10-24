@@ -598,6 +598,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 反而更差）。已知 9 个候选 0.459、33 个 0.311。图像嵌入把正确资产放在
             # 全库中位第 365 名——如果 128 个候选时还有两成，那就不用做两段式，
             # 直接把图像前 128 名全过一遍残差即可。衰减多快决定下一步的形状。
+            # 深度噪声的容差线：真值深度 + 可控噪声，噪声按包围盒对角线的比例给。
+            # 这条曲线是任何未来几何后端的**指标**，比「再试一个后端」有用。
+            for _nz in (0.005, 0.01, 0.02, 0.05):
+                _n = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
+                                         n_views=7, noise=_nz)
+                if _n is not None:
+                    out.setdefault(f"{kind}/respick_noise{int(_nz * 1000):03d}", []).append(_n)
             for _c in (32, 128, 384):
                 _hard = _residual_pick_rate(clouds, _gt_ref, _c, hard=True, n_views=7)
                 if _hard is not None:
@@ -1638,7 +1645,8 @@ def _hard_distractors(gt_ref: str, n: int) -> list[str]:
 
 def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
                         seed: int = 0, hard: bool = False,
-                        n_views: int = 1, n_yaw: int = 1) -> float | None:
+                        n_views: int = 1, n_yaw: int = 1,
+                        noise: float = 0.0) -> float | None:
     """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
 
     这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
@@ -1694,6 +1702,14 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
     queries = [np.asarray(c, float) for c in picks if len(np.asarray(c, float)) >= 30]
     if not queries:
         return None
+    # **注入可控深度噪声。** 真实 VGGT 深度下这条判据掉到随机水平，而相机、判据、
+    # 物体大小三条都排除了。所以问题是「深度要准到什么程度这条才成立」——这个数
+    # 比「再试一个后端」有用得多：它是任何未来几何后端要达到的**指标**。
+    # 噪声按物体自身尺度给（包围盒对角线的比例），各向同性高斯。
+    if noise > 0:
+        nrng = np.random.default_rng(abs(hash((gt_ref, n_distract, noise))) % (2**32))
+        scale = float(np.median([np.linalg.norm(q.max(0) - q.min(0)) for q in queries]))
+        queries = [q + nrng.normal(0.0, noise * scale, q.shape) for q in queries]
     best_id, best_rmse = None, float("inf")
     for aid in ids:
         tpl = _asset_points_by_id(aid)
@@ -2107,9 +2123,9 @@ def main() -> int:
             extra = f"  **覆盖率 {statistics.mean(values):.3f}**（候选集里有正确答案的比例）"
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
                 or "/respick_cands" in key or "/d2pick_cands" in key
-                or "/respick33" in key):
+                or "/respick33" in key or "/respick_noise" in key):
             n_plus = (33 if "_hard_33" in key
-                      else 33 if key.endswith("/respick33")
+                      else 33 if (key.endswith("/respick33") or "/respick_noise" in key)
                       else int(key.rsplit("cands", 1)[-1])
                       if ("respick_cands" in key or "d2pick_cands" in key)
                       else int(key.rsplit("_", 1)[-1]))
