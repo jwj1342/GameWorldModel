@@ -9,6 +9,8 @@ from ..taxonomy import is_ground_class, is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
+from .ground_proximity import measure_ground_proximity
+from .ground_sampling import GroundSamplingPolicy, uses_sampling_roles
 from .registration import infer_articulation, looks_static, track_rigid
 
 
@@ -88,39 +90,63 @@ def reject_planes_on_camera(ok: list[dict], min_ratio: float) -> tuple[list[dict
     return kept, [c["idx"] for c in ok if id(c) not in kept_ids]
 
 
-def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np.ndarray, float, dict]:
+def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: dict | None = None, source_video_sha256: str | None = None) -> tuple[np.ndarray, float, dict]:
     """Find the ground plane from static pixels, return (T 4x4 applied to world points, scale, info).
     Candidate planes are extracted iteratively; the ground is the large, roughly horizontal plane below the camera
     that most object centres lie above (this rejects sky/far planes). Result world: y up, ground at y=0."""
     pc = cfg["perception"]
     W, H = geom.size()
+    sampling = GroundSamplingPolicy(tracks, geom.frame_indices, cfg, source_video_sha256=source_video_sha256)
     pts_all, obj_pts = [], []
+    point_sources = []
     step = max(1, len(geom.frame_indices) // 6)
     for k in range(0, len(geom.frame_indices), step):
         fi = geom.frame_indices[k]
         depth = geom.depth[k]; med = np.median(depth[depth > 1e-4]) if (depth > 1e-4).any() else 1.0
         near = (depth > 1e-4) & (depth < pc.get("far_depth_factor", 3.0) * med)   # drop sky / far garbage
-        static_mask = near.copy(); any_obj = np.zeros((H, W), bool)
-        for o in tracks.objects:
-            m = o.masks.get(fi)
-            if m is not None: mm = _resize_mask(m, (W, H)); static_mask &= ~mm; any_obj |= mm
+        any_obj, excluded, support = sampling.masks(tracks, fi, (W, H), _resize_mask)
+        static_mask = near & ~excluded
         if geom.dynamic_mask is not None: static_mask &= ~geom.dynamic_mask[k].astype(bool)
         if geom.depth_conf is not None:
             conf = geom.depth_conf[k]; thr = np.percentile(conf, 30)
             if conf.max() - conf.min() > 1e-6: static_mask &= conf >= thr   # skip the filter when confidence is constant (ground-truth backend)
+        sampling.record_frame(fi, any_obj, excluded, support, static_mask)
         pts_all.append(to_world(unproject(depth, geom.intrinsics[k], static_mask, stride=4), _fix(geom.cam_to_world[k])))
+        if replay is not None:
+            ys, xs = np.mgrid[0:H:4, 0:W:4]
+            valid = static_mask[::4, ::4] & (depth[::4, ::4] > 1e-4)
+            point_sources.extend([[int(fi), int(y), int(x)] for y, x in zip(ys[valid], xs[valid])])
         if any_obj.any(): obj_pts.append(to_world(unproject(depth, geom.intrinsics[k], any_obj & near, stride=6), _fix(geom.cam_to_world[k])))
     P = np.concatenate(pts_all, 0) if pts_all else np.zeros((0, 3))
     O = np.concatenate(obj_pts, 0) if obj_pts else np.zeros((0, 3))
     rng = rng or np.random.default_rng(0)
-    if len(P) > 60000: P = P[rng.choice(len(P), 60000, replace=False)]
+    if replay is not None:
+        replay["rng_before_sampling"] = copy.deepcopy(rng.bit_generator.state)
+    if len(P) > 60000:
+        chosen = rng.choice(len(P), 60000, replace=False)
+        P = P[chosen]
+        if replay is not None: point_sources = [point_sources[i] for i in chosen]
+    if replay is not None:
+        replay.update({"static_point_sources": point_sources, "candidates": [],
+                       "coordinate_space": "OpenCV world after _fix; before alignment and scale"})
     info = {"n_static_points": int(len(P)), "n_object_points": int(len(O))}
+    if sampling.enabled:
+        info["ground_sampling"] = sampling.audit
+        if replay is not None: replay["ground_sampling"] = sampling.audit
     up = np.array([0, 1.0, 0]); cam0 = _fix(geom.cam_to_world[0])[:3, 3]
     scene_scale = float(np.percentile(np.abs(P - P.mean(0)).max(1), 50)) if len(P) else 1.0
     thresh = max(scene_scale * pc["ground_ransac_thresh_m"], 1e-4)
     T = np.eye(4)
     # iterative plane extraction
     cands, rest = [], P.copy()
+    rest_ids = np.arange(len(P)) if replay is not None else None
+    if replay is not None: replay["ransac_threshold"] = float(thresh)
+    if sampling.enabled and not any(f["eligible_support_stride4_before_cap"] for f in sampling.audit["frames"]):
+        sampling.warn("ground_sampling_no_support", "/meta/alignment/ground_sampling",
+                      "No observed support survived frame scope and filters; ground remains unknown.")
+        info.update(ground="not_found", ground_candidate_count=0, plane_candidates=[])
+        if replay is not None: replay.update(selected=None, T=T.tolist(), scale=1.0)
+        return T, 1.0, info
     for _ in range(4):
         if len(rest) < 200: break
         n, d, inl = fit_plane_ransac(rest, thresh=thresh, rng=rng)
@@ -130,6 +156,12 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np
         cam_h = float(cam0 @ n + d)                         # signed height of camera above plane
         frac_obj_above = float(((O @ n + d) > -thresh).mean()) if len(O) else 1.0
         cands.append({"idx": len(cands), "n": n, "d": d, "inliers": int(inl.sum()), "angle_deg": round(ang, 1), "cam_height": round(cam_h, 4), "frac_obj_above": round(frac_obj_above, 3)})
+        if replay is not None:
+            replay["candidates"].append({"idx": len(cands) - 1, "normal": n.tolist(),
+                "offset": float(d), "inlier_point_indices": rest_ids[inl].tolist(),
+                "camera_height": cam_h, "fraction_object_above": frac_obj_above,
+                "angle_to_up_deg": ang})
+            rest_ids = rest_ids[~inl]
         rest = rest[~inl]
     fwd = (_fix(geom.cam_to_world[0])[:3, :3] @ np.array([0, 0, 1.0]))  # camera viewing direction in the y-up world (OpenCV +z)
     for c in cands: c["angle_to_view_deg"] = round(math.degrees(math.acos(np.clip(abs(c["n"] @ fwd), -1, 1))), 1)
@@ -155,7 +187,16 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np
         info["rejected_near_camera"] = rejected
         info["near_camera_ratio"] = pc.get("ground_plane_min_height_ratio", 0.25)
     info["plane_candidates"] = [{k: v for k, v in c.items() if k not in ("n", "d")} for c in cands]
+    # Provenance only: retain the original best-plane selection and transform.
+    info["ground_candidate_count"] = len(ok)
+    if replay is not None:
+        for c in cands:
+            rec = replay["candidates"][c["idx"]]
+            rec.update({"selection_normal": c["n"].tolist(), "selection_offset": float(c["d"]),
+                        "eligible": any(c is candidate for candidate in ok),
+                        "score": c["inliers"] * (0.5 + 0.5 * c["frac_obj_above"])})
     if not ok:
+        if replay is not None: replay.update({"selected": None, "T": T.tolist(), "scale": 1.0})
         info["ground"] = "not_found"; return T, 1.0, info
     best = max(ok, key=lambda c: c["inliers"] * (0.5 + 0.5 * c["frac_obj_above"]))
     normal, d = best["n"], best["d"]
@@ -167,6 +208,10 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None) -> tuple[np
     h = float(cam0h[1]); target = pc.get("assumed_camera_height_m", 1.2)
     scale = target / h if geom.scale == "relative" and h > 1e-3 else 1.0
     info["camera0_height_before_scale"] = round(h, 4); info["scale_factor"] = round(scale, 4)
+    if replay is not None:
+        replay.update({"selected": best["idx"], "T": T.tolist(), "scale": float(scale),
+                       "scale_basis": "assumed_camera_height" if geom.scale == "relative" and h > 1e-3 else "input_scale",
+                       "assumed_camera_height": float(target)})
     return T, scale, info
 
 def _fix(c2w: np.ndarray) -> np.ndarray:
@@ -252,10 +297,22 @@ def smooth_series(x: np.ndarray, win: int) -> np.ndarray:
     return np.stack([np.convolve(xp[:, j], k, mode="valid") for j in range(x.shape[1])], 1) if x.ndim == 2 else np.convolve(xp, k, mode="valid")
 
 # ---------------- main ----------------
-def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "") -> dict:
+def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks, cfg: dict, out_dir: str | Path, keyframes: list[dict], fallbacks: list[str], phrases_source: str = "", *, replay_source: str = "in_memory_unspecified", source_video_sha256: str | None = None) -> dict:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     W, H = geom.size()
-    T, scale, align_info = align_world(geom, tracks, cfg)
+    record_replay = bool(cfg["perception"].get("geometry_replay", False))
+    alignment_replay = {} if record_replay else None
+    object_replay = []
+    if record_replay and any((out / name).exists() for name in ("geometry_replay", "geometry_replay_v1")):
+        raise FileExistsError("geometry replay already exists; use a fresh output directory")
+    align_kwargs = {"replay": alignment_replay} if record_replay else {}
+    if uses_sampling_roles(cfg):
+        from .geometry_replay import _resolve_video_hash
+        align_kwargs["source_video_sha256"] = _resolve_video_hash(frames, source_video_sha256)
+    if align_kwargs:
+        T, scale, align_info = align_world(geom, tracks, cfg, **align_kwargs)
+    else:
+        T, scale, align_info = align_world(geom, tracks, cfg)
     def wpt(pts_cam, k):  # camera points -> aligned, scaled world
         return (to_world(pts_cam, _fix(geom.cam_to_world[k])) @ T[:3, :3].T + T[:3, 3]) * scale
     cam_poses = []
@@ -350,9 +407,16 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             mres = _resize_mask(m, (W, H)); area = float(mres.mean())
             pts = wpt(unproject(geom.depth[k], geom.intrinsics[k], mres, stride=2), k)
             ob = obb_from_points(pts, extent_pct)
+            if record_replay:
+                sample_replay = {"object_id": o.id, "frame": int(fi), "t": float(frames[fi]["t"]),
+                                 "raw_obb": copy.deepcopy(ob), "point_count": len(pts),
+                                 "contact_branch": "obb_unavailable" if ob is None else "disabled_or_ground"}
+                object_replay.append(sample_replay)
             if ob is None: continue
             if use_contact and not is_ground:
                 cc = contact_center(mres, k, ob["size"][1])
+                if record_replay:
+                    sample_replay.update({"contact_candidate": cc, "contact_branch": "no_intersection" if cc is None else "guard_rejected"})
                 # only trust the ground-contact point when the object really rests on the ground: the depth-based centre must agree in xz
                 # and its bottom must be near y=0 (floating objects such as coins keep the depth-based centre)
                 if cc is not None:
@@ -360,6 +424,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     bottom = ob["center"][1] - ob["size"][1] / 2
                     if dxz < max(1.0 * diag, 0.2) and abs(bottom) < max(0.5 * ob["size"][1], 0.15):
                         ob["center_depth"] = ob["center"]; ob["center"] = cc
+                        if record_replay: sample_replay["contact_branch"] = "applied"
+            if record_replay: sample_replay["pre_smoothing_obb"] = copy.deepcopy(ob)
             ob["t"] = frames[fi]["t"]; ob["frame"] = fi; ob["conf"] = float(min(1.0, ob["n"] / 400)); ob["visible"] = True
             ys, xs = np.where(mres)
             bbox = ({"format": "xyxy", "values": [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)],
@@ -473,14 +539,14 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                                         orientation_reliable=footprint_ratio >= cfg["perception"]["motion"].get("yaw_min_aspect_ratio", 1.3))
         mg = motion_result["motion_guess"]
         mg["position_source"] = motion_source
-        # contacts with ground
-        bottoms = cs[:, 1] - sz[:, 1] / 2
-        on_ground = np.abs(bottoms) < cfg["perception"]["contact_dist_m"] * max(1.0, float(np.median(sz[:, 1])) / 0.1)
-        contacts = []
-        if on_ground.mean() > 0.5: contacts.append({"with_id": "ground", "t_start": float(ts_a[0]), "t_end": float(ts_a[-1]), "conf": float(on_ground.mean())})
+        # Geometric compatibility is not evidence of continuous physical contact.
+        proximity = measure_ground_proximity(
+            obbs, [ground], cfg, scale=geom.scale, alignment=align_info,
+            frames=[{"frame_index": int(f["index"]), "t": float(f["t"])} for f in frames])
         geometry_conf = float(np.mean([ob["conf"] for ob in obbs])) if obbs else "unknown"
         objects.append({"id": o.id, "track_id": o.id, "class_guess": o.phrase, "confidence": float(min(1.0, o.score)), "is_dynamic": "unknown" if mg["type"] == "unknown" else mg["type"] != "static",
-                        "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg, "contacts": contacts,
+                        "obb": [{k: v for k, v in ob.items() if k != "n"} for ob in obbs], "motion_guess": mg,
+                        "contacts": [], "ground_proximity": proximity,
                         **({"registration": registration} if registration else {}),
                         "observations": observations,
                         "appearance": appearances[o.id],
@@ -513,6 +579,11 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         "objects": objects,
         "keyframes": keyframes,
     }
+    if record_replay:
+        from .geometry_replay import save_replay
+        save_replay(out / "geometry_replay", geom, tracks, frames, cfg,
+                    alignment_replay, object_replay, replay_source,
+                    source_video_sha256=source_video_sha256)
     (out / "evidence.json").write_text(json.dumps(evidence, indent=1))
     try:
         from .overlay import render_overlay

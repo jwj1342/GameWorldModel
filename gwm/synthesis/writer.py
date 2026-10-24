@@ -10,6 +10,7 @@ from ..perception.quality import assess_evidence_quality
 from .direct import evidence_to_program, recentre_periodic
 from .vlm import VLMClient
 from ..perception.color import measured_color
+from ..perception.ground_proximity import is_geometric_proximity
 
 REPO = Path(__file__).resolve().parents[2]
 PROMPTS = REPO / "prompts"
@@ -46,7 +47,17 @@ def evidence_summary(ev: dict, max_obb: int = 12) -> str:
         mg = o["motion_guess"]; ob = o["obb"]; step = max(1, len(ob) // max_obb)
         traj = "; ".join(f"t={b['t']:.2f} c={_r(b['center'])}" for b in ob[::step])
         mgs = ", ".join(f"{k}={_r(v) if isinstance(v, list) else (round(v, 3) if isinstance(v, float) else v)}" for k, v in mg.items() if k not in ("notes",) and v is not None)
-        lines.append(f"- id={o['id']} class_guess='{o['class_guess']}' conf={_conf_text(o.get('confidence'))} dynamic={o['is_dynamic']} size_first={_r(ob[0]['size'])} quat_first={_r(ob[0]['quat'])} contacts={[c['with_id'] for c in o.get('contacts', [])]}\n  motion_guess: {mgs} ({mg.get('notes','')})\n  centres: {traj}")
+        lines.append(f"- id={o['id']} class_guess='{o['class_guess']}' conf={_conf_text(o.get('confidence'))} dynamic={o['is_dynamic']} size_first={_r(ob[0]['size'])} quat_first={_r(ob[0]['quat'])} contacts={[c['with_id'] for c in o.get('contacts', []) if not is_geometric_proximity(c)]}\n  motion_guess: {mgs} ({mg.get('notes','')})\n  centres: {traj}")
+        proximity = o.get("ground_proximity")
+        if proximity is not None:
+            samples = proximity["samples"]
+            states = [(s["frame_index"], s["t"], s["state"]) for s in samples[:max_obb]]
+            counts = {state: sum(s["state"] == state for s in samples)
+                      for state in ("compatible", "separated", "penetrating", "unknown")}
+            lines.append(f"  ground_proximity={proximity['status']}; counts={counts}; "
+                         f"sampled (frame,t,state), first {len(states)}/{len(samples)}={states}; "
+                         "physical_contact=unknown; confidence=unknown. Geometry-only, no continuous interval. "
+                         "Do not infer support or move geometry from proximity or missing contacts.")
     return "\n".join(lines)
 
 def camera_keyframes_from_evidence(ev: dict, n: int = 16) -> list[dict]:

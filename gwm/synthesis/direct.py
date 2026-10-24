@@ -1,6 +1,7 @@
 """Evidence -> program without any VLM (baseline, ablation, and fallback when generation fails)."""
 from __future__ import annotations
 import math
+from ..perception.ground_proximity import is_geometric_proximity
 import numpy as np
 from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
@@ -233,6 +234,7 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             else:
                 node["notes"] = (f"观测到它在动，但位移太小、模型也判不出来"
                                  f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
-        if any(c["with_id"] == "ground" for c in o.get("contacts", [])) and g: node["support"] = "ground"
+        if any(c["with_id"] == "ground" and not is_geometric_proximity(c)
+               for c in o.get("contacts", [])) and g: node["support"] = "ground"
         program["objects"].append(node)
     return program

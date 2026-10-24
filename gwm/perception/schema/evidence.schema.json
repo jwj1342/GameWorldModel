@@ -195,6 +195,35 @@
         }}
       }
     },
+    "groundProximity": {
+      "type": "object",
+      "required": ["basis", "coordinates", "scale", "temporal_scope", "confidence", "physical_contact", "tolerance_world", "status", "reason", "samples", "issues"],
+      "additionalProperties": false,
+      "properties": {
+        "basis": {"const": "obb_plane_distance"},
+        "coordinates": {"const": "aligned_world"},
+        "scale": {"enum": ["metric", "relative", "unknown"]},
+        "temporal_scope": {"const": "sample_points"},
+        "confidence": {"const": "unknown"},
+        "physical_contact": {"const": "unknown"},
+        "tolerance_world": {"type": "number", "minimum": 0},
+        "status": {"enum": ["assessed", "partial", "unknown"]},
+        "reason": {"type": "string", "minLength": 1},
+        "issues": {"type": "array", "items": {
+          "type": "object", "required": ["code"],
+          "properties": {"code": {"type": "string"}, "frame_index": {"$ref": "#/$defs/frameIndex"}}
+        }},
+        "samples": {"type": "array", "items": {
+          "type": "object", "required": ["frame_index", "t", "state", "gap"], "additionalProperties": false,
+          "properties": {
+            "frame_index": {"$ref": "#/$defs/frameIndex"},
+            "t": {"type": "number", "minimum": 0},
+            "state": {"enum": ["compatible", "separated", "penetrating", "unknown"]},
+            "gap": {"anyOf": [{"type": "number"}, {"$ref": "#/$defs/unknown"}]}
+          }
+        }}
+      }
+    },
     "object": {
       "type": "object",
       "required": ["id", "track_id", "class_guess", "confidence", "is_dynamic", "obb", "motion_guess", "contacts", "observations", "attribute_confidence", "hypotheses"],
@@ -208,6 +237,7 @@
         "obb": {"type": "array"},
         "motion_guess": {"type": "object"},
         "contacts": {"type": "array"},
+        "ground_proximity": {"$ref": "#/$defs/groundProximity"},
         "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}},
         "attribute_confidence": {"$ref": "#/$defs/attributeConfidence"},
         "appearance": {"$ref": "#/$defs/appearance"},
