@@ -527,6 +527,17 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         centres = {f: _p[f][0] for f in frames if f in _p}
         common_deg = (_common_visible_rotation_deg(clouds, frames, cam_list, centres)
                       if len(cam_list) == len(clouds) else np.array([]))
+        # 第六条：同样裁公共可见区，但可见性用**真值基本体的解析法向**算。
+        # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
+        # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
+        # 这个误差源整个去掉，只留深度噪声，才回答得了「噪声本身会不会吃掉收益」。
+        _shapes = _gt_shapes_and_extents(CURRENT_CLIP_DIR) if CURRENT_CLIP_DIR else {}
+        _node = oid if oid in _shapes else oid.rsplit("_", 1)[0]
+        analytic_deg = np.array([])
+        if _node in _shapes and len(cam_list) == len(clouds) and _p:
+            _shape, _half = _shapes[_node]
+            analytic_deg = _common_visible_analytic_deg(
+                clouds, frames, cam_list, _p, _shape, _half)
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -555,6 +566,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/common_range_deg", []).append(float(np.ptp(common_deg)))
             out.setdefault(f"{kind}/common_rmse_deg", []).append(
                 float(np.sqrt(np.mean((common_deg - true_deg) ** 2))))
+        if len(analytic_deg) == len(true_deg):
+            out.setdefault(f"{kind}/analytic_range_deg", []).append(float(np.ptp(analytic_deg)))
+            out.setdefault(f"{kind}/analytic_rmse_deg", []).append(
+                float(np.sqrt(np.mean((analytic_deg - true_deg) ** 2))))
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
@@ -683,6 +698,103 @@ def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.n
 
 
 
+
+
+
+def _gt_shapes_and_extents(clip_dir) -> dict:
+    """真值节点 id → (基本体种类, 半长 3 元组)。解析法向要用。"""
+    out = {}
+    try:
+        program = json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return out
+    for node in (program.get("objects") or []) + (program.get("static") or []):
+        geom = node.get("geom") or {}
+        if geom.get("kind") != "primitive":
+            continue
+        shape = str(geom.get("shape") or "box")
+        ext = geom.get("extent")
+        if isinstance(ext, list) and len(ext) == 3:
+            half = np.asarray(ext, float) / 2.0
+        else:
+            r = float(geom.get("radius") or 0.0)
+            h = float(geom.get("height") or (2 * r))
+            half = np.array([r, h / 2.0, r], float)
+        if (half > 0).all():
+            out[str(node.get("id"))] = (shape, half)
+    return out
+
+
+def _analytic_normals(pts_obj: np.ndarray, shape: str, half: np.ndarray) -> np.ndarray:
+    """基本体表面的**解析**外法向（物体坐标系）。
+
+    为什么必须解析算。上一版从带噪点云的邻域估法向，结果真实数据上比现状还差
+    （静止 RMSE 13.07° → 19.71°）——噪声进了法向就裁错了面。那个否定结果关闭的是
+    「用估计法向近似可见性」，**不是前向模型本身**。这里把法向估计这个误差源整个
+    去掉，只留深度噪声，才回答得了「噪声本身会不会吃掉收益」。
+    """
+    p = np.asarray(pts_obj, float)
+    if shape == "sphere":
+        n = p.copy()
+    elif shape in ("cylinder", "cone"):
+        # 侧面是径向的；靠近端盖的点按 y 给法向
+        radial = np.stack([p[:, 0], np.zeros(len(p)), p[:, 2]], 1)
+        rad_len = np.linalg.norm(radial, axis=1)
+        on_cap = np.abs(p[:, 1]) / max(half[1], 1e-9) > (rad_len / max(half[0], 1e-9))
+        n = radial
+        n[on_cap] = np.stack([np.zeros(on_cap.sum()),
+                              np.sign(p[on_cap, 1]),
+                              np.zeros(on_cap.sum())], 1)
+        if shape == "cone":                      # 锥面法向往外上方倾
+            slope = half[0] / max(2 * half[1], 1e-9)
+            n[~on_cap, 1] = rad_len[~on_cap] * slope
+    else:                                        # box：离哪个面最近就用那个面的法向
+        rel = np.abs(p) / np.maximum(half, 1e-9)
+        axis = np.argmax(rel, axis=1)
+        n = np.zeros_like(p)
+        n[np.arange(len(p)), axis] = np.sign(p[np.arange(len(p)), axis])
+    norm = np.linalg.norm(n, axis=1, keepdims=True)
+    return n / np.maximum(norm, 1e-9)
+
+
+def _common_visible_analytic_deg(clouds: list, frames: list, cams: list,
+                                 poses_obj: dict, shape: str, half: np.ndarray) -> np.ndarray:
+    """公共可见区裁剪，可见性用**解析法向**算——干净的预言机版本。
+
+    和 `_common_visible_rotation_deg` 唯一的差别就是法向从哪来，所以并排比能干净地
+    回答「上一版的失败是法向估计的锅，还是深度噪声的锅」。
+    """
+    from gwm.perception.registration import icp
+    if len(clouds) < 2 or len(cams) != len(clouds):
+        return np.array([])
+
+    def facing(cloud, f, eye):
+        entry = poses_obj.get(f)
+        if entry is None:
+            return np.ones(len(cloud), bool)
+        pos, quat = entry
+        rot = R.from_quat(quat)
+        obj = rot.inv().apply(np.asarray(cloud, float) - np.asarray(pos, float))
+        n_world = rot.apply(_analytic_normals(obj, shape, half))
+        view = np.asarray(eye, float) - cloud
+        view /= np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+        return np.einsum("ij,ij->i", n_world, view) > 0.05
+
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(clouds)):
+        keep_prev = facing(clouds[i - 1], frames[i - 1], cams[i - 1]) & \
+            facing(clouds[i - 1], frames[i - 1], cams[i])
+        keep_cur = facing(clouds[i], frames[i], cams[i]) & \
+            facing(clouds[i], frames[i], cams[i - 1])
+        src, dst = clouds[i][keep_cur], clouds[i - 1][keep_prev]
+        if len(src) < 30 or len(dst) < 30:
+            out.append(out[-1]); continue
+        step = icp(src, dst)
+        if step.get("ok"):
+            R_acc = np.asarray(step["rotation"], float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
 
 def _common_visible_rotation_deg(clouds: list, frames: list, cams: list,
                                  centres: dict) -> np.ndarray:
