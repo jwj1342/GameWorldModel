@@ -1731,9 +1731,20 @@ def _asset_silhouettes(asset_id: str) -> list:
         if not f.is_file():
             continue
         try:
-            a = np.asarray(Image.open(f).convert("RGBA"))[:, :, 3] > 16
+            rgb = np.asarray(Image.open(f).convert("RGB"), dtype=np.int16)
         except (OSError, ValueError):
             continue
+        # **不能用 alpha 通道抠。** 第一版用 `convert("RGBA")[:,:,3] > 16`，而这批
+        # 缩略图的 alpha **全是 255**（有 alpha 通道不等于用了它）——于是每个资产的
+        # 「轮廓」都是整个 160×160 方块，Hu 矩完全相同，所有候选距离相等。
+        # 第一版靠 `if d < best_d` 严格小于保留先遍历到的那个，而列表是
+        # `[gt_ref] + picked`，真值永远排首位，于是「74/74 全对」——纯平局顺序造的。
+        # 自检（margin 恒为 0.000、改成排序后挑对率掉到 0.000~0.125）把它抓了出来。
+        #
+        # 背景是均匀的浅灰 (242,242,242)，按离背景色的距离抠前景。
+        bg = np.median(np.stack([rgb[0, 0], rgb[0, -1], rgb[-1, 0], rgb[-1, -1]]),
+                       axis=0)
+        a = np.abs(rgb - bg[None, None, :]).max(axis=2) > 24
         d = _hu_moments(a)
         if d is not None:
             out.append(d)
