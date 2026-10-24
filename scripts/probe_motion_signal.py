@@ -78,12 +78,25 @@ def perceive(clip_dir: Path, work: Path, perception: str = "gt") -> dict:
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml"]
     if perception == "gt":
         files.append(REPO / "configs/perception/gt.yaml")
+    elif perception == "gtcamseg":
+        # **只把相机位姿换成真值**，深度仍走神经。真值分割照旧保住物体身份。
+        # 用来分解真实几何那一轮的失效：残差挑从 0.297 掉到 0.041，是相机位姿
+        # 还是深度在主导？线索是真值位姿模板在真实几何下仍然有效（15.07°/8.34°，
+        # 基线 35.19°/19.30°）——点云还带着足够的形状信息，坏掉的是配准的条件数，
+        # 而条件数最直接的杀手是相机位姿（点云正是靠它摆到世界坐标里的）。
+        #
+        # 反过来不行：真值深度是从真值相机渲出来的，深度和相机必须一起换
+        # （见 configs/perception/gt_geometry.yaml 的注释）。
+        files.append(REPO / "configs/perception/gt_segmentation.yaml")
+        files.append(REPO / "configs/perception/gt_camera.yaml")
     elif perception == "gtseg":
         # 真值分割保住物体身份（否则 id 变成检测器的证据 id，真值资产 ref 对不上，
         # 残差那一臂根本不触发），几何换成真实的 VGGT。
         files.append(REPO / "configs/perception/gt_segmentation.yaml")
     cfg = load_config([f for f in files if Path(f).is_file()])
     cfg["perception"]["gt_program"] = str(clip_dir / "program.json")
+    if perception == "gtcamseg":
+        cfg["perception"]["gt_camera_program"] = str(clip_dir / "program.json")
     return run_perception(str(clip_dir / "clip.mp4"), clip_dir.name, work / clip_dir.name, cfg)
 
 
@@ -1965,7 +1978,7 @@ def main() -> int:
     ap.add_argument("--rendered", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--limit", type=int, default=8)
-    ap.add_argument("--perception", default="gt", choices=("gt", "gtseg", "neural"),
+    ap.add_argument("--perception", default="gt", choices=("gt", "gtcamseg", "gtseg", "neural"),
                     help="gt=全真值；gtseg=真值分割+真实几何（保住物体身份，只换深度）；"
                          "neural=全真实。残差挑资产的数都是全真值上测的，而管线端到端"
                          "是 0/78，必须单独验深度噪声这一条。")
