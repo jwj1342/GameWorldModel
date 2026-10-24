@@ -199,7 +199,15 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
         return free
     r_free, r_fixed = free.get("rmse"), fixed.get("rmse")
     if r_free is None or r_fixed is None or r_fixed <= 1e-9:
-        return free
+        # 提前返回的路上也要留下**为什么**。第一版这里直接 return free，于是上层拿到
+        # 的 rotation_gain 是 None，看起来像「闸没生效」，实际是「闸根本没运行」。
+        # 两件事要做的处理完全不同，不能靠猜。
+        out = dict(free)
+        out["rotation_accepted"] = None
+        out["rotation_gate_skipped"] = (
+            "free_rmse_none" if r_free is None else
+            "fixed_rmse_none" if r_fixed is None else "fixed_rmse_degenerate")
+        return out
     gain = (r_fixed - r_free) / r_fixed
     # **相对增益还不够，要有绝对下限。** 只有平移的那一档如果残差本来就在噪声水平，
     # 那是「已经拟合得很好了」，转动再压一点点也没有意义——而两个很小的数做比值，
