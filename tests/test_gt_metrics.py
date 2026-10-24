@@ -321,3 +321,58 @@ def test_配对判据可选而且起点口径不吃运动误差():
     with pytest.raises(ValueError):
         evaluate(program(["a"]), program(["a"]), states(["a"]), states(["a"]),
                  match_on="whatever")
+
+
+def test_配对不看类名所以类名准确率要单独报():
+    """`match_objects` 的代价只有距离，没有类别项——一个叫 "cardboard box" 的东西
+    摆在真值 marble 的位置上，在召回和精确率里算命中。
+
+    所以「召回 0.500」的意思是「一半的真值物体位置上有东西」，不是「一半的物体被
+    正确重建了」。实测：即使把场景里确切存在的类名喂给检测器，配对上的 24 个里也
+    只有 3 个贴对了标签；换一组完全不相干的通用词表，配对数和精确率几乎不变，
+    类名准确率是 0（#56）。
+
+    类名决定检索哪个资产，资产决定场景长什么样——不单独报这一列，「复原得像不像」
+    就没在量。
+    """
+    gt = program(["a"]); gt["objects"][0]["class"] = "marble"
+    right = program(["a"]); right["objects"][0]["class"] = "marble"
+    wrong = program(["a"]); wrong["objects"][0]["class"] = "cardboard box"
+
+    hit = evaluate(gt, right, states(["a"]), states(["a"]))["full"]["objects"]
+    miss = evaluate(gt, wrong, states(["a"]), states(["a"]))["full"]["objects"]
+    # 两种情况下位置完全一样，所以召回和精确率必须一样——这正是问题所在
+    assert hit["recall"] == miss["recall"] and hit["precision"] == miss["precision"]
+    # 而类名准确率要把它们分开
+    assert hit["class_accuracy"] == 1.0, f"类名对了却没算对：{hit}"
+    assert miss["class_accuracy"] == 0.0, f"类名错了却算对了：{miss}"
+
+
+def test_形状和尺度分开报而且形状对缩放不敏感():
+    """真值用基本体（sphere/box/cylinder/cone），我们产出带 extent 的资产节点，
+    两边形状描述方式不同，所以统一折成三个边长再比。
+
+    形状差对**整体缩放不敏感**：一个细长的东西被重建成细长的，哪怕大小差一倍，
+    形状这一项也该是对的。尺度单独报。
+
+    为什么不用类名：这个合成数据集的类名和形状脱钩（生成器从词表挑名字、再独立配
+    一个基本体，girder 是球、coin 是盒子、crate 用过三种形状），类名准确率在这里
+    量的是一个原理上测不出来的量（#56）。
+    """
+    from gwm.feedback.gt_metrics import node_extent, shape_scale_agreement
+
+    # 基本体折边长
+    assert list(node_extent({"geom": {"shape": "sphere", "radius": 0.5}})) == [1.0, 1.0, 1.0]
+    cyl = node_extent({"geom": {"shape": "cylinder", "radius": 0.5, "height": 3.0}})
+    assert list(cyl) == [1.0, 3.0, 1.0]
+
+    gt = {"geom": {"shape": "box", "extent": [1.0, 4.0, 1.0]}}          # 细长
+    same_shape_bigger = {"geom": {"extent": [2.0, 8.0, 2.0]}}           # 同形状、大一倍
+    wrong_shape = {"geom": {"extent": [1.0, 1.0, 1.0]}}                 # 立方
+
+    err, ratio = shape_scale_agreement(gt, same_shape_bigger)
+    assert err < 1e-9, f"同形状不同大小，形状差应该是 0，实际 {err}"
+    assert abs(ratio - 2.0) < 1e-9, "尺度要单独报出来"
+
+    err2, _ = shape_scale_agreement(gt, wrong_shape)
+    assert err2 > 0.2, f"细长的被重建成立方，形状差该明显，实际 {err2}"

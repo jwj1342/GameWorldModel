@@ -52,6 +52,45 @@ def estimate_normals(points: np.ndarray, k: int = 12) -> np.ndarray:
     return vectors[:, :, 0]                           # 最小特征值对应的方向
 
 
+def visible_subset(model: np.ndarray, cam: np.ndarray, *, k: int = 12,
+                   normals: np.ndarray | None = None) -> np.ndarray:
+    """模型里**从这个相机位置看得见**的那一部分（的下标）。
+
+    为什么需要它。`refine_poses` 那条「全部帧建完整模型、每帧独立对它配准」实测更差
+    （`172d5ae`），原因写得很清楚——
+
+    > 一帧只看得见一个局部表面，拿它去配准更完整的模型时，这块局部可以滑到模型上
+    > 好几个位置都说得通；而相邻两帧的可见面大小相当、重叠又多，反倒良态。
+
+    也就是说「部分对完整」欠定，**是因为没告诉它该对哪一部分**。而那个信息我们是有的：
+    可见面为什么变？因为相机动了。相机位姿是几何后端一起给出来的，现成的，
+    但 `registration.py` 里一行相机都没有——`track_rigid` 只拿到点云。
+
+    所以这里按法向朝不朝着相机来筛模型：留下正对相机的那一半，再去配准。
+    这样源和目标就是**以同样的方式**局部的，欠定的根源就去掉了。
+
+    **法向必须先统一朝外。** `estimate_normals` 取的是邻域最小主成分方向，符号是任意
+    的，所以不能直接看点积正负。第一版用了 `|n·view| > 阈值`，结果留下的是正对**和**
+    背对两个面、只丢掉掠射的一圈——球面上留下来的点质心仍在中间，**根本没选出可见那
+    一侧**。单元测试当场抓住了这件事。
+
+    这里先按「从点云质心指向该点」的方向给法向定向（这些基本体都接近凸的，这个定向
+    是对的），再留下 `n·view > 0` 的那些，也就是法向朝着相机的面。掠射的也一并去掉
+    ——掠射面在深度图里本来就采不到点，留着只会制造假对应。
+    """
+    model = np.asarray(model, float)
+    if len(model) < k + 1:
+        return np.arange(len(model))
+    n = estimate_normals(model, k=k) if normals is None else np.asarray(normals, float)
+    outward = model - model.mean(0)                   # 近似凸：质心指向表面就是朝外
+    flip = np.sign(np.einsum("ij,ij->i", n, outward))
+    flip[flip == 0] = 1.0
+    n = n * flip[:, None]
+    view = np.asarray(cam, float) - model
+    view = view / np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+    cos = np.einsum("ij,ij->i", n, view)
+    return np.flatnonzero(cos > 0.34)                 # 朝向相机且非掠射（约 70 度以内）
+
 def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
                          normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """点到面的一步：小角度线性化之后解一个 6x6 方程。
@@ -76,12 +115,20 @@ def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
 
 def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         tolerance: float = 1e-4, reject_factor: float = 2.5,
-        max_points: int = 2000, seed: int = 0, point_to_plane: bool = False) -> dict:
+        max_points: int = 2000, seed: int = 0, point_to_plane: bool = False,
+        translation_only: bool = False) -> dict:
     """把 source 配准到 target。返回旋转、平移、残差和参与配准的点数。
 
     `reject_factor` 控制剔除：距离大于「中位距离乘这个系数」的对应点不参与求解。
     相邻帧之间总有一部分点是刚露出来或刚被遮住的，它们在另一帧里没有对应，必须剔掉，
     否则会把整个变换拽偏。
+
+    `translation_only=True` 时干脆不给转动这个自由度，每步只解对应点的质心差。
+    它是用来当**零假设**的：ICP 在部分曲面上总能找到一个让残差更小的转动，
+    所以静止物体也会被解出 13.5 度的假转动（#7 在另一批数据上量到 26.6 度），
+    而铰链门槛是 8 度——第三档全是假关节就是这么来的。
+    有了这一档，「这个物体到底转没转」就能变成一个**带零假设的检验**：
+    只有当允许转动显著降低残差时，才认它真的转了。
     """
     from scipy.spatial import cKDTree
 
@@ -109,6 +156,10 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         if normals is not None:
             R_step, t_step = _point_to_plane_step(current[keep], dst[indices[keep]],
                                                   normals[indices[keep]])
+        elif translation_only:
+            # 只解平移：对应点的质心差。转动这个自由度干脆不给。
+            R_step = np.eye(3)
+            t_step = dst[indices[keep]].mean(0) - current[keep].mean(0)
         else:
             R_step, t_step = kabsch(current[keep], dst[indices[keep]])
         current = current @ R_step.T + t_step
@@ -123,9 +174,69 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
             "rmse": rmse, "pairs": int(len(current))}
 
 
+
+
+def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
+                            min_gain: float = 0.05, **icp_kwargs) -> dict:
+    """转动要「挣」出来：只有显著降低残差才认它真的转了。
+
+    为什么需要。ICP 无条件享有旋转自由度，而在一块**部分曲面**上它总能找到某个转动
+    让残差更小——于是静止物体也被解出转动。实测 13.5 度（#7 在另一批数据上是
+    26.6 度），而铰链门槛是 8 度，所以第三档产出的关节全是假的。
+
+    位置那一侧已经被时间平滑治住了（位移误差 0.045 → 0.028，静止漂移 0.077 → 0.039），
+    **但平滑不影响转动**，所以这个数一直挂在那儿。它是现在挡住第三档的那一个数。
+
+    做法是把「转没转」变成一个**带零假设的检验**，而不是无条件相信 ICP：
+    零假设是「只有平移」，备择是「平移 + 转动」。只有当后者把残差压低超过
+    `min_gain`（相对比例）时，才采用带转动的解；否则返回转动为单位阵的那个。
+
+    这正是今天反复踩的那个坑的反面——报任何「更好」之前，先摆出一个什么都不做的基线。
+    """
+    free = icp(source, target, **icp_kwargs)
+    fixed = icp(source, target, translation_only=True, **icp_kwargs)
+    if not free.get("ok") or not fixed.get("ok"):
+        return free
+    r_free, r_fixed = free.get("rmse"), fixed.get("rmse")
+    if r_free is None or r_fixed is None or r_fixed <= 1e-9:
+        # 提前返回的路上也要留下**为什么**。第一版这里直接 return free，于是上层拿到
+        # 的 rotation_gain 是 None，看起来像「闸没生效」，实际是「闸根本没运行」。
+        # 两件事要做的处理完全不同，不能靠猜。
+        why = ("free_rmse_none" if r_free is None else
+               "fixed_rmse_none" if r_fixed is None else "fixed_rmse_degenerate")
+        # 残差退化那一条要返回 **fixed**，不是 free。
+        # `r_fixed <= 1e-9` 的意思是「只用平移就把数据解释干净了」——那正是最强的
+        # 「不需要转动」的证据，这时候再把带转动的解交出去是反的。第一版返回 free，
+        # 于是纯平移的用例拿到了自由 ICP 解出的那点数值残余转动。
+        out = dict(fixed if why == "fixed_rmse_degenerate" else free)
+        out["rotation_accepted"] = False if why == "fixed_rmse_degenerate" else None
+        out["rotation_gate_skipped"] = why
+        return out
+    gain = (r_fixed - r_free) / r_fixed
+    # **相对增益还不够，要有绝对下限。** 只有平移的那一档如果残差本来就在噪声水平，
+    # 那是「已经拟合得很好了」，转动再压一点点也没有意义——而两个很小的数做比值，
+    # 相对增益很容易随便就超过阈值。单元测试里纯平移的用例就是这么漏过去的。
+    #
+    # 下限按点云自身的尺度定，无量纲：残差低于最长边的 1% 就当作已经对齐好了。
+    src = np.asarray(source, float)
+    scale = float(np.ptp(src, axis=0).max()) if len(src) else 0.0
+    already_good = scale > 0 and r_fixed < 0.01 * scale
+    accept = (gain >= min_gain) and not already_good
+    out = dict(free if accept else fixed)
+    out["rotation_gain"] = float(gain)
+    out["rotation_already_good"] = bool(already_good)
+    # 诊断值一起返回：闸没按预期工作时，不该靠猜
+    out["rmse_free"] = float(r_free)
+    out["rmse_translation_only"] = float(r_fixed)
+    out["cloud_scale"] = float(scale)
+    out["rotation_accepted"] = bool(accept)
+    return out
+
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
-                refine: int = 0, **icp_kwargs) -> dict:
+                refine: int = 0, cam_positions: list | None = None,
+                rotation_min_gain: float | None = None,
+                **icp_kwargs) -> dict:
     """把一串逐帧点云配成一条轨迹。
 
     点云本身已经在世界坐标里，所以帧与帧之间的变换就是物体这一步的运动。
@@ -138,6 +249,17 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
 
     返回每帧位置、每步残差和锚点。锚点默认取第一帧质心，它落在可见表面上所以绝对位置
     本来就偏；轨迹的**形状**不依赖锚点，而运动估计用的正是形状。
+
+    `cam_positions`（可选，世界坐标下每帧的相机位置）给了之后，每一帧只拿**它看得见
+    的那部分模型**去配，而不是整个模型。
+
+    为什么这条值得试。`refine_poses` 那种「全部帧建完整模型、每帧独立配」实测更差
+    （`172d5ae`）：一帧只看得见一个局部表面，拿它去配更完整的模型时，这块局部能滑到
+    好几个位置都说得通。**欠定的根源是没告诉它该对哪一部分**——而这个信息现成就有：
+    可见面为什么变？因为相机动了。相机位姿是几何后端一起给出来的，但
+    `registration.py` 里原本一行相机都没有，`track_rigid` 只拿到点云。
+
+    不给就是原来的行为，一点不变。
     """
     if not clouds:
         return {"positions": [], "residuals": [], "ok": False, "reason": "no clouds"}
@@ -151,6 +273,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     residuals: list[float | None] = []
     steps_t: list[float] = []                  # 每一步解出来的平移量
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
+    gate_votes: list[bool] = []                # 转动闸放行了哪些步（开闸时才有）
     step_transforms: list[tuple[np.ndarray, np.ndarray]] = []
     R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
     transforms = [(R_acc.copy(), t_acc.copy())]
@@ -158,12 +281,27 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
         cloud = np.asarray(current, float)
         # 用上一帧的位姿做初值：相邻帧位姿接近，这样 ICP 从一开始就在收敛域里
         guess = cloud @ R_acc.T + t_acc
-        step = icp(guess, model, **icp_kwargs)
+        # 给了相机轨迹就只拿**这一帧看得见的那部分模型**去配。
+        # 「部分对完整」欠定（见 visible_subset 的注释和 172d5ae），而欠定的根源是
+        # 没告诉它该对哪一部分——相机位置正好给出这个信息，而且是现成的。
+        target = model
+        if cam_positions is not None and index < len(cam_positions):
+            cam_obj = R_acc @ np.asarray(cam_positions[index], float) + t_acc
+            keep = visible_subset(model, cam_obj)
+            if len(keep) >= 50:
+                target = model[keep]
+        step = (rotation_earns_its_keep(guess, target, min_gain=rotation_min_gain, **icp_kwargs)
+                if rotation_min_gain is not None else icp(guess, target, **icp_kwargs))
         if step["ok"]:
             # 每步的修正量是判静止最稳的信号：累积位置会被缓慢滑移带偏，
             # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。
             steps_t.append(float(np.linalg.norm(step["translation"])))
             step_transforms.append((step["rotation"].copy(), step["translation"].copy()))
+            # 闸到底放行了多少步。三个门槛给出完全相同的 rot_static（12.670），
+            # 说明增益分布离它们都很远——到底是「几乎总放行」还是「几乎总拦住」，
+            # 不能靠猜，直接数。
+            if "rotation_accepted" in step:
+                gate_votes.append(bool(step["rotation_accepted"]))
             angle = (np.trace(step["rotation"]) - 1.0) / 2.0
             steps_r.append(float(np.degrees(np.arccos(np.clip(angle, -1.0, 1.0)))))
             R_acc = step["rotation"] @ R_acc
@@ -191,6 +329,8 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             "step_translation": steps_t, "step_rotation_deg": steps_r,
             "total_rotation": R_acc.tolist(), "total_translation": t_acc.tolist(),
             "step_transforms": step_transforms,
+            "rotation_gate_accept_rate": (sum(gate_votes) / len(gate_votes)) if gate_votes else None,
+            "rotation_gate_steps": len(gate_votes),
             "ok": True, "frames": len(positions)}
 
 
@@ -228,6 +368,25 @@ def _axis_of(rotation: np.ndarray) -> tuple[np.ndarray, float]:
     return axis / norm, angle
 
 
+# **这个函数在当前链路上不成立，默认关着（`infer_articulation: false`）。原因是
+# #7 那个 ICP 伪造转动，不是这里的阈值没调好。**
+#
+# #7 做过一个合成对照：一个完全静止的物体被 ICP 解出 **26.6°** 的转动，根因是
+# 「图像上固定的采样栅格 × 相机运动」让两帧的点落在物体表面的不同位置上。而下面
+# 铰链的门槛是 **8°**。实测触发时的转角中位数是 22.4° / 37.8° / 76.5°（三批数据）
+# ——和伪造转动同一个量级，全在门槛之上。
+#
+# 这一个机制解释了四个现象：
+#   写出来的关节 12 个 hinge 只有 1 个 slide —— 伪造的是转动，所以几乎全判成铰链；
+#   全真值几何 + 全真值分割也救不了（12 个真关节只找回 1 个）—— 完美的掩码和深度
+#     不会让 ICP 不伪造转动，伪造来自采样方式随相机动；
+#   铰链重建残差那个判据方向是反的（真关节 0.606 > 非关节 0.530）—— 假关节的
+#     「转动」本来就是拟合出来的，当然拟合得好；
+#   抬门槛没用 —— 真关节的转角和伪造转动完全重叠（#7 里那张表：抬门槛会挡掉
+#     十四个真转动里的九个）。
+#
+# 所以这一档挂在 #7 后面，不是 #56 后面。在 ICP 那个问题解决之前，调这里的任何
+# 阈值都没有意义。
 def infer_articulation(tracked: dict, *, min_rotation_deg: float = 8.0,
                        min_slide_m: float = 0.05, axis_consistency: float = 0.85,
                        slide_straightness: float = 0.9) -> dict | None:

@@ -64,3 +64,18 @@ def test_分离时长有配置缺省值():
     from pathlib import Path
     cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
     assert cfg["synthesis"]["separate_seconds"] == 1.5
+
+
+def test_固定结构按词匹配而不是按子串():
+    """`"ground" in "playground"` 是 True，`"table" in "tablet"` 也是。
+
+    这个 bug 一直潜伏着：调用方原来要求「运动分类肯定地说它静止」才生效，而运动分类
+    85% 的时候返回 unknown，等于把这条规则大部分时候关掉了。把那个与条件换成
+    「没有证据表明它会动」之后它立刻咬人——playground slide 被判成了固定结构。
+    """
+    from gwm.taxonomy import is_static_class
+
+    for name in ("wall", "wooden floor", "train track", "conveyor belt", "dirt road"):
+        assert is_static_class(name), f"{name} 应该是固定结构"
+    for name in ("playground slide", "tablet", "railing gun", "grasshopper", "wallet"):
+        assert not is_static_class(name), f"{name} 不该被判成固定结构"

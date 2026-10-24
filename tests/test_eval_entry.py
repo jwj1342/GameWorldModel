@@ -328,3 +328,19 @@ def test_ground_truth_path_outside_the_repo_is_recorded_absolute(tmp_path):
     assert ev._display_path(outside) == str(outside)
     inside = ev.REPO / "examples" / "handwritten" / "program.json"
     assert ev._display_path(inside) == "examples/handwritten/program.json"
+
+
+def test_一个物体都没检出来时汇总不该崩():
+    """`rebuild_with_assets` 的汇总行是 `bool(index) if root else False`，
+    只守了 root 没守 asset_nodes。一条**零个物体**的片段会在所有工作做完之后、
+    写汇总时崩在 UnboundLocalError 上，产物全丢。实测十二条里有两条是这样。
+
+    这里只盯住「源码里 index 在分支外初始化」——完整复现要跑整条感知链路，太贵。
+    """
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "rebuild_with_assets.py").read_text(encoding="utf-8")
+    init = re.search(r"^(\s*)index = embedder = None", src, re.M)
+    assert init, "index 没有在任何地方初始化"
+    assert len(init.group(1)) == 4, "index 的初始化缩进在 if 里面，零物体的片段仍会崩"

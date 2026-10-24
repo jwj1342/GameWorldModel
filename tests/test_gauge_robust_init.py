@@ -73,7 +73,7 @@ def test_coarse_gauge_votes_instead_of_averaging():
     """直接测粗对齐这一层：三个点对得上，一个离群点不该左右结果。"""
     gt = np.array([[0.0, 1, 0.0], [6.0, 1, 0.0], [0.0, 1, 4.0]])
     pred = np.vstack([gt + np.array([10.0, 0, 0]), [[500.0, 1, 500.0]]])
-    R, t, info = coarse_gauge(gt, pred, 3.0)
+    R, t, _s, info = coarse_gauge(gt, pred, 3.0)
     assert info["inliers"] == 3
     assert np.allclose(R, np.eye(3))
     assert t == pytest.approx([-10.0, 0.0, 0.0], abs=1e-6)

@@ -140,7 +140,8 @@ def test_default_yaml_has_no_duplicate_keys_and_preserves_both_branches():
 
 
 @pytest.mark.parametrize("cache_state", ["valid", "tampered"])
-def test_archived_cache_rebuild_preserves_registration_and_occlusion(tmp_path, monkeypatch, cache_state):
+@pytest.mark.parametrize("rotation_gate", [None, .05])
+def test_archived_cache_rebuild_preserves_registration_and_occlusion(tmp_path, monkeypatch, cache_state, rotation_gate):
     evmod = importlib.import_module("gwm.perception.evidence")
     overlay = importlib.import_module("gwm.perception.overlay")
     monkeypatch.setattr(evmod, "align_world", lambda *args: (np.eye(4), 1, {"ground": "not_found"}))
@@ -166,9 +167,12 @@ def test_archived_cache_rebuild_preserves_registration_and_occlusion(tmp_path, m
         archive.write_bytes(b"changed")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     registered = np.array([[float(i), 0, 0] for i in range(6)])
-    monkeypatch.setattr(evmod, "track_rigid", lambda clouds: {
-        "ok": True, "positions": registered.tolist(), "orientations": [np.eye(3).tolist()]*6,
-        "residuals": [.01]*6})
+    registration_calls = []
+    def track(clouds, *, rotation_min_gain=None):
+        registration_calls.append(rotation_min_gain)
+        return {"ok": True, "positions": registered.tolist(),
+                "orientations": [np.eye(3).tolist()]*6, "residuals": [.01]*6}
+    monkeypatch.setattr(evmod, "track_rigid", track)
     calls = []
     original = evmod.estimate_motion
 
@@ -180,7 +184,9 @@ def test_archived_cache_rebuild_preserves_registration_and_occlusion(tmp_path, m
     cfg = load_config()
     cfg["perception"]["ground_contact_centers"] = False
     cfg["perception"]["motion"]["registration_smooth_window"] = 1
+    cfg["perception"]["motion"]["rotation_min_gain"] = rotation_gate
     rebuilt = rebuild_evidence(tmp_path, cfg)
+    assert registration_calls == [rotation_gate]
     assert len(calls) == 1
     positions, quaternions, kwargs = calls[0]
     np.testing.assert_allclose(positions - positions[0], registered)

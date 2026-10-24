@@ -12,7 +12,7 @@
 from __future__ import annotations
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .framing import scale_program
 from .behavior import (BINDING_CLASSES, TEST_FAMILIES, TRAIN_FAMILIES,
@@ -40,22 +40,34 @@ class SceneSpec:
                                           # 见 gwm/dataset/framing.py 和 #68
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # 真值场景用资产库搭（见 behavior._asset_geom）。给配置字典，里面要有
+    # assets.library；尺寸来自所选GLB的真实XYZ边界，不使用排序形状缓存。
+    # 留空、库不可用或所选静态几何不支持时，沿用基本体回退。
+    #
+    # 为什么需要：现在的真值是「随机名字 + 独立挑的基本体」，于是「该挑哪个资产」
+    # 没有标准答案（检索改进测不出来——实测换掉 64% 的资产，所有指标逐字节不动），
+    # 而且类名和形状脱钩导致 class_accuracy 恒等于噪声。真值改从同一个库里挑，
+    # 两件事一起修好。
+    asset_cfg: dict | None = None
 
+    # 两个派生方法都用 `dataclasses.replace`，**不要逐字段重建**。
+    #
+    # 原来是逐字段抄的，于是 `stage_scale` 被漏掉、退回默认的 1.0——基准片段缩到了
+    # 0.15，派生出来的配对没缩，两边差 6.667 倍。后果是 `style_variant` 这组
+    # 「同行为、只换样式」的不变量**根本不成立**，而 #52 的整个指标就建立在这个
+    # 不变量上。实测六组 style_variant 行为全不同，一组都用不了。
+    #
+    # 逐字段重建是这类 bug 的温床：以后往 SceneSpec 加字段，一样会被静默漏掉，
+    # 而且不报错。replace 只改要改的，其余自动带上。
     def with_style(self, style_seed: int, clip: str) -> "SceneSpec":
         """同行为、同观测，只换样式。"""
-        return SceneSpec(clip=clip, family=self.family, behavior_seed=self.behavior_seed,
-                         style_seed=style_seed, camera_seed=self.camera_seed, profile=self.profile,
-                         duration=self.duration, fps=self.fps, objects=self.objects,
-                         camera_track=self.camera_track, notes=self.notes,
-                         tags=tuple(self.tags) + ("style_variant",))
+        return replace(self, clip=clip, style_seed=style_seed,
+                       tags=tuple(self.tags) + ("style_variant",))
 
     def with_behavior(self, behavior_seed: int, clip: str) -> "SceneSpec":
         """同样式、同观测，只换行为。"""
-        return SceneSpec(clip=clip, family=self.family, behavior_seed=behavior_seed,
-                         style_seed=self.style_seed, camera_seed=self.camera_seed, profile=self.profile,
-                         duration=self.duration, fps=self.fps, objects=self.objects,
-                         camera_track=self.camera_track, notes=self.notes,
-                         tags=tuple(self.tags) + ("behavior_variant",))
+        return replace(self, clip=clip, behavior_seed=behavior_seed,
+                       tags=tuple(self.tags) + ("behavior_variant",))
 
 
 def _material_rng(style_seed: int, node_id: str) -> random.Random:
@@ -129,7 +141,8 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
 
     statics, layout = sample_layout(behavior_rng, spec.family, stage_rng)
     count = spec.objects or behavior_rng.randint(1, 8)
-    objects = sample_objects(behavior_rng, layout, spec.profile, spec.duration, count)
+    objects = sample_objects(behavior_rng, layout, spec.profile, spec.duration, count,
+                             cfg=spec.asset_cfg)
 
     track = spec.camera_track or camera_rng.choice(CAMERA_TRACKS)
     camera = sample_camera(camera_rng, layout, spec.duration, track)
