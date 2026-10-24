@@ -201,9 +201,19 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
     if r_free is None or r_fixed is None or r_fixed <= 1e-9:
         return free
     gain = (r_fixed - r_free) / r_fixed
-    out = dict(free if gain >= min_gain else fixed)
+    # **相对增益还不够，要有绝对下限。** 只有平移的那一档如果残差本来就在噪声水平，
+    # 那是「已经拟合得很好了」，转动再压一点点也没有意义——而两个很小的数做比值，
+    # 相对增益很容易随便就超过阈值。单元测试里纯平移的用例就是这么漏过去的。
+    #
+    # 下限按点云自身的尺度定，无量纲：残差低于最长边的 1% 就当作已经对齐好了。
+    src = np.asarray(source, float)
+    scale = float(np.ptp(src, axis=0).max()) if len(src) else 0.0
+    already_good = scale > 0 and r_fixed < 0.01 * scale
+    accept = (gain >= min_gain) and not already_good
+    out = dict(free if accept else fixed)
     out["rotation_gain"] = float(gain)
-    out["rotation_accepted"] = bool(gain >= min_gain)
+    out["rotation_already_good"] = bool(already_good)
+    out["rotation_accepted"] = bool(accept)
     return out
 
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
