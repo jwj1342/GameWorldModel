@@ -233,7 +233,7 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
     return out
 
 def box_template(centre, extents, rotation=None, per_face: int = 400,
-                 seed: int = 0) -> np.ndarray:
+                 seed: int = 0, shrink: float = 0.95) -> np.ndarray:
     """按包围盒搭一个长方体表面，当配准模板用。
 
     为什么要合成一个而不是用观测点。`track_rigid` 维护的那个「累积模型」是从
@@ -250,8 +250,22 @@ def box_template(centre, extents, rotation=None, per_face: int = 400,
     但它不是对所有形状都有效：立鳍在正中间的 T 形上，包围盒里绝大部分是空的，
     盒子表面离物体表面很远，假转动反而从 5.9° 涨到 21.7°。调用方要按
     `template_mismatch` 之类的判据决定用不用。
+
+    **尺寸错的方向不对称，宁可搭小。** 受控扫描（模板相对它要配的那片点云）：
+
+        长方体  x0.7: 5.0°  x0.8: 4.9°  x0.9: 1.9°  x1.0: 5.2°  x1.1: 9.7°
+                x1.2: 24.2°  x1.3: 88.5°                        （对照 12.5°）
+        L 形    x0.7: 5.2°  x0.8: 4.8°  x0.9: 3.7°  x1.0: 4.0°  x1.1: 4.6°
+                x1.2:  5.7°  x1.3: 15.4°                        （对照  7.6°）
+
+    偏小完全安全甚至更好，偏大才崩，悬崖在 x1.1~x1.3。道理：偏小的模板整个嵌在
+    点云里，对应关系仍然唯一；偏大的闭合盒子让局部点云沿着面滑。所以 `shrink`
+    默认 0.95——这点保险是白给的，而偏大的代价是量级的。
+
+    真实点云上那次失败正是栽在这一侧：模板按**所有帧并起来**的点云搭，而那团点云
+    随视角扫动，盒子比物体大一圈，静止物体的假转动 19.85°→43.59°。
     """
-    half = np.asarray(extents, float) / 2.0
+    half = np.asarray(extents, float) * float(shrink) / 2.0
     rng = np.random.default_rng(seed)
     pts = []
     for axis in range(3):
