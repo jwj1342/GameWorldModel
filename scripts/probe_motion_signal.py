@@ -275,6 +275,11 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                     out.setdefault(f"drift_static/{tag}_smooth15", []).append(
                         float(np.linalg.norm(sm.max(0) - sm.min(0))))
                 gated_arms.append((tag, g))     # 转角那一段在外面统一记，这里只收集
+                # 闸到底放行了多少步。三个门槛给出完全相同的 rot_static，说明增益
+                # 分布离它们都很远——「几乎总放行」还是「几乎总拦住」不能靠猜。
+                rate = g.get("rotation_gate_accept_rate")
+                if rate is not None:
+                    out.setdefault(f"gate_accept/{tag}", []).append(float(rate))
 
         vis = track_rigid(clouds, cam_positions=cams)
         if vis["ok"] and len(vis["positions"]) == len(gt):

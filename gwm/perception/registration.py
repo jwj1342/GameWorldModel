@@ -273,6 +273,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     residuals: list[float | None] = []
     steps_t: list[float] = []                  # 每一步解出来的平移量
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
+    gate_votes: list[bool] = []                # 转动闸放行了哪些步（开闸时才有）
     step_transforms: list[tuple[np.ndarray, np.ndarray]] = []
     R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
     transforms = [(R_acc.copy(), t_acc.copy())]
@@ -296,6 +297,11 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。
             steps_t.append(float(np.linalg.norm(step["translation"])))
             step_transforms.append((step["rotation"].copy(), step["translation"].copy()))
+            # 闸到底放行了多少步。三个门槛给出完全相同的 rot_static（12.670），
+            # 说明增益分布离它们都很远——到底是「几乎总放行」还是「几乎总拦住」，
+            # 不能靠猜，直接数。
+            if "rotation_accepted" in step:
+                gate_votes.append(bool(step["rotation_accepted"]))
             angle = (np.trace(step["rotation"]) - 1.0) / 2.0
             steps_r.append(float(np.degrees(np.arccos(np.clip(angle, -1.0, 1.0)))))
             R_acc = step["rotation"] @ R_acc
@@ -323,6 +329,8 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             "step_translation": steps_t, "step_rotation_deg": steps_r,
             "total_rotation": R_acc.tolist(), "total_translation": t_acc.tolist(),
             "step_transforms": step_transforms,
+            "rotation_gate_accept_rate": (sum(gate_votes) / len(gate_votes)) if gate_votes else None,
+            "rotation_gate_steps": len(gate_votes),
             "ok": True, "frames": len(positions)}
 
 
