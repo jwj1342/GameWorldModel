@@ -1303,13 +1303,25 @@ def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
 
     资产的尺度和物体未必一致（检索只保证类别像），所以配准前先按两边的包围盒
     对角线把模板缩到同一尺度——ICP 解的是刚体变换，尺度不对会被旋转和平移吸收。
+
+    **缩到哪个对角线上要紧，这里原来是错的。** 第一版用 `np.vstack(clouds)`，也就是
+    所有帧并起来的那团点云的对角线。但那团点云随视角扫动，比物体大一圈——实测
+    并帧对角线是逐帧包围盒中位对角线的 **1.89 倍**。于是资产模板被统一放大了 1.89 倍，
+    而受控扫描说模板相对点云大 1.2 倍就越过对照、大 1.3 倍崩到 88.5°。
+
+    也就是说那次「资产网格当模板，静止假转动 63.71°、RMSE 80.92°」量的不是资产
+    模板，是一个被放大 1.89 倍的资产模板。拟合长方体那一臂换成逐帧中位之后
+    RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
     """
     from gwm.perception.registration import icp
     template = _asset_points(cls)
     if template is None or not clouds:
         return np.array([])
-    span = np.vstack(clouds)
-    obs_diag = float(np.linalg.norm(span.max(0) - span.min(0)))
+    per_frame = [np.linalg.norm(np.asarray(c, float).max(0) - np.asarray(c, float).min(0))
+                 for c in clouds if len(np.asarray(c, float)) >= 10]
+    if not per_frame:
+        return np.array([])
+    obs_diag = float(np.median(per_frame))
     tpl_diag = float(np.linalg.norm(template.max(0) - template.min(0)))
     if tpl_diag <= 1e-9 or obs_diag <= 1e-9:
         return np.array([])
