@@ -143,7 +143,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
                   top_k: int = 5, shapes: dict | None = None,
-                  shape_weight: float = 0.0, image_admit: int = 0) -> list[dict]:
+                  shape_weight: float = 0.0, image_admit: int = 0,
+                  image_gate_rank: int = 0) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -220,10 +221,33 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                 record["image_score_best"] = round(float(max(image_scores.values())), 4)
             except (AttributeError, ValueError, TypeError):
                 pass
-        if hits and hits[0][1] >= min_score:
-            geom["ref"] = hits[0][0].id
-            record.update(chosen=hits[0][0].id, score=hits[0][1])
-        else:
-            record["chosen"] = None
+        # 收不收这个资产。原来只有一道门：**文字分**过 min_score。
+        #
+        # 图像塞进来的候选文字分恒为 0，所以就算融合之后排第一也必然被这道门挡掉、
+        # 退回基本体——「图像进候选」这个开关在这道门下面从原理上不可能兑现。
+        # 所以图像这一路要有自己的门，而且不能是拍脑袋的绝对阈值（DINOv2 比真实
+        # 照片和低多边形渲染，余弦值天然低，量纲和文字分对不上，这是当初不混进
+        # 阈值的理由，仍然成立）。
+        #
+        # 用**本次裁剪图在全库里的名次**当判据：名次是自归一化的，不受这一张图
+        # 整体相似度高低的影响。标定来自实测——本片段真值资产的中位名次 365、
+        # 进前 32 名 0.176，而别片段集合的零假设是 1117 / 0.031。名次越靠前，
+        # 富集倍数越高。
+        chosen_pair = hits[0] if hits else None
+        record["chosen"] = None
+        if chosen_pair is not None:
+            top_asset, top_text = chosen_pair
+            passed = top_text >= min_score
+            # 文字分为 0 说明这个候选是图像塞进来的——自检要数它，否则又会出现
+            # 「旋钮没点着却以为测到了」那种事。
+            record["admitted_by_image"] = bool(image_scores) and top_text <= 0.0
+            if not passed and image_scores and image_gate_rank > 0:
+                own = float(image_scores.get(top_asset.id, 0.0))
+                rank = 1 + sum(1 for v in image_scores.values() if v > own)
+                record["image_gate_rank"] = rank
+                passed = rank <= image_gate_rank
+            if passed:
+                geom["ref"] = top_asset.id
+                record.update(chosen=top_asset.id, score=top_text)
         decisions.append(record)
     return decisions

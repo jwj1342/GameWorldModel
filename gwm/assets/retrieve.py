@@ -132,24 +132,31 @@ def retrieve(query: str, catalog: list[Asset], k: int = 5,
     # 让图像分高的资产**进候选集**，而不只是在候选里重排。
     #
     # 上面那段注释说「文字分决定收不收，图像分只在候选里重排」，当时的理由是量纲
-    # 不同、混进阈值会误杀。那个理由仍然成立——所以这里不动阈值，只是**额外**把
-    # 图像分最高的几个塞进候选，它们的文字分照常是 0。
+    # 不同、混进阈值会误杀。那个理由仍然成立——所以这里不动文字阈值，只是**额外**
+    # 把图像分最高的几个塞进候选，它们的文字分照常是 0，由调用方那一侧另立一道
+    # 图像自己的门来决定收不收（见 annotate.choose_assets 的 image_gate_rank）。
     #
-    # 为什么要加：真值改用资产库搭之后第一次量到检索的真实状况——
-    #   拿**真值类名**当查询词，top-1 命中 42/61 = 0.689、top-5 0.820；
-    #   而管线端到端（查询词＝检测器说的词）是 **0/71 = 0.000**。
-    # 排序本身是好的，瓶颈整个在查询词上：**正确的资产根本没进候选集**。
-    # 在这种情况下任何「候选内重排」（图像分、形状分）都从原理上没有机会——
-    # 实测形状重排换掉 64%% 的资产，命中率 0.000 → 0.000。
-    if image_scores and image_admit > 0:
-        have = {a.id for a, _s in ranked}
-        extra = sorted(((a, 0.0) for a in catalog if a.id not in have),
-                       key=lambda pair: -image_scores.get(pair[0].id, 0.0))[:image_admit]
-        ranked = ranked + extra
+    # **塞进来的必须进融合重排的窗口里。** 第一版写成 `ranked = ranked + extra`
+    # 接在文字命中表尾巴后面，而下面的重排只动前 `shortlist` 个——查 "cardboard box"
+    # 时库里名字带 box 的文字分都 >0，`ranked` 早就超过 24 条，塞进来的 32 个全落在
+    # `tail` 里，永不重排、永不进前 k。实测 122 条决策只有 8 条候选表真的变了
+    # （那 8 条文字只召回 2 个，表短，extras 才进了窗口），一条都没改选中。
+    # 那个 A/B 什么都没测到。
+    #
+    # 为什么值得加：拿视频里的裁剪图在**全库 4812 个**里按图像分排序，本片段真值
+    # 资产的中位名次是 365，而换成别片段真值集合的零假设是 1117；进前 32 名的比例
+    # 0.176 对零假设 0.031。图像分里有真信号。对照之下，管线现在按文字选中的那个
+    # 在图像分上排第 860——比正确答案还靠后，也就是图像信号已经「知道」得更准，
+    # 只是从来没被问过。
     if image_scores:
-        head, tail = ranked[:shortlist], ranked[shortlist:]
-        head.sort(key=lambda pair: (-((1 - image_weight) * pair[1]
+        pool = ranked[:shortlist]
+        if image_admit > 0:
+            have = {a.id for a, _s in pool}
+            extra = sorted((a for a in catalog if a.id not in have),
+                           key=lambda a: -image_scores.get(a.id, 0.0))[:image_admit]
+            pool = pool + [(a, 0.0) for a in extra]
+        pool.sort(key=lambda pair: (-((1 - image_weight) * pair[1]
                                       + image_weight * image_scores.get(pair[0].id, 0.0)),
                                     pair[0].id))
-        ranked = head + tail
+        ranked = pool + ranked[shortlist:]
     return ranked[:k]

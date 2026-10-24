@@ -96,6 +96,39 @@ def main(argv: list[str]) -> int:
         if dists:
             print(f"  形状距离（到最近的真值资产）中位 {statistics.median(dists):.4f}，"
                   f"四分位 {np.percentile(dists, 25):.4f} / {np.percentile(dists, 75):.4f}")
+        # **旋钮点着了没有。** 上一轮「图像进候选 32」两臂逐字节相同，我差点读成
+        # 「图像分定位不到资产」，查下来是 extras 被接在了重排窗口外面，整个 A/B
+        # 什么都没测到。所以这里直接把决策记录里的账目报出来：图像塞进来的候选
+        # 最后被选中了几次。这个数是 0 的话，上面那三行的任何变化都和图像无关。
+        tot = picked = adm = adm_picked = 0
+        gate_ranks: list[int] = []
+        for clip_dir in sorted(Path(report).glob("*test_*")):
+            rb = clip_dir / "rebuild.json"
+            if not rb.is_file():
+                continue
+            d = json.loads(rb.read_text(encoding="utf-8"))
+            recs = d if isinstance(d, list) else (d.get("decisions") or d.get("records") or [])
+            if isinstance(recs, dict):
+                recs = list(recs.values())
+            for r in recs:
+                if not isinstance(r, dict):
+                    continue
+                tot += 1
+                picked += 1 if r.get("chosen") else 0
+                if r.get("admitted_by_image"):
+                    adm += 1
+                    if r.get("chosen"):
+                        adm_picked += 1
+                if r.get("image_gate_rank") is not None:
+                    gate_ranks.append(int(r["image_gate_rank"]))
+        if tot:
+            print(f"  账目：决策 {tot} 条，选中资产 {picked} 条；其中**图像塞进来的候选"
+                  f"排到第一**的 {adm} 条，最终真被选中的 {adm_picked} 条")
+            if gate_ranks:
+                print(f"        走图像那道门的 {len(gate_ranks)} 条，名次中位 "
+                      f"{statistics.median(gate_ranks):.0f}")
+            if adm_picked == 0:
+                print("        **图像那一路一次都没兑现**——上面三行的任何变化都与图像无关。")
     print("""
 怎么读：
   三个数一起看。命中率是最严的，形状距离最宽——**创新点一要动的是后者**：
