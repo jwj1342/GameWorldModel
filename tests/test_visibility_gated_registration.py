@@ -92,8 +92,13 @@ def test_纯平移时转动挣不到_返回零转动():
     dst = src + np.array([0.04, 0.01, 0.0])
     out = rotation_earns_its_keep(src, dst, min_gain=0.05)
     ang = np.degrees(np.arccos(np.clip((np.trace(out["rotation"]) - 1) / 2, -1, 1)))
-    assert ang < 1e-6, f"纯平移却接受了 {ang:.2f} 度的转动"
-    assert out["rotation_accepted"] is False
+    why = (f"gain={out.get('rotation_gain'):.3f} "
+           f"rmse_free={out.get('rmse_free'):.5f} "
+           f"rmse_trans={out.get('rmse_translation_only'):.5f} "
+           f"scale={out.get('cloud_scale'):.3f} "
+           f"already_good={out.get('rotation_already_good')}")
+    assert ang < 1e-6, f"纯平移却接受了 {ang:.2f} 度的转动（{why}）"
+    assert out["rotation_accepted"] is False, why
 
 
 def test_真的转了的时候转动要被接受():

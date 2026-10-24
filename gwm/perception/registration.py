@@ -213,6 +213,10 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
     out = dict(free if accept else fixed)
     out["rotation_gain"] = float(gain)
     out["rotation_already_good"] = bool(already_good)
+    # 诊断值一起返回：闸没按预期工作时，不该靠猜
+    out["rmse_free"] = float(r_free)
+    out["rmse_translation_only"] = float(r_fixed)
+    out["cloud_scale"] = float(scale)
     out["rotation_accepted"] = bool(accept)
     return out
 
