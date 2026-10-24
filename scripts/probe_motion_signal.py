@@ -34,7 +34,7 @@ if str(REPO) not in sys.path:
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
 from gwm.perception.evidence import smooth_series                                  # noqa: E402
-from gwm.perception.registration import infer_articulation, looks_static, track_rigid  # noqa: E402
+from gwm.perception.registration import infer_articulation, kabsch, looks_static, track_rigid  # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
 
@@ -531,6 +531,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
         # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
         # 这个误差源整个去掉，只留深度噪声，才回答得了「噪声本身会不会吃掉收益」。
+        # 第七条，也是唯一真正去掉根因的：**跨帧特征点对应**（光流跟踪 + Kabsch），
+        # 完全不用 ICP。前六条都在「拿什么去配」上做文章，而只要两边不是同一批物理
+        # 点，那些都改变不了问题的性质。合成实验证明有精确对应就全好了。
+        flow_deg = _flow_correspondence_rotation_deg(run, geom, clouds, frames, per_frame)
         _shapes = _gt_shapes_and_extents(CURRENT_CLIP_DIR) if CURRENT_CLIP_DIR else {}
         _node = oid if oid in _shapes else oid.rsplit("_", 1)[0]
         analytic_deg = np.array([])
@@ -566,6 +570,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/common_range_deg", []).append(float(np.ptp(common_deg)))
             out.setdefault(f"{kind}/common_rmse_deg", []).append(
                 float(np.sqrt(np.mean((common_deg - true_deg) ** 2))))
+        if len(flow_deg) == len(true_deg):
+            out.setdefault(f"{kind}/flow_range_deg", []).append(float(np.ptp(flow_deg)))
+            out.setdefault(f"{kind}/flow_rmse_deg", []).append(
+                float(np.sqrt(np.mean((flow_deg - true_deg) ** 2))))
         if len(analytic_deg) == len(true_deg):
             out.setdefault(f"{kind}/analytic_range_deg", []).append(float(np.ptp(analytic_deg)))
             out.setdefault(f"{kind}/analytic_rmse_deg", []).append(
@@ -700,6 +708,90 @@ def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.n
 
 
 
+
+
+
+def _flow_correspondence_rotation_deg(run, geom, clouds: list, frames: list,
+                                      masks_per_frame: dict) -> np.ndarray:
+    """**跨帧特征点对应**解刚体变换，完全不用 ICP（#79 的小版本）。
+
+    为什么是这条。当天关掉的六条修法里有五条都在「拿什么去配」或「配哪一块」上做
+    文章，全部失败；而合成实验证明**有精确对应关系就全好了**（静止 0.0°、纯平移
+    0.8°、真转 90° 保住 90.4°）。根因一直是同一句话——
+
+        采样格子钉在**图像**上不钉在物体上，相机一动，两帧之间连一个共同物理点都没有。
+
+    ICP 用最近邻**猜**对应，所以它改变不了这件事。光流跟踪的是**同一个物理点**，
+    这是六条路里唯一真正去掉根因的做法。
+
+    流程：掩码内取角点 → Lucas-Kanade 跟到下一帧 → 两端各用自己那帧的深度抬到三维
+    → Kabsch 闭式解 (R, t)。对应关系是**跟出来的**，不是猜的。
+
+    已知的弱点，先写在这里免得又把弱版本当强版本（当天栽过两次）：
+      * 光流在低纹理表面上会失败——合成渲染的物体恰恰纹理很少；
+      * 反向跟踪一致性只是必要条件，不保证对；
+      * 抬到三维用的还是同一张深度图，深度噪声没有被去掉。
+    所以这是「对应关系这条路值不值得投」的第一个数，不是落地方案。
+    """
+    import cv2
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    lk = dict(winSize=(21, 21), maxLevel=3,
+              criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ka, kb = idx_of.get(frames[i - 1]), idx_of.get(frames[i])
+        if ka is None or kb is None or ka >= len(files) or kb >= len(files):
+            out.append(out[-1]); continue
+        ga = cv2.imread(str(files[ka]), cv2.IMREAD_GRAYSCALE)
+        gb = cv2.imread(str(files[kb]), cv2.IMREAD_GRAYSCALE)
+        if ga is None or gb is None:
+            out.append(out[-1]); continue
+        m = masks_per_frame.get(frames[i - 1])
+        if m is None:
+            out.append(out[-1]); continue
+        m = np.asarray(m).astype(np.uint8)
+        if m.shape != ga.shape:
+            m = cv2.resize(m, (ga.shape[1], ga.shape[0]), interpolation=cv2.INTER_NEAREST)
+        pts = cv2.goodFeaturesToTrack(ga, maxCorners=400, qualityLevel=0.01,
+                                      minDistance=4, mask=m)
+        if pts is None or len(pts) < 8:
+            out.append(out[-1]); continue
+        nxt, st, _err = cv2.calcOpticalFlowPyrLK(ga, gb, pts, None, **lk)
+        back, st2, _ = cv2.calcOpticalFlowPyrLK(gb, ga, nxt, None, **lk)
+        # 反向跟踪一致性：跟过去再跟回来，落点偏得远的扔掉
+        ok = (st.ravel() == 1) & (st2.ravel() == 1) & \
+             (np.linalg.norm(pts - back, axis=2).ravel() < 1.0)
+        if ok.sum() < 8:
+            out.append(out[-1]); continue
+        pa, pb = pts[ok].reshape(-1, 2), nxt[ok].reshape(-1, 2)
+        P = _lift(geom, ka, pa)
+        Q = _lift(geom, kb, pb)
+        good = np.isfinite(P).all(1) & np.isfinite(Q).all(1)
+        if good.sum() < 8:
+            out.append(out[-1]); continue
+        rot, _t = kabsch(Q[good], P[good])       # 把第 i 帧配回第 i-1 帧
+        R_acc = np.asarray(rot, float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
+
+
+def _lift(geom, k: int, px: np.ndarray) -> np.ndarray:
+    """像素坐标 + 该帧深度 → 世界坐标。深度图是几何后端那一档的分辨率。"""
+    depth = geom.depth[k]
+    h, w = depth.shape
+    u = np.clip(np.round(px[:, 0]).astype(int), 0, w - 1)
+    v = np.clip(np.round(px[:, 1]).astype(int), 0, h - 1)
+    z = depth[v, u]
+    K = geom.intrinsics[k]
+    cam = np.stack([(u - K[0, 2]) * z / K[0, 0], (v - K[1, 2]) * z / K[1, 1], z], 1)
+    out = to_world(cam, _fix(geom.cam_to_world[k]))
+    out[z <= 1e-4] = np.nan
+    return out
 
 def _gt_shapes_and_extents(clip_dir) -> dict:
     """真值节点 id → (基本体种类, 半长 3 元组)。解析法向要用。"""
