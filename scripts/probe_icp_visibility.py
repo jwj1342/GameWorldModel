@@ -53,6 +53,39 @@ def box_surface(extent=(0.6, 0.4, 0.3), per_face=900, seed=0) -> tuple[np.ndarra
     return np.vstack(pts), np.vstack(normals)
 
 
+# 受控实验里的物体一直是个长方体，而候选修法的模板也是个长方体——那是在自己证
+# 自己：「盒子模板对盒子物体有效」推不出「盒子模板对真实物体有效」。
+# 这里加两个非盒子的源形状，模板仍然只按**观测包围盒**搭（不需要检索挑对资产）。
+SHAPES: dict[str, list[tuple[tuple, tuple]]] = {
+    "box": [((0.0, 0.0, 0.0), (0.6, 0.4, 0.3))],
+    # L 形：一块底板加一块立板。家具的典型轮廓，而且转动不对称。
+    "ell": [((0.0, -0.125, 0.0), (0.6, 0.15, 0.3)),
+            ((-0.225, 0.15, 0.0), (0.15, 0.4, 0.3))],
+    # T 形：底板加中间一片竖鳍。比 L 更接近「包围盒填充率很低」的那类物体。
+    "tee": [((0.0, -0.15, 0.0), (0.6, 0.12, 0.3)),
+            ((0.0, 0.14, 0.0), (0.12, 0.4, 0.3))],
+}
+
+
+def compound_surface(boxes, per_face: int = 900, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """若干长方体拼成的**实体**表面。
+
+    落在别的子块内部的点要剔掉。不剔的话，可见性剔除会留下本该被物体自己挡住的
+    内部面，「只留可见面」这一档就不成立了——而整个受控实验的结论都建立在那一档上。
+    """
+    pts, normals = [], []
+    for i, (centre, extent) in enumerate(boxes):
+        p, n = box_surface(extent, per_face, seed + i)
+        pts.append(p + np.asarray(centre, float))
+        normals.append(n)
+    P, N = np.vstack(pts), np.vstack(normals)
+    inside = np.zeros(len(P), bool)
+    for centre, extent in boxes:
+        c, h = np.asarray(centre, float), np.asarray(extent, float) / 2
+        inside |= np.all(np.abs(P - c) < h - 1e-6, axis=1)
+    return P[~inside], N[~inside]
+
+
 def camera_at(mode: str, k: int, n: int) -> np.ndarray | None:
     """相机位置。None 表示不做可见性剔除（完整点云）。"""
     if mode == "full":
@@ -124,8 +157,9 @@ def voxel_downsample(pts: np.ndarray, size: float) -> np.ndarray:
     return out / counts[:, None]
 
 
-def make_clouds(motion: str, visibility: str, n_frames: int = 24) -> list[np.ndarray]:
-    base, base_normals = box_surface()
+def make_clouds(motion: str, visibility: str, n_frames: int = 24,
+                shape: str = "box") -> list[np.ndarray]:
+    base, base_normals = compound_surface(SHAPES[shape])
     clouds = []
     for k in range(n_frames):
         rot, trans = pose_at(motion, k, n_frames)
@@ -146,7 +180,7 @@ def make_clouds(motion: str, visibility: str, n_frames: int = 24) -> list[np.nda
     return clouds
 
 
-def make_template(kind: str) -> np.ndarray:
+def make_template(kind: str, shape: str = "box") -> np.ndarray:
     """退化模板。模板的作用是提供一组**不随相机动的完整点**——它需不需要是
     *正确*的那个资产？
 
@@ -161,32 +195,41 @@ def make_template(kind: str) -> np.ndarray:
                 所以这一档是对照，不是现实风险，放进来是为了说明「错在哪一维」
                 不是等价的。
     """
-    base = (0.6, 0.4, 0.3)
+    truth = compound_surface(SHAPES[shape])[0]
+    base = tuple(float(v) for v in np.ptp(truth, axis=0))
+    # 非盒子形状的包围盒中心不在原点，而 box_surface 是以原点为心的。不把模板挪到
+    # 同一个中心上，ICP 一上来就要吃掉一个平移，暖启动还会把它累积放大。
+    centre = (truth.min(axis=0) + truth.max(axis=0)) / 2
     if kind == "perfect":
-        return box_surface(base)[0]
-    if kind == "aspect":                       # 比例错：长宽高各歪 30% 左右
-        return box_surface((0.78, 0.34, 0.33))[0]
+        return truth                           # 物体本身的完整表面
+    if kind == "obb":
+        # **不需要检索的那一档**：按观测包围盒搭个盒子。尺寸和比例都来自观测，
+        # 形状细节一概不要。这正是点二能不能脱离点一独立推进的判据。
+        return box_surface(base)[0] + centre
+    if kind == "aspect":                       # 比例错：三条边各歪 30% 左右
+        return box_surface(tuple(v * f for v, f in zip(base, (1.3, 0.85, 1.1))))[0] + centre
     if kind == "cube":                         # 比例全丢，体积保持
         e = float(np.prod(base)) ** (1 / 3)
-        return box_surface((e, e, e))[0]
+        return box_surface((e, e, e))[0] + centre
     if kind == "scale":                        # 整体大 1.5 倍
-        return box_surface(tuple(v * 1.5 for v in base))[0]
+        return box_surface(tuple(v * 1.5 for v in base))[0] + centre
     rng = np.random.default_rng(0)
     if kind == "sphere":                       # 等体积的球
         r = (3 * float(np.prod(base)) / (4 * np.pi)) ** (1 / 3)
         v = rng.normal(size=(5400, 3))
-        return v / np.linalg.norm(v, axis=1, keepdims=True) * r
+        return v / np.linalg.norm(v, axis=1, keepdims=True) * r + centre
     if kind == "cylinder":                     # 等体积的柱，轴沿 y
         r = (float(np.prod(base)) / (np.pi * base[1])) ** 0.5
         a = rng.uniform(0, 2 * np.pi, 5400)
         y = rng.uniform(-base[1] / 2, base[1] / 2, 5400)
-        return np.stack([r * np.cos(a), y, r * np.sin(a)], axis=1)
+        return np.stack([r * np.cos(a), y, r * np.sin(a)], axis=1) + centre
     raise ValueError(kind)
 
 
 def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24,
                                      warm_start: bool = False,
-                                     template_kind: str = "perfect") -> float:
+                                     template_kind: str = "perfect",
+                                     shape: str = "box") -> float:
     """把**完整模板**配到每一帧的局部观测上，而不是让局部观测互相配。
 
     受控实验里「完整点云」那一行是全对的（静止 0.3°、转 90° 解出 89.9°），而所有出错
@@ -200,8 +243,8 @@ def solved_rotation_against_template(motion: str, visibility: str, n_frames: int
     这里比的是整段的转角**范围**，取逆不改变大小，所以可以直接比。
     """
     from gwm.perception.registration import icp
-    template = make_template(template_kind)
-    clouds = make_clouds(motion, visibility, n_frames)
+    clouds = make_clouds(motion, visibility, n_frames, shape=shape)
+    template = make_template(template_kind, shape=shape)
     angles = []
     warm_R, warm_t = np.eye(3), np.zeros(3)      # 上一帧解出的位姿，当这一帧的初值
     for cloud in clouds:
@@ -329,22 +372,32 @@ def main() -> int:
     print("  上面那一行用的是**生成点云的那个盒子本身**，完美模板，所以是上限不是现实值。")
     print("  现实里模板来自资产检索，而检索现在 0/71 全错。所以要单独问：")
     print("  模板错到什么程度还压得住假转动。静止那一行的数就是假转动本身。")
-    print(f"{'模板':<22}{'静止(该 0°)':>13}{'转 90°(该 90°)':>16}{'说明':>6}")
-    kinds = [("perfect", "完美：就是那个盒子"), ("aspect", "比例错 30%"),
-             ("cube", "正方体（比例全丢）"), ("sphere", "球（形状全错）"),
-             ("cylinder", "圆柱（形状全错）"), ("scale", "形状对、大 1.5 倍")]
-    for kind, label in kinds:
-        st = solved_rotation_against_template("static", "orbit_grid", n,
-                                              warm_start=True, template_kind=kind)
-        rt = solved_rotation_against_template("rotate", "orbit_grid", n,
-                                              warm_start=True, template_kind=kind)
-        print(f"{label:<22}{st:>12.1f}°{rt:>15.1f}°")
-    print("  对照：两边都是局部观测、谁都不钉死 —— 静止解出 26.6°（上表第四行）。")
+    print("  三个源形状一起看——受控实验一直拿长方体当物体，而候选修法的模板也是")
+    print("  长方体，那是在自己证自己。ell 是 L 形、tee 是 T 形，都不是盒子。")
+    kinds = [("perfect", "完美：物体自己的表面"), ("obb", "**按观测包围盒搭的盒子**"),
+             ("aspect", "包围盒再歪 30%"), ("cube", "正方体（比例全丢）"),
+             ("sphere", "球（转动对称）"), ("cylinder", "圆柱（转动对称）"),
+             ("scale", "形状对、大 1.5 倍")]
+    for shape, slabel in (("box", "长方体"), ("ell", "L 形"), ("tee", "T 形")):
+        clouds = make_clouds("static", "orbit_grid", n, shape=shape)
+        solved = solved_rotation_deg(clouds)
+        none_tmpl = float(np.ptp(solved)) if len(solved) > 1 else float("nan")
+        print(f"\n  ### 源形状：{slabel} ###   对照：不用模板、两边都是局部观测 —— "
+              f"静止解出 {none_tmpl:.1f}°")
+        print(f"  {'模板':<24}{'静止(该 0°)':>13}{'转 90°(该 90°)':>16}")
+        for kind, label in kinds:
+            st = solved_rotation_against_template("static", "orbit_grid", n,
+                                                  warm_start=True, template_kind=kind,
+                                                  shape=shape)
+            rt = solved_rotation_against_template("rotate", "orbit_grid", n,
+                                                  warm_start=True, template_kind=kind,
+                                                  shape=shape)
+            print(f"  {label:<24}{st:>12.1f}°{rt:>15.1f}°")
     print()
-    print("  怎么读。**只要有一档退化模板的静止值明显低于 26.6°，点二就不用等点一**——")
-    print("  因为那说明模板的作用是「提供一组不随相机动的点」，而不是「提供正确的形状」，")
-    print("  那么一个按观测包围盒搭的盒子就够用，不需要检索挑对。")
-    print("  反过来，只有完美模板那一档压得住的话，点二确实卡在检索上。")
+    print("  怎么读。**「按观测包围盒搭的盒子」这一档在三个源形状上都明显低于对照**，")
+    print("  点二就不用等点一——那说明模板的作用是「提供一组不随相机动的点」，而不是")
+    print("  「提供正确的形状」，而包围盒不需要检索挑对，观测直接就有。")
+    print("  反过来，只有在长方体那一组上成立的话，那是源形状和模板撞在一起的假象。")
     print()
     print("「正反不一致」这个自检信号**失败了**：出错的那几行也是 0.00°。ICP 自洽地错——")
     print("相邻两帧采到的确实是差一个小旋转的两块表面，它如实报告了，问题在问题本身。")
