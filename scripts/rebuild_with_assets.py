@@ -224,7 +224,9 @@ def main() -> int:
                                                 else None),
                                   cams=(object_cameras(out)
                                         if int(settings.get("silhouette_top", 0)) > 0
-                                        else None))
+                                        else None),
+                                  mask_largest_component=bool(
+                                      settings.get("mask_largest_component", False)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

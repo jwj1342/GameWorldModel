@@ -245,11 +245,41 @@ def _project_outline(pts, R_wc, yaw: float, grid: int = 96):
     return out
 
 
-def _mask_outline(mask, grid: int = 96):
+def _largest_component(m):
+    """只留掩码的最大连通块。
+
+    **不碰候选，所以没有循环依赖。** 「用挑中的网格去修掩码」那条有陷阱——修出来
+    的掩码被候选塑形，再挑必然偏向同一个候选（配对条件含被测量）。取最大连通块
+    完全独立于候选。
+
+    为什么直指问题：神经掩码的**形状统计和真值几乎一样**（占外接框 0.750 对 0.790、
+    边界复杂度 25.3 对 24.9），却一个都没命中——说明差别不在形状质量，在**框的是
+    什么东西**。碎片和粘连都会在连通性上露出来。
+    """
+    import numpy as _np
+
+    try:
+        from scipy.ndimage import label
+    except ImportError:
+        return m
+    a = _np.asarray(m, bool)
+    if not a.any():
+        return a
+    lab, n = label(a)
+    if n <= 1:
+        return a
+    counts = _np.bincount(lab.ravel())
+    counts[0] = 0
+    return lab == int(counts.argmax())
+
+
+def _mask_outline(mask, grid: int = 96, largest_only: bool = False):
     """观测掩码按它的二维包围盒等比归一化到同一个格子。"""
     import numpy as _np
 
     m = _np.asarray(mask, bool)
+    if largest_only:
+        m = _largest_component(m)
     ys, xs = _np.nonzero(m)
     if len(xs) < 20:
         return None
@@ -266,7 +296,8 @@ def _mask_outline(mask, grid: int = 96):
 
 
 def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
-                    top: int = 0, n_views: int = 3, n_yaw: int = 8) -> tuple:
+                    top: int = 0, n_views: int = 3, n_yaw: int = 8,
+                    largest_component: bool = False) -> tuple:
     """**用轮廓 IoU 从候选里挑**，全程不碰深度。返回 (资产, IoU) 或 (None, None)。
 
     为什么换掉深度残差。根因是 VGGT 沿相机视线把物体压扁（最短轴只剩正确比例的
@@ -298,7 +329,8 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
     if 0 < n_views < len(avail):
         stride = len(avail) / float(n_views)
         avail = [avail[min(len(avail) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
-    obs = [(f, _mask_outline(masks_per_frame[f])) for f in avail]
+    obs = [(f, _mask_outline(masks_per_frame[f], largest_only=largest_component))
+           for f in avail]
     obs = [(f, g) for f, g in obs if g is not None]
     if not obs:
         return None, None
@@ -354,7 +386,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   image_gate_rank: int = 0, clouds: dict | None = None,
                   residual_top: int = 0, root=None,
                   silhouette_top: int = 0, masks_by_obj: dict | None = None,
-                  cams: dict | None = None) -> list[dict]:
+                  cams: dict | None = None,
+                  mask_largest_component: bool = False) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -435,7 +468,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         _mk = (masks_by_obj or {}).get(_oid) if _oid else None
         if silhouette_top > 0 and _mk and cams and root is not None and hits:
             _pick, _iou = silhouette_pick(_mk, cams, [a for a, _s in hits], root,
-                                          top=silhouette_top)
+                                          top=silhouette_top,
+                                          largest_component=mask_largest_component)
             if _pick is not None:
                 _by_id = {a.id: sc for a, sc in hits}
                 record["silhouette_iou"] = round(float(_iou), 4)
