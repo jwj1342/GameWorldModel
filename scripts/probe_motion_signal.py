@@ -535,6 +535,9 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 完全不用 ICP。前六条都在「拿什么去配」上做文章，而只要两边不是同一批物理
         # 点，那些都改变不了问题的性质。合成实验证明有精确对应就全好了。
         flow_deg = _flow_correspondence_rotation_deg(run, geom, clouds, frames, per_frame)
+        # 第八条：稠密光流。稀疏角点在这个物体尺度上拿不到足够的点（掩码中位
+        # 264 像素、角点中位 4 个，而阈值是 8），稠密给的是每个掩码像素一个对应。
+        dense_deg = _dense_flow_rotation_deg(run, geom, frames, per_frame)
         _shapes = _gt_shapes_and_extents(CURRENT_CLIP_DIR) if CURRENT_CLIP_DIR else {}
         _node = oid if oid in _shapes else oid.rsplit("_", 1)[0]
         analytic_deg = np.array([])
@@ -570,6 +573,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/common_range_deg", []).append(float(np.ptp(common_deg)))
             out.setdefault(f"{kind}/common_rmse_deg", []).append(
                 float(np.sqrt(np.mean((common_deg - true_deg) ** 2))))
+        if len(dense_deg) == len(true_deg):
+            out.setdefault(f"{kind}/dense_range_deg", []).append(float(np.ptp(dense_deg)))
+            out.setdefault(f"{kind}/dense_rmse_deg", []).append(
+                float(np.sqrt(np.mean((dense_deg - true_deg) ** 2))))
         if len(flow_deg) == len(true_deg):
             out.setdefault(f"{kind}/flow_range_deg", []).append(float(np.ptp(flow_deg)))
             out.setdefault(f"{kind}/flow_rmse_deg", []).append(
@@ -779,6 +786,66 @@ def _flow_correspondence_rotation_deg(run, geom, clouds: list, frames: list,
         out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
     return np.asarray(out)
 
+
+
+
+def _dense_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> np.ndarray:
+    """**稠密光流**的跨帧对应 + Kabsch。稀疏角点在这个物体尺度上不够用。
+
+    为什么换稠密。稀疏版（goodFeaturesToTrack + LK）两个方向同时崩：静止解出 84.9°、
+    真转 114° 的 spin 解出 0.000°。我第一反应是「合成渲染没纹理」，**数出来是错的**
+    ——587 个物体-帧样本里只有 6.6% 完全没角点，角点数中位 **4.0**，而掩码面积中位
+    只有 **264 像素**（约 16×16）。真因是**物体在画面里太小**，4 个角点过不了
+    `>= 8` 那道门，于是每帧都走「跟不到就沿用上一个值」。
+
+    稠密光流给的是掩码内**每个像素**的对应——264 个像素就是 264 个对应。
+    点数不再是瓶颈，而且 Kabsch 可以配上剔除。
+
+    注意不要把阈值从 8 降到 3 来「解决」稀疏版的问题：4 个点解 Kabsch 对噪声极敏感，
+    那是换一种方式失败。
+    """
+    import cv2
+    from gwm.perception.masks import resize_mask
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ka, kb = idx_of.get(frames[i - 1]), idx_of.get(frames[i])
+        if ka is None or kb is None or ka >= len(files) or kb >= len(files):
+            out.append(out[-1]); continue
+        ga = cv2.imread(str(files[ka]), cv2.IMREAD_GRAYSCALE)
+        gb = cv2.imread(str(files[kb]), cv2.IMREAD_GRAYSCALE)
+        m = masks_per_frame.get(frames[i - 1])
+        if ga is None or gb is None or m is None:
+            out.append(out[-1]); continue
+        m = np.asarray(m).astype(bool)
+        if m.shape != ga.shape:
+            m = resize_mask(m, (ga.shape[1], ga.shape[0])).astype(bool)
+        if m.sum() < 40:
+            out.append(out[-1]); continue
+        flow = cv2.calcOpticalFlowFarneback(ga, gb, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        vs, us = np.nonzero(m)
+        pa = np.stack([us.astype(np.float32), vs.astype(np.float32)], 1)
+        pb = pa + flow[vs, us]
+        P = _lift(geom, ka, pa)
+        Q = _lift(geom, kb, pb)
+        good = np.isfinite(P).all(1) & np.isfinite(Q).all(1)
+        if good.sum() < 20:
+            out.append(out[-1]); continue
+        P, Q = P[good], Q[good]
+        # 一轮剔除：先解一次，把残差大的四分之一扔掉再解一次
+        rot, t = kabsch(Q, P)
+        res = np.linalg.norm(Q @ np.asarray(rot, float).T + t - P, axis=1)
+        keep = res <= np.percentile(res, 75)
+        if keep.sum() >= 20:
+            rot, _t = kabsch(Q[keep], P[keep])
+        R_acc = np.asarray(rot, float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
 
 def _lift(geom, k: int, px: np.ndarray) -> np.ndarray:
     """像素坐标 + 该帧深度 → 世界坐标。深度图是几何后端那一档的分辨率。"""
