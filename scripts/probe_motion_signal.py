@@ -620,6 +620,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 直接把图像前 128 名全过一遍残差即可。衰减多快决定下一步的形状。
             # 深度噪声的容差线：真值深度 + 可控噪声，噪声按包围盒对角线的比例给。
             # 这条曲线是任何未来几何后端的**指标**，比「再试一个后端」有用。
+            # **轮廓判据**：绕开已坐实的根因（深度误差沿视线，轮廓是二维的）。
+            for _c in (32, 128):
+                _sil = _silhouette_pick_rate(per_frame, frames, _gt_ref, _c, n_views=7)
+                if _sil is not None:
+                    out.setdefault(f"{kind}/silpick_cands{_c + 1}", []).append(_sil)
             # 把压扁补偿掉：沿最短主轴拉 1/0.526≈1.9 倍。1.0 是对照。
             for _uf in (1.0, 1.5, 1.9, 2.5):
                 _u = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
@@ -1644,6 +1649,121 @@ def _d2_pick_rate(clouds: list, gt_ref: str, n_distract: int,
     return 1.0 if best_id == gt_ref else 0.0
 
 
+_SIL_CACHE: dict = {}
+THUMB_DIR = Path("/scratch/jwj/gwm/asset_thumbs")
+
+
+def _hu_moments(mask: np.ndarray) -> np.ndarray | None:
+    """二值图的 Hu 矩（取对数压幅），外加紧实度和长宽比。
+
+    Hu 矩对平移、尺度、面内旋转都不变，所以观测的朝向任意也能比。
+    自己算不依赖 cv2：中心矩 → 归一化中心矩 → Hu 的七个组合。
+    """
+    m = np.asarray(mask, bool)
+    ys, xs = np.nonzero(m)
+    if len(xs) < 20:
+        return None
+    x0, y0 = xs.mean(), ys.mean()
+    dx, dy = xs - x0, ys - y0
+    m00 = float(len(xs))
+
+    def mu(i, j):
+        return float((dx ** i * dy ** j).sum())
+
+    def nu(i, j):
+        return mu(i, j) / (m00 ** (1.0 + (i + j) / 2.0))
+
+    n20, n02, n11 = nu(2, 0), nu(0, 2), nu(1, 1)
+    n30, n03, n21, n12 = nu(3, 0), nu(0, 3), nu(2, 1), nu(1, 2)
+    h = np.empty(7)
+    h[0] = n20 + n02
+    h[1] = (n20 - n02) ** 2 + 4 * n11 ** 2
+    h[2] = (n30 - 3 * n12) ** 2 + (3 * n21 - n03) ** 2
+    h[3] = (n30 + n12) ** 2 + (n21 + n03) ** 2
+    h[4] = ((n30 - 3 * n12) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2)
+            + (3 * n21 - n03) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2))
+    h[5] = ((n20 - n02) * ((n30 + n12) ** 2 - (n21 + n03) ** 2)
+            + 4 * n11 * (n30 + n12) * (n21 + n03))
+    h[6] = ((3 * n21 - n03) * (n30 + n12) * ((n30 + n12) ** 2 - 3 * (n21 + n03) ** 2)
+            - (n30 - 3 * n12) * (n21 + n03) * (3 * (n30 + n12) ** 2 - (n21 + n03) ** 2))
+    hu = np.sign(h) * np.log10(np.abs(h) + 1e-30)
+    # 再补两个直观量：紧实度（占外接框的比例）和长宽比。它们不是 Hu 的冗余，
+    # Hu 对这两样不敏感，而低多边形资产之间差别恰恰常在这里。
+    w = float(xs.max() - xs.min() + 1)
+    hgt = float(ys.max() - ys.min() + 1)
+    solidity = m00 / max(w * hgt, 1.0)
+    aspect = max(w, hgt) / max(min(w, hgt), 1.0)
+    return np.concatenate([hu, [solidity * 10.0, np.log10(aspect) * 10.0]])
+
+
+def _asset_silhouettes(asset_id: str) -> list:
+    """资产的轮廓描述子（从缩略图的 alpha 通道来，每个资产 4 个视角）。
+
+    **为什么轮廓。** 根因量到深度误差是**沿相机视线**的（物体被压扁到最短轴的
+    0.526），而轮廓是**二维**的，完全不碰深度——沿视线的误差投影到像平面上是零。
+    所以这是唯一一个绕开已坐实根因的判据。
+
+    每个候选严格 4 个视角，预算完全相同，所以「取最好」在这里不触犯
+    [[best-of-n-init-biases-selection]]（那条针对的是预算不等）。
+    """
+    if asset_id in _SIL_CACHE:
+        return _SIL_CACHE[asset_id]
+    from PIL import Image
+    stem = asset_id.replace("/", "-")
+    out = []
+    for k in range(4):
+        f = THUMB_DIR / f"{stem}_{k}.png"
+        if not f.is_file():
+            continue
+        try:
+            a = np.asarray(Image.open(f).convert("RGBA"))[:, :, 3] > 16
+        except (OSError, ValueError):
+            continue
+        d = _hu_moments(a)
+        if d is not None:
+            out.append(d)
+    _SIL_CACHE[asset_id] = out
+    return out
+
+
+def _silhouette_pick_rate(per_frame: dict, frames: list, gt_ref: str,
+                          n_distract: int, n_views: int = 7) -> float | None:
+    """**用轮廓挑资产**：观测掩码的 Hu 矩对候选资产缩略图轮廓的 Hu 矩。
+
+    协议和残差那条对齐：同样的形状最接近干扰项、同样的候选数和视角数，
+    唯一的变量是判据——一个比三维表面（被深度误差毁掉），一个比二维轮廓（不碰深度）。
+    """
+    if not gt_ref or not per_frame:
+        return None
+    picked = _hard_distractors(gt_ref, n_distract)
+    if len(picked) < n_distract:
+        return None
+    avail = [f for f in frames if f in per_frame]
+    if not avail:
+        return None
+    if 0 < n_views < len(avail):
+        stride = len(avail) / float(n_views)
+        avail = [avail[min(len(avail) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
+    obs = [d for d in (_hu_moments(np.asarray(per_frame[f]).astype(bool)) for f in avail)
+           if d is not None]
+    if not obs:
+        return None
+    best_id, best_d = None, float("inf")
+    for aid in [gt_ref] + picked:
+        sils = _asset_silhouettes(aid)
+        if not sils:
+            continue
+        # 每一帧对该资产的 4 个视角取最近的那个，再对帧取中位——和残差那条
+        # 同样的聚合方式（中位不取均值，单帧掩码漏一块不会拖垮）。
+        per = [min(float(np.abs(o - t).sum()) for t in sils) for o in obs]
+        d = float(np.median(per))
+        if d < best_d:
+            best_d, best_id = d, aid
+    if best_id is None:
+        return None
+    return 1.0 if best_id == gt_ref else 0.0
+
+
 def _shape_distance(a_id: str, b_id: str) -> float | None:
     """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
     shapes = _ASSET_CACHE.get("__shapes__") or {}
@@ -2192,12 +2312,13 @@ def main() -> int:
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
                 or "/respick_cands" in key or "/d2pick_cands" in key
                 or "/respick33" in key or "/respick_noise" in key
-                or "/respick_unflat" in key):
+                or "/respick_unflat" in key or "/silpick_cands" in key):
             n_plus = (33 if "_hard_33" in key
                       else 33 if (key.endswith("/respick33") or "/respick_noise" in key
                                   or "/respick_unflat" in key)
                       else int(key.rsplit("cands", 1)[-1])
-                      if ("respick_cands" in key or "d2pick_cands" in key)
+                      if ("respick_cands" in key or "d2pick_cands" in key
+                          or "silpick_cands" in key)
                       else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
