@@ -553,6 +553,20 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
+        # 物体在画面里多大，用来分桶。对应关系方法在小物体上必然差（孔径问题 +
+        # 邻域平滑），所以报误差之前先把尺寸摆出来——掩码中位只有 264 像素时，
+        # 「方法不行」和「物体太小」是两件事。
+        _areas = [int(np.asarray(per_frame[f]).astype(bool).sum())
+                  for f in frames if f in per_frame]
+        _med_area = float(np.median(_areas)) if _areas else 0.0
+        _bucket = ("小 <200px" if _med_area < 200 else
+                   "中 200~600px" if _med_area < 600 else "大 >600px")
+        out.setdefault(f"area/{_bucket}", []).append(_med_area)
+        if len(dense_deg) == len(true_deg):
+            out.setdefault(f"bysize/{_bucket}/dense_rmse_deg", []).append(
+                float(np.sqrt(np.mean((dense_deg - true_deg) ** 2))))
+        out.setdefault(f"bysize/{_bucket}/icp_rmse_deg", []).append(
+            float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
         out.setdefault(f"{kind}/true_range_deg", []).append(float(np.ptp(true_deg)))
         out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
         out.setdefault(f"{kind}/angle_rmse_deg", []).append(
