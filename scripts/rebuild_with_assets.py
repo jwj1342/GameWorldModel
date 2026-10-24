@@ -62,6 +62,48 @@ def _settle(game_dir: Path, out: Path, seconds: float, separate_seconds: float =
         return {}
 
 
+
+def object_clouds(out: Path, masks: dict, max_frames: int = 9) -> dict:
+    """每个物体的逐帧世界坐标点云，给残差挑资产用。
+
+    只取均匀抽的 max_frames 帧：残差挑资产只用中间那一帧，多取是为了估尺度
+    （逐帧包围盒的中位对角线）。全取会白花时间。
+
+    尺度必须用**逐帧**包围盒的中位值，不能用所有帧并起来的——并帧点云随视角扫动，
+    实测比逐帧中位大 1.89 倍，而模板相对点云大 1.2 倍就越过对照、1.3 倍崩掉。
+    """
+    from gwm.perception.evidence import to_world, unproject
+    from gwm.perception.masks import resize_mask
+    from gwm.perception.run import load_geometry
+
+    path = out / "perception" / "geometry.npz"
+    if not path.is_file():
+        return {}
+    geom = load_geometry(path)
+    frame_of = {int(f): k for k, f in enumerate(geom.frame_indices)}
+    clouds: dict = {}
+    for oid, per_frame in masks.items():
+        items = sorted(per_frame.items())
+        if len(items) > max_frames:
+            step = max(1, len(items) // max_frames)
+            items = items[::step][:max_frames]
+        pile = []
+        for fi, mask in items:
+            k = frame_of.get(int(fi))
+            if k is None:
+                continue
+            m = np.asarray(mask).astype(bool)
+            if m.shape != geom.depth[k].shape:
+                m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+                           np.asarray(geom.cam_to_world[k], float))
+            if len(pts) >= 30:
+                pile.append(pts)
+        if pile:
+            clouds[oid] = pile
+    return clouds
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -144,7 +186,11 @@ def main() -> int:
                                   shapes=_shapes,
                                   shape_weight=float(settings.get("shape_weight", 0.0)),
                                   image_admit=int(settings.get("image_admit", 0)),
-                                  image_gate_rank=int(settings.get("image_gate_rank", 0)))
+                                  image_gate_rank=int(settings.get("image_gate_rank", 0)),
+                                  clouds=(object_clouds(out, masks)
+                                          if int(settings.get("residual_top", 0)) > 0 else None),
+                                  residual_top=int(settings.get("residual_top", 0)),
+                                  root=root)
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

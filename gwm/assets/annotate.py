@@ -139,12 +139,68 @@ def shape_rerank(hits: list, observed: list[float] | None, shapes: dict,
     return [(a, s) for a, s, _d in scored]
 
 
+def residual_pick(clouds: list, candidates: list, root, top: int = 0) -> tuple:
+    """**用配准残差从候选里挑**：把每个候选网格缩到观测点云的尺度，ICP 配一次，
+    取残差最小的。返回 (资产, 残差) 或 (None, None)。
+
+    这是「用连续稠密表征监督离散符号选择」的落地形式。梯度传不过去不要紧——
+    「哪个网格配得上这团点」这个判据本来就不需要梯度。
+
+    实测（assetgt60，74 个带真值 ref 的物体，按样本加权）：
+
+        真值 + 32 个随机干扰          挑对 0.284（随机猜 0.030，9.4 倍）
+        真值 + 32 个**形状最接近**的干扰 挑对 **0.243**（随机猜 0.030，**8.0 倍**）
+
+    第二行是密度匹配的零假设——随机资产长得和目标完全不像，而真实候选集个个都像。
+    换成难干扰项只掉了 0.04，说明残差不是靠排除「长得完全不像的」在赢。
+    真值静止的物体上难干扰项 33 选 1 挑对 0.500。
+
+    **尺度要缩到逐帧包围盒的中位对角线上，不能用并帧的。** 并帧点云随视角扫动，
+    实测比逐帧中位大 **1.89 倍**，而受控扫描说模板相对点云大 1.2 倍就越过对照、
+    1.3 倍崩掉。这个坑踩过一次（资产模板的角度 RMSE 80.92°，改掉之后 32.54°）。
+    偏小是安全的，所以宁可缩小一点。
+
+    **已知边界：物体在转的时候这条就垮**（periodic_rotate 挑对 0.000、spin 0.125，
+    而静止 0.500）。调用方拿不准的时候该退回文字那条，而不是硬挑。
+    """
+    import numpy as _np
+    from ..perception.registration import icp
+    from .mesh import load_points
+
+    if not clouds or not candidates:
+        return None, None
+    per_frame = [float(_np.linalg.norm(_np.asarray(c, float).max(0) - _np.asarray(c, float).min(0)))
+                 for c in clouds if len(_np.asarray(c, float)) >= 10]
+    if not per_frame:
+        return None, None
+    obs_diag = float(_np.median(per_frame))
+    # 取中间那一帧当查询：首帧和末帧的可见面都偏。
+    query = _np.asarray(clouds[len(clouds) // 2], float)
+    best, best_rmse = None, float("inf")
+    for asset in (candidates[:top] if top > 0 else candidates):
+        try:
+            pts = load_points(Path(root) / asset.path, samples=3000)
+        except (OSError, ValueError):
+            continue
+        if pts is None or len(pts) < 10:
+            continue
+        diag = float(_np.linalg.norm(pts.max(0) - pts.min(0)))
+        if diag <= 1e-9 or obs_diag <= 1e-9:
+            continue
+        model = (pts - pts.mean(0)) * (obs_diag / diag)
+        step = icp(query, model)
+        if step["ok"] and step["rmse"] is not None and float(step["rmse"]) < best_rmse:
+            best_rmse, best = float(step["rmse"]), asset
+    return best, (best_rmse if best is not None else None)
+
+
 def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict,
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
                   top_k: int = 5, shapes: dict | None = None,
                   shape_weight: float = 0.0, image_admit: int = 0,
-                  image_gate_rank: int = 0) -> list[dict]:
+                  image_gate_rank: int = 0, clouds: dict | None = None,
+                  residual_top: int = 0, root=None) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -200,7 +256,10 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                 except (OSError, ValueError, KeyError) as error:
                     record["image_error"] = f"{type(error).__name__}: {error}"[:160]
 
-        hits = retrieve(query, catalog, k=top_k, image_scores=image_scores,
+        # 残差挑资产要在**大候选集**上做才有意义：图像嵌入把正确资产放在中位
+        # 第 365 名，前 5 个里基本不会有它。所以开了残差就把 k 放大到 residual_top。
+        _k = max(top_k, residual_top) if residual_top > 0 else top_k
+        hits = retrieve(query, catalog, k=_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0,
                         image_admit=image_admit)
         # 形状重排：把观测到的边长比例用进「选哪个资产」这个离散选择。
@@ -211,7 +270,20 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                 hits = shape_rerank(hits, obs_ratio, shapes, weight=shape_weight)
                 record["shape_reranked"] = True
                 record["observed_ratio"] = [round(v, 3) for v in obs_ratio]
-        record["candidates"] = [{"asset_id": a.id, "score": s} for a, s in hits]
+        # **用配准残差从候选里挑。** 这是「连续稠密表征监督离散符号选择」的落地形式：
+        # 文字和图像只负责**提候选**，谁配得上这团点由几何说了算。见 residual_pick。
+        _cloud = (clouds or {}).get(obj["id"]) if obj else None
+        if residual_top > 0 and _cloud and root is not None and hits:
+            _pick, _rmse = residual_pick(_cloud, [a for a, _s in hits], root,
+                                         top=residual_top)
+            if _pick is not None:
+                _by_id = {a.id: s for a, s in hits}
+                record["residual_rmse"] = round(float(_rmse), 5)
+                record["residual_rank"] = next(
+                    (i for i, (a, _s) in enumerate(hits) if a.id == _pick.id), None)
+                hits = [(_pick, _by_id.get(_pick.id, 0.0))] + [
+                    pair for pair in hits if pair[0].id != _pick.id]
+        record["candidates"] = [{"asset_id": a.id, "score": s} for a, s in hits[:5]]
         # 图像那一路的最高分记进**决策记录**，不进程序。程序是一份受校验的契约：
         # schema 里 assetGeom 的 additionalProperties 是 false，往 geom 里塞一个
         # ref_image_score 会让每个资产节点都校验失败——试过，十二条片段只剩两条能跑完，
