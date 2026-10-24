@@ -105,6 +105,12 @@ def _asset_pool(cfg: dict | None = None) -> list:
                         # 类名取文件名，把分隔符换成空格——它会成为真值的 class，
                         # 检索那一侧拿到的就是这个词，所以名字和网格天然绑定。
                         name = str(a.name).replace("-", " ").replace("_", " ").strip().lower()
+                        # schema 给 class 定了 maxLength（40），资产文件名里有
+                        # "track striped wide straight hill complete half" 这种，
+                        # 不截就整条片段校验失败——实测 12 条里挂了 1 条。
+                        # 从**词边界**截，别截出半个词。
+                        if len(name) > 40:
+                            name = name[:40].rsplit(" ", 1)[0] or name[:40]
                         if name:
                             _ASSET_POOL.append((a.id, name, r))
         except Exception:                      # noqa: BLE001 — 没有库不是错误
