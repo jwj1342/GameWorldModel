@@ -111,7 +111,8 @@ def score_asset(query_tokens: list[str], asset: Asset) -> float:
 
 def retrieve(query: str, catalog: list[Asset], k: int = 5,
              image_scores: dict[str, float] | None = None,
-             image_weight: float = 0.5, shortlist: int = 24) -> list[tuple[Asset, float]]:
+             image_weight: float = 0.5, shortlist: int = 24,
+             image_admit: int = 0) -> list[tuple[Asset, float]]:
     """返回前 k 个 (资产, **文字分**)，按融合分排序。
 
     两个分数各管一件事，别混：
@@ -128,6 +129,23 @@ def retrieve(query: str, catalog: list[Asset], k: int = 5,
     ranked = [(asset, score) for asset, score in
               ((a, score_asset(tokens, a)) for a in catalog) if score > 0]
     ranked.sort(key=lambda pair: (-pair[1], pair[0].id))
+    # 让图像分高的资产**进候选集**，而不只是在候选里重排。
+    #
+    # 上面那段注释说「文字分决定收不收，图像分只在候选里重排」，当时的理由是量纲
+    # 不同、混进阈值会误杀。那个理由仍然成立——所以这里不动阈值，只是**额外**把
+    # 图像分最高的几个塞进候选，它们的文字分照常是 0。
+    #
+    # 为什么要加：真值改用资产库搭之后第一次量到检索的真实状况——
+    #   拿**真值类名**当查询词，top-1 命中 42/61 = 0.689、top-5 0.820；
+    #   而管线端到端（查询词＝检测器说的词）是 **0/71 = 0.000**。
+    # 排序本身是好的，瓶颈整个在查询词上：**正确的资产根本没进候选集**。
+    # 在这种情况下任何「候选内重排」（图像分、形状分）都从原理上没有机会——
+    # 实测形状重排换掉 64%% 的资产，命中率 0.000 → 0.000。
+    if image_scores and image_admit > 0:
+        have = {a.id for a, _s in ranked}
+        extra = sorted(((a, 0.0) for a in catalog if a.id not in have),
+                       key=lambda pair: -image_scores.get(pair[0].id, 0.0))[:image_admit]
+        ranked = ranked + extra
     if image_scores:
         head, tail = ranked[:shortlist], ranked[shortlist:]
         head.sort(key=lambda pair: (-((1 - image_weight) * pair[1]

@@ -142,7 +142,8 @@ def main() -> int:
                                   image_weight=float(settings.get("image_weight", 0.6)),
                                   min_score=float(settings.get("min_score", 0.45)),
                                   shapes=_shapes,
-                                  shape_weight=float(settings.get("shape_weight", 0.0)))
+                                  shape_weight=float(settings.get("shape_weight", 0.0)),
+                                  image_admit=int(settings.get("image_admit", 0)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

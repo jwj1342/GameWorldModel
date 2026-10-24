@@ -143,7 +143,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
                   top_k: int = 5, shapes: dict | None = None,
-                  shape_weight: float = 0.0) -> list[dict]:
+                  shape_weight: float = 0.0, image_admit: int = 0) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -200,7 +200,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                     record["image_error"] = f"{type(error).__name__}: {error}"[:160]
 
         hits = retrieve(query, catalog, k=top_k, image_scores=image_scores,
-                        image_weight=image_weight if image_scores else 0.0)
+                        image_weight=image_weight if image_scores else 0.0,
+                        image_admit=image_admit)
         # 形状重排：把观测到的边长比例用进「选哪个资产」这个离散选择。
         # shape_weight 为 0（默认）时完全不动，行为和以前一致。
         if shape_weight > 0 and shapes:
