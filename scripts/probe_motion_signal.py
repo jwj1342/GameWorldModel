@@ -555,12 +555,14 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                     out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
             # 密度匹配的难干扰项：形状最接近真值的那 32 个。随机干扰项太好认，
             # 而真实方法面对的候选集个个都像。这一行才是可引用的数。
-            # 视角数固定在 7（已验到顶），扫初始偏航个数。
-            for _y in (1, 4, 8):
-                _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
-                                            n_views=7, n_yaw=_y)
+            # **候选集多大还成立。** 视角数固定 7（已验到顶），初值固定 1（加初值
+            # 反而更差）。已知 9 个候选 0.459、33 个 0.311。图像嵌入把正确资产放在
+            # 全库中位第 365 名——如果 128 个候选时还有两成，那就不用做两段式，
+            # 直接把图像前 128 名全过一遍残差即可。衰减多快决定下一步的形状。
+            for _c in (32, 128, 384):
+                _hard = _residual_pick_rate(clouds, _gt_ref, _c, hard=True, n_views=7)
                 if _hard is not None:
-                    out.setdefault(f"{kind}/respick_yaw{_y}", []).append(_hard)
+                    out.setdefault(f"{kind}/respick_cands{_c + 1}", []).append(_hard)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         # **形状第 k 近的邻居当模板。** 不用「管线实际选中的那个」是因为管线的物体
@@ -1902,8 +1904,10 @@ def main() -> int:
         # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
         # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
-                or "/respick_yaw" in key):
-            n_plus = 33 if ("_hard_33" in key or "respick_yaw" in key) else int(key.rsplit("_", 1)[-1])
+                or "/respick_cands" in key):
+            n_plus = (33 if "_hard_33" in key
+                      else int(key.rsplit("cands", 1)[-1]) if "respick_cands" in key
+                      else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
         # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
