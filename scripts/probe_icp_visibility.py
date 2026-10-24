@@ -426,9 +426,15 @@ def main() -> int:
     print()
     print("—— 包围盒要估得多准 ——")
     print("  上一张表说模板不需要是正确的资产，只要尺寸比例对。那「对」到什么程度？")
-    print("  这条线要和管线实测对得上：shape_ok（比例误差 ≤0.2）0.69，")
-    print("  scale_ok 只有 0.31、scale_ratio 中位 0.784（整体偏小两成多）。")
+    print("  **口径先说清楚。** 这里的「尺寸估错」不是度量尺度错（管线那个 scale_ratio")
+    print("  中位 0.784 是相对真值的），而是**模板相对它要配的那片点云**错多少。")
+    print("  模板是从观测点云自己的包围盒搭的、配的也是同一片点云，两边共用同一个")
+    print("  错误的度量尺度，所以度量误差在这里是抵消掉的——拿 scale_ok 0.31 来对这")
+    print("  条线是口径错误。真正相关的是包围盒拟合相对点云本身的偏差，而")
+    print("  `obb_from_points` 的 extent_percentile=3.0 会把盒子修得**比点云略小**，")
+    print("  所以 1.0 以下那一侧才是现实会落进去的区间。")
     print("  两列都是**静止物体解出的假转动**，越小越好；对照写在每组行首。")
+    SCALES = (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3)
     for shape, slabel in (("box", "长方体"), ("ell", "L 形"), ("tee", "T 形")):
         clouds = make_clouds("static", "orbit_grid", n, shape=shape)
         solved = solved_rotation_deg(clouds)
@@ -436,14 +442,14 @@ def main() -> int:
         row_s = [solved_rotation_against_template("static", "orbit_grid", n, warm_start=True,
                                                   template_kind="obb", shape=shape,
                                                   tmpl_scale=v)
-                 for v in (1.0, 1.1, 1.2, 1.3, 1.5)]
+                 for v in SCALES]
         row_a = [solved_rotation_against_template("static", "orbit_grid", n, warm_start=True,
                                                   template_kind="obb", shape=shape,
                                                   tmpl_aspect=v)
                  for v in (0.0, 0.1, 0.2, 0.3)]
         print(f"\n  ### {slabel} ###  不用模板的对照 {ctrl:.1f}°")
         print("    尺寸估错    " + "  ".join(f"x{v:.1f}:{d:6.1f}°"
-                                           for v, d in zip((1.0, 1.1, 1.2, 1.3, 1.5), row_s)))
+                                           for v, d in zip(SCALES, row_s)))
         print("    比例估错    " + "  ".join(f"{v:.0%}:{d:6.1f}°"
                                            for v, d in zip((0.0, 0.1, 0.2, 0.3), row_a)))
     print("  （比例那一档按 (1+e, 1-e/2, 1+e/3) 三条边各歪，换算成 shape_error")

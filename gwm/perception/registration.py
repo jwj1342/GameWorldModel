@@ -232,10 +232,48 @@ def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
     out["rotation_accepted"] = bool(accept)
     return out
 
+def box_template(centre, extents, rotation=None, per_face: int = 400,
+                 seed: int = 0) -> np.ndarray:
+    """按包围盒搭一个长方体表面，当配准模板用。
+
+    为什么要合成一个而不是用观测点。`track_rigid` 维护的那个「累积模型」是从
+    **第一帧的点云**长出来的，而深度图点云的采样格子钉在图像上——相机一动，两帧
+    之间看到的根本不是同一批物理点，ICP 会把这个重采样本身解成一点转动。受控实验
+    量过：完整点云 0.3°、只留可见面 6.9°、只做像素格重采样 0.0°，**两个叠起来
+    12.5°**。合成模板钉在世界里，不随相机动，这一项就没了。
+
+    模板不需要是正确的资产。受控实验里拿「比例错 30% 的盒子」当模板，静止物体的
+    假转动比用物体自己的完整表面还低。要求只有两条：**尺寸和比例要准**（正方体
+    那一档退回对照水平，整体大 1.5 倍直接崩），**不能转动对称**（球和圆柱比不用
+    模板还糟，没有偏航参考）。
+
+    但它不是对所有形状都有效：立鳍在正中间的 T 形上，包围盒里绝大部分是空的，
+    盒子表面离物体表面很远，假转动反而从 5.9° 涨到 21.7°。调用方要按
+    `template_mismatch` 之类的判据决定用不用。
+    """
+    half = np.asarray(extents, float) / 2.0
+    rng = np.random.default_rng(seed)
+    pts = []
+    for axis in range(3):
+        others = [i for i in range(3) if i != axis]
+        for sign in (-1.0, 1.0):
+            uv = rng.uniform(-1.0, 1.0, size=(per_face, 2))
+            p = np.zeros((per_face, 3))
+            p[:, others[0]] = uv[:, 0] * half[others[0]]
+            p[:, others[1]] = uv[:, 1] * half[others[1]]
+            p[:, axis] = sign * half[axis]
+            pts.append(p)
+    local = np.vstack(pts)
+    if rotation is not None:
+        local = local @ np.asarray(rotation, float).T
+    return local + np.asarray(centre, float)
+
+
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
                 refine: int = 0, cam_positions: list | None = None,
                 rotation_min_gain: float | None = None,
+                template: np.ndarray | None = None,
                 **icp_kwargs) -> dict:
     """把一串逐帧点云配成一条轨迹。
 
@@ -264,18 +302,29 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
     if not clouds:
         return {"positions": [], "residuals": [], "ok": False, "reason": "no clouds"}
     rng = np.random.default_rng(seed)
-    model = np.asarray(clouds[0], float)
-    point = model.mean(0) if anchor is None else np.asarray(anchor, float)
-    positions = [point.copy()]
+    # 给了模板就拿它当配准目标，而且**不再往里并点**。累积模型是从第一帧的点云长
+    # 出来的，那一帧本身就钉在图像上；再并进后面的帧只会把这个污染摊开。合成模板
+    # 钉在世界里，不随相机动。见 `box_template` 的注释。
+    model = np.asarray(clouds[0], float) if template is None else np.asarray(template, float)
+    first_cloud = np.asarray(clouds[0], float)
+    point = first_cloud.mean(0) if anchor is None else np.asarray(anchor, float)
+    R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧（给模板时是 -> 模板）
+    if template is not None:
+        # 第 0 帧也要配一次，否则后面各帧的位姿是相对模板的、而第 0 帧是单位阵，
+        # 两者不在一个参考系里。配完之后下面的循环照旧，列表长度也不变。
+        seed_step = icp(first_cloud, model, **icp_kwargs)
+        if seed_step["ok"]:
+            R_acc = np.asarray(seed_step["rotation"], float).copy()
+            t_acc = np.asarray(seed_step["translation"], float).copy()
+    positions = [R_acc.T @ (point - t_acc)]
     # 朝向也要一起给出来。旋转类的运动（spin、revolute、周期转动）全靠朝向拟合，
     # 而包围盒的朝向是可见点在 xz 平面上的主轴，物体一转可见面就变，主轴跟着跳。
-    orientations = [np.eye(3)]
+    orientations = [R_acc.T.copy()]
     residuals: list[float | None] = []
     steps_t: list[float] = []                  # 每一步解出来的平移量
     steps_r: list[float] = []                  # 每一步解出来的转角（度）
     gate_votes: list[bool] = []                # 转动闸放行了哪些步（开闸时才有）
     step_transforms: list[tuple[np.ndarray, np.ndarray]] = []
-    R_acc, t_acc = np.eye(3), np.zeros(3)      # 第 k 帧 -> 第 0 帧
     transforms = [(R_acc.copy(), t_acc.copy())]
     for index, current in enumerate(clouds[1:], start=1):
         cloud = np.asarray(current, float)
@@ -308,7 +357,7 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             t_acc = step["rotation"] @ t_acc + step["translation"]
             # 只让前几帧进模型。让它一直长下去的话，静止物体会跟着可见面缓慢滑移——
             # 实测静止漂移从 0.18 m 涨到 0.30 m，而轨迹误差并没有因此变好。
-            if index < model_frames:
+            if template is None and index < model_frames:
                 aligned = cloud @ R_acc.T + t_acc
                 model = np.concatenate([model, aligned], axis=0)
                 if len(model) > model_points:
