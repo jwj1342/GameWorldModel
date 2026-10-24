@@ -61,6 +61,75 @@ def _geom(rng: random.Random, shape: str, distinct_xz: bool = False) -> tuple[di
             height / 2, radius)
 
 
+# —— 用资产库搭真值场景 ——
+#
+# 为什么要这条路（#82）。现在的真值是「从词表随机挑个名字 + 独立挑个基本体」，
+# 于是两件事同时成立：
+#
+#   * **「该挑哪个资产」没有标准答案**——真值里压根没有资产，检索改进测不出来。
+#     实测：把检索重排改掉，86 个资产节点换了 55 个（64%），而所有指标逐字节不动。
+#   * **类名和形状脱钩**，所以 `class_accuracy` 恒等于噪声（`gt_metrics.py` 的注释
+#     自己写明了「别拿它当成绩也别拿它调参」）。
+#
+# 真值改成从**我们检索的同一个资产库**里挑，两件事一起修好：资产 id 可以直接比对，
+# 类名从资产名来所以和形状天然绑定。
+#
+# 默认关。打开要给 `assets.library`，库不在就自动退回基本体，生成照常跑。
+
+_ASSET_POOL: list | None = None
+
+
+def _asset_pool(cfg: dict | None = None) -> list:
+    """(资产 id, 可读类名, 边长比例) 的列表。没有库就是空的。"""
+    global _ASSET_POOL
+    if _ASSET_POOL is None:
+        _ASSET_POOL = []
+        try:
+            import json as _json
+            import os
+            from pathlib import Path as _Path
+            from ..assets.library import library_root, load_catalog
+            root = library_root(cfg or {})
+            shapes_path = ((cfg or {}).get("assets") or {}).get("shape_cache") or \
+                os.environ.get("GWM_ASSET_SHAPES")
+            shapes = {}
+            if shapes_path:
+                try:
+                    shapes = _json.loads(_Path(shapes_path).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    shapes = {}
+            if root is not None:
+                for a in load_catalog(root):
+                    r = shapes.get(a.id)
+                    if isinstance(r, list) and len(r) == 3:
+                        # 类名取文件名，把分隔符换成空格——它会成为真值的 class，
+                        # 检索那一侧拿到的就是这个词，所以名字和网格天然绑定。
+                        name = str(a.name).replace("-", " ").replace("_", " ").strip().lower()
+                        if name:
+                            _ASSET_POOL.append((a.id, name, r))
+        except Exception:                      # noqa: BLE001 — 没有库不是错误
+            _ASSET_POOL = []
+    return _ASSET_POOL
+
+
+def _asset_geom(rng: random.Random, cfg: dict | None = None):
+    """从资产库挑一个，返回 (geom, 半高, 半径, 类名)。库不可用时返回 None。
+
+    尺寸按比例缩到和基本体那一路同一个量级，这样场景的尺度分布不变——
+    只换「长什么样」，不换「多大」，否则两批数据连相机取景都没法比。
+    """
+    pool = _asset_pool(cfg)
+    if not pool:
+        return None
+    asset_id, name, ratios = rng.choice(pool)
+    longest = round(rng.uniform(0.5, 2.2), 3)          # 和 _geom 的盒子同量级
+    ext = [round(longest * r, 3) for r in ratios]
+    rng.shuffle(ext)                                   # 最长边不总是 x
+    ext = [max(v, 0.05) for v in ext]
+    geom = {"kind": "asset", "ref": asset_id, "extent": ext}
+    return geom, ext[1] / 2, max(ext[0], ext[2]) / 2, name
+
+
 def _class_name(rng: random.Random) -> str:
     pool = BINDING_CLASSES if rng.random() < BINDING_SHARE else NEUTRAL_CLASSES
     return rng.choice(pool)
@@ -212,7 +281,7 @@ def sample_motion(rng: random.Random, kind: str, base: list[float], duration: fl
 
 
 def sample_objects(rng: random.Random, layout: dict, profile: str, duration: float,
-                   count: int) -> list[dict]:
+                   count: int, cfg: dict | None = None) -> list[dict]:
     weights = MOTION_WEIGHTS[profile]
     # 留边按比例给，不是固定 1.5 米。走廊只有 4 米宽的时候，固定边距会把可活动范围
     # 压到半米，物体写着在动其实挪不开——又一类观测不到的样本。
@@ -223,10 +292,19 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
     for i in range(count):
         # 先抽运动，再按运动挑形状。顺序反过来就会造出球体自转这种按构造观测不到的样本。
         kind = rng.choices(list(weights), weights=list(weights.values()))[0]
-        if kind in _ROTATION_IN_PLACE:
+        # 真值用资产库搭：`dataset.use_assets` 打开之后，几何和类名都从库里来，
+        # 于是「该挑哪个资产」有了标准答案、类名也和形状绑定（见 _asset_geom）。
+        # 库不可用时自动退回基本体，生成照常跑。
+        asset = (_asset_geom(rng, cfg)
+                 if ((cfg or {}).get("dataset") or {}).get("use_assets") else None)
+        if asset is not None:
+            geom, half_height, radius, _asset_class = asset
+        elif kind in _ROTATION_IN_PLACE:
             geom, half_height, radius = _geom(rng, "box", distinct_xz=True)
+            _asset_class = None
         else:
             geom, half_height, radius = _geom(rng, rng.choice(_SHAPES))
+            _asset_class = None
         extent = geom.get("extent") or [2 * radius, 2 * half_height, 2 * radius]
         diag = math.sqrt(sum(v * v for v in extent))
         for _ in range(24):                      # 简单排开：水平距离大于两者半径之和
@@ -242,7 +320,8 @@ def sample_objects(rng: random.Random, layout: dict, profile: str, duration: flo
         elif rng.random() < 0.25:
             lift = half_height + round(rng.uniform(0.5, 2.5), 2)      # 一部分悬空物体，和贴地的分开
         pos = [x, round(lift, 3), z]
-        objects.append({"id": f"obj_{i + 1}", "class": _class_name(rng), "geom": geom,
+        objects.append({"id": f"obj_{i + 1}",
+                        "class": _asset_class or _class_name(rng), "geom": geom,
                         "pose": {"pos": pos},
                         "motion": sample_motion(rng, kind, pos, duration, half_height,
                                                 bounds=(half_w, half_d), diag=diag)})
