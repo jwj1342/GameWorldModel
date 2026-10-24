@@ -20,6 +20,7 @@
 from __future__ import annotations
 import argparse
 import json
+import random
 import statistics
 import sys
 from pathlib import Path
@@ -544,6 +545,14 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # **链条的预言机：拿真值资产网格当模板。** 只预言检索，不预言位姿。
         # 回答「把点一修好之后，点二能拿到什么」——现在的 asset 那一臂量的是拿错的
         # 网格（检索 0/71），回答不了这个。
+        # 创新点一的字面检验：残差能不能把真值资产从 N 个干扰项里挑出来。
+        # 两个 N 一起报，好看出它随候选集增大怎么衰减。
+        _gt_ref = _gt_asset_refs().get(oid, "")
+        if _gt_ref:
+            for _n in (8, 32):
+                _hit = _residual_pick_rate(clouds, _gt_ref, _n)
+                if _hit is not None:
+                    out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         _cam_corr = _camera_step_correlation(tracked, cam_list)
@@ -1353,6 +1362,63 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
     return np.asarray(out)
 
 
+def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
+                        seed: int = 0) -> float | None:
+    """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
+
+    这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
+    但「哪个网格配得上这团点」这个判据不需要梯度。
+
+    **为什么这样设计而不是直接测管线的命中率。** 管线那条链有两段：提候选、在候选里挑。
+    现在卡在第一段（文字查询词来自检测器，命中率 0/71），而第二段从来没被单独测过。
+    把两段拆开才答得了「挑这件事本身成不成立」。
+
+    **为什么不用类名取候选。** assetgt 的类名就是资产文件名拆出来的，拿它检索等于
+    拿资产自己的名字查自己——那条「上限 top-1 0.689」就是这么来的，是循环的。
+    改成「真值 + 随机干扰项」就没有这个问题，而且 N 可调，直接给出「能从多少个里挑对」。
+
+    配准前把每个候选缩到**逐帧包围盒的中位对角线**上。并帧对角线比物体大 1.89 倍，
+    而受控扫描说模板大 1.2 倍就越过对照、1.3 倍崩掉——这个坑踩过一次。
+
+    随机干扰项要**按 id 排序后再抽**，否则目录遍历顺序会让结果不可复现。
+    """
+    from gwm.assets.library import library_root, load_catalog
+    from gwm.perception.registration import icp
+    if not gt_ref or not clouds:
+        return None
+    root = library_root()
+    if root is None:
+        return None
+    catalog = _ASSET_CACHE.setdefault("__catalog__", load_catalog(root))
+    others = sorted((a.id for a in catalog if a.id != gt_ref))
+    if len(others) < n_distract:
+        return None
+    rng = random.Random(f"{seed}:{gt_ref}:{n_distract}")
+    ids = [gt_ref] + rng.sample(others, n_distract)
+    per_frame = [np.linalg.norm(np.asarray(c, float).max(0) - np.asarray(c, float).min(0))
+                 for c in clouds if len(np.asarray(c, float)) >= 10]
+    if not per_frame:
+        return None
+    obs_diag = float(np.median(per_frame))
+    # 拿中间那一帧的点云当查询：首帧的可见面最偏，末帧也是；中间那帧最有代表性。
+    query = np.asarray(clouds[len(clouds) // 2], float)
+    best_id, best_rmse = None, float("inf")
+    for aid in ids:
+        tpl = _asset_points_by_id(aid)
+        if tpl is None:
+            continue
+        tpl_diag = float(np.linalg.norm(tpl.max(0) - tpl.min(0)))
+        if tpl_diag <= 1e-9:
+            continue
+        model = (tpl - tpl.mean(0)) * (obs_diag / tpl_diag)
+        step = icp(query, model)
+        if step["ok"] and step["rmse"] is not None and float(step["rmse"]) < best_rmse:
+            best_rmse, best_id = float(step["rmse"]), aid
+    if best_id is None:
+        return None
+    return 1.0 if best_id == gt_ref else 0.0
+
+
 def _camera_total_deg(cam_list: list) -> float | None:
     """这一段相机一共转过多少度（绕物体的方位角总行程）。
 
@@ -1710,6 +1776,12 @@ def main() -> int:
             continue
         extra = (f"  均值 {statistics.mean(values):>6.3f}"
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
+        # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
+        # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
+        if "/residual_pick_of_" in key:
+            n_plus = int(key.rsplit("_", 1)[-1])
+            extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
+                     f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
         # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
         # 而决策真正要的是**有多少比例低于铰链门槛 8 度**——高于门槛的会产出假关节。
         if key.startswith(("rot_static/", "rot_rotating/", "rot_translating/")):
