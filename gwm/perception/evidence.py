@@ -9,7 +9,8 @@ from ..taxonomy import is_ground_class, is_static_class
 from .base import CV2THREE, Geometry, Tracks
 from .motion import estimate_motion
 from .color import observe_colors
-from .registration import infer_articulation, looks_static, track_rigid
+from .registration import (box_template, infer_articulation, looks_static,
+                           template_mismatch_ratio, track_rigid)
 
 
 def _quat_xyzw(mat3: np.ndarray) -> list[float]:
@@ -410,7 +411,23 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             # 而铰链门槛是 8 度——第三档产出的关节全是假的。时间平滑治得了位置
             # （位移 0.045→0.028、漂移 0.077→0.039），治不了转动。
             _gate = cfg["perception"]["motion"].get("rotation_min_gain")
-            tracked = track_rigid(clouds, rotation_min_gain=_gate)
+            # 配准模板：按包围盒搭一个长方体表面当配准目标，代替「从第一帧点云长
+            # 出来的累积模型」。受控实验里这一项把静止物体的假转动从 12.5° 压到
+            # 5.2°（长方体）、7.6° 压到 4.0°（L 形），但在 T 形上反而涨到 21.7°——
+            # 包围盒里大部分是空的时候盒子表面离物体表面太远。所以要按失配比例开关。
+            #
+            # **比例先记下来，门槛先别定。** 受控实验那几个数（0.019 / 0.024 / 0.054）
+            # 是干净合成点云上的，真实点云带噪声，量级会不一样。先看分布再定。
+            _size = np.median([ob["size"] for ob in obbs], axis=0)
+            _diag0 = float(np.linalg.norm(_size))
+            _tmpl = box_template(np.asarray(obbs[0]["center"], float), _size,
+                                 R.from_quat(obbs[0]["quat"]).as_matrix())
+            _mism = template_mismatch_ratio(_tmpl, clouds[0], _diag0)
+            _max_mism = cfg["perception"]["motion"].get("template_mismatch_max")
+            _use_tmpl = (_max_mism is not None and _mism is not None
+                         and _mism <= float(_max_mism))
+            tracked = track_rigid(clouds, rotation_min_gain=_gate,
+                                  template=_tmpl if _use_tmpl else None)
             # 配准残差按物体记下来。它和 motion_guess.residual 是两回事：那个是运动
             # 假设拟合轨迹的残差，这个是「这团点在帧间能不能当成一个刚体对齐」。
             # 后者不依赖任何运动模型，是独立的一维信息——#56 里排除掉的那八个判别子
@@ -422,6 +439,8 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
                     "rmse_m": round(float(np.median(_res)), 5),
                     "rmse_over_diagonal": round(float(np.median(_res)) / max(_diag, 1e-9), 4),
                     "frames": len(clouds),
+                    "template_mismatch": None if _mism is None else round(_mism, 4),
+                    "template_used": bool(_use_tmpl),
                 }
             if tracked["ok"] and len(tracked["positions"]) == len(c_a):
                 diag = float(np.linalg.norm(np.median([ob["size"] for ob in obbs], axis=0)))

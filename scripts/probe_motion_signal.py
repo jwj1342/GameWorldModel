@@ -526,6 +526,8 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
         # 第四条：模板用**对观测拟合出来的长方体**，不需要检索也不需要真值。
         prim_deg = _primitive_template_rotation_deg(clouds)
+        # 同一个盒子模板，只换搭法：按逐帧包围盒的中位边长，而不是并帧点云。
+        primmed_deg, box_oversize = _per_frame_box_rotation_deg(clouds)
         # 第五条，也是合成实验里唯一三条判据全过的那条：**不换模板，换被配的那两块**
         # ——把相邻两帧都裁到「两个相机都看得见」的公共表面再配。合成上限是
         # 静止 12.5°→0.0°、纯平移 26.9°→0.8°、真转 90° 保住 90.4°。
@@ -593,6 +595,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
             out.setdefault(f"{kind}/template_rmse_deg", []).append(
                 float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        if np.isfinite(box_oversize):
+            out.setdefault(f"{kind}/box_oversize", []).append(float(box_oversize))
+        if len(primmed_deg) == len(true_deg):
+            out.setdefault(f"{kind}/primmed_range_deg", []).append(float(np.ptp(primmed_deg)))
+            out.setdefault(f"{kind}/primmed_rmse_deg", []).append(
+                float(np.sqrt(np.mean((primmed_deg - true_deg) ** 2))))
         if len(prim_deg) == len(true_deg):
             out.setdefault(f"{kind}/prim_range_deg", []).append(float(np.ptp(prim_deg)))
             out.setdefault(f"{kind}/prim_rmse_deg", []).append(
@@ -1218,6 +1226,76 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _per_frame_box_points(clouds: list, n: int = 4000,
+                          seed: int = 0) -> tuple[np.ndarray | None, float]:
+    """按**逐帧包围盒的中位边长**造模板，而不是按所有帧并起来的那团点云。
+
+    `_fitted_primitive_points` 的结论是「拟合长方体模板不成立，比不用模板还差」
+    （static 的 range 43.59° 对基线 19.85°），而它自己的注释把原因写清楚了：
+    那个盒子是**所有帧并起来**的点云的包围盒，而那团点云随视角扫动，所以盒子比
+    物体大一圈。
+
+    今天的受控扫描给这个诊断配上了刻度——模板相对点云大多少时会崩：
+
+        长方体   x1.0: 5.2°   x1.1: 9.7°   x1.2: 24.2°   x1.3: 88.5°（对照 12.5°）
+        L 形     x1.0: 4.0°   x1.1: 4.6°   x1.2:  5.7°   x1.3: 15.4°（对照  7.6°）
+
+    悬崖在 x1.1 到 x1.3 之间。所以如果并帧盒子的超大倍数落在这个区间，那次失败
+    就是**模板偏大**造成的，而不是「模板这条路不成立」——两者的区别决定后面做不做。
+
+    逐帧包围盒取中位边长系统性地小于并帧包围盒，而且管线里 `obbs` 本来就是逐帧的。
+    一并返回超大倍数（并帧对角线 / 逐帧中位对角线），好直接验证那个诊断。
+    """
+    if not clouds:
+        return None, float("nan")
+    per_frame = []
+    for c in clouds:
+        a = np.asarray(c, float)
+        if len(a) >= 10:
+            per_frame.append(a.max(0) - a.min(0))
+    if not per_frame:
+        return None, float("nan")
+    size = np.median(np.asarray(per_frame, float), axis=0)
+    span = np.vstack(clouds)
+    union = span.max(0) - span.min(0)
+    oversize = (float(np.linalg.norm(union) / np.linalg.norm(size))
+                if np.linalg.norm(size) > 1e-9 else float("nan"))
+    if (size <= 1e-6).any():
+        return None, oversize
+    rng = np.random.default_rng(seed)
+    per = max(n // 6, 1)
+    faces = []
+    lo = -size / 2.0
+    for axis in range(3):
+        for end in (0.0, 1.0):
+            uv = rng.random((per, 3))
+            uv[:, axis] = end
+            faces.append(lo + uv * size)
+    pts = np.vstack(faces)
+    return pts - pts.mean(0), oversize
+
+
+def _per_frame_box_rotation_deg(clouds: list) -> tuple[np.ndarray, float]:
+    """和 `_primitive_template_rotation_deg` 同一套流程，只换模板的搭法。
+
+    唯一的变量是「盒子按并帧点云搭还是按逐帧包围盒中位边长搭」，所以并排比能干净
+    地回答：那次失败是模板偏大造成的，还是模板这条路本身不成立。
+    """
+    from gwm.perception.registration import icp
+    model, oversize = _per_frame_box_points(clouds)
+    if model is None:
+        return np.array([]), oversize
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out), oversize
 
 
 def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:

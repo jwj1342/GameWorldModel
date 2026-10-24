@@ -269,6 +269,31 @@ def box_template(centre, extents, rotation=None, per_face: int = 400,
     return local + np.asarray(centre, float)
 
 
+def template_mismatch_ratio(template: np.ndarray, cloud: np.ndarray,
+                            diagonal: float) -> float | None:
+    """模板表面离观测点云有多远（中位距离 / 包围盒对角线）。
+
+    包围盒模板不是对所有形状都有效。受控实验里：长方体 0.019、L 形 0.024 时模板
+    把假转动压下去了（12.5°→5.2°、7.6°→4.0°），而 T 形 0.054 时反而涨上去
+    （5.9°→21.7°）——立鳍在正中间，包围盒里绝大部分是空的，盒子表面离物体表面
+    很远，ICP 条件数极差。
+
+    所以这条修法要带开关，而开关的判据必须**在推理时算得出来**：模板是包围盒
+    （观测直接给），点云是观测到的，不需要任何真值。
+
+    门槛先别定。受控实验那几个数是干净合成点云上的，真实点云带噪声，量级会不一样。
+    先把这个比值记进证据里看分布，再定门槛——不然就是凭空拍一个数。
+    """
+    from scipy.spatial import cKDTree
+
+    t = np.asarray(template, float)
+    c = np.asarray(cloud, float)
+    if len(t) < 10 or len(c) < 10 or diagonal <= 0:
+        return None
+    d, _ = cKDTree(c).query(t, k=1)
+    return float(np.median(d) / diagonal)
+
+
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
                 refine: int = 0, cam_positions: list | None = None,
