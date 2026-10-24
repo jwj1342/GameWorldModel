@@ -477,6 +477,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     frame_of = {f: i for i, f in enumerate(geom.frame_indices)}
     out: dict[str, list] = {}
     skipped: dict[str, int] = {}
+    _gtref_paired: list = []            # 和 gtref 同一批物体上的基线值，见下面的注释
     for oid, per_frame in masks.items():
         kind = kinds.get(oid)
         series = gt_quat.get(oid)
@@ -623,6 +624,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/gtref_range_deg", []).append(float(np.ptp(gtref_deg)))
             out.setdefault(f"{kind}/gtref_rmse_deg", []).append(
                 float(np.sqrt(np.mean((gtref_deg - true_deg) ** 2))))
+            # **配对口径。** gtref 只覆盖带资产 ref 的物体（60 条片段里静止桶 67 个
+            # 物体只有 8 个是），拿它的中位数和全体 67 个的基线比是混口径——这个坑
+            # 记过。把基线和逐帧盒子在**同一批物体**上的值单独记一份。
+            _gtref_paired.append((float(np.ptp(solved_deg)),
+                                  float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))),
+                                  float(np.ptp(primmed_deg)) if len(primmed_deg) == len(true_deg) else None,
+                                  kind))
         if np.isfinite(box_oversize):
             out.setdefault(f"{kind}/box_oversize", []).append(float(box_oversize))
         if len(primmed_deg) == len(true_deg):
@@ -656,6 +664,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
+    # 把配对口径的那一份摊进 out。键名带 paired_ 前缀，和全体那一份区分开，
+    # 免得有人（包括以后的我）把 gtref 的中位数和全体基线的中位数并排读。
+    for s_range, s_rmse, p_range, k in _gtref_paired:
+        out.setdefault(f"{k}/paired_solved_range_deg", []).append(s_range)
+        out.setdefault(f"{k}/paired_solved_rmse_deg", []).append(s_rmse)
+        if p_range is not None:
+            out.setdefault(f"{k}/paired_primmed_range_deg", []).append(p_range)
     # 一个样本都没有的时候要说清楚卡在哪，别只打印「没有可比对的样本」
     if not out and skipped:
         print(f"  icp: 一个都没留下，原因 {skipped}", flush=True)
@@ -1705,7 +1720,14 @@ def main() -> int:
             want = "该高" if key.startswith("rot_rotating/") else "该低"
             extra += (f"  均值 {statistics.mean(values):>6.2f}"
                       f"  低于 8 度门槛 {below:.3f}（{want}）")
-        print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
+        # **四分位一并报。** 只给中位数会掩盖分布——这个项目里栽过三次（双峰、
+        # 散开六倍都被一个中位数抹平）。而现在有两个结论直接取决于散度：
+        # rot_per_cam_deg 要「稳定」才说明机制解释得了假转动，cam_total_deg 要
+        # 「散得开」这个回归才不退化。
+        q1, q3 = ((np.percentile(values, 25), np.percentile(values, 75))
+                  if len(values) >= 4 else (float("nan"), float("nan")))
+        print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}"
+              f"   四分位 {q1:>7.3f}/{q3:<7.3f}{extra}")
     return 0
 
 
