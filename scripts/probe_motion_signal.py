@@ -628,6 +628,15 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # **用轮廓解位姿**：每帧扫一圈偏航取 IoU 最高的。全程不碰深度，
             # 而今天所有位姿实验都建在深度点云的 ICP 上——这条一次都没试过。
             _yaw_deg = _silhouette_yaw_series(per_frame, frames, _cams, _gt_ref)
+            # **真实形态**：图像提候选 + 轮廓挑。包含「正确答案不在候选里」这一项。
+            for _nc in (64, 256):
+                _cst: dict = {}
+                _comb = _combined_pick_rate(run, evidence, per_frame, frames, _cams,
+                                            oid, _gt_ref, n_cand=_nc, stats=_cst)
+                if _comb is not None:
+                    out.setdefault(f"{kind}/combined_top{_nc}", []).append(_comb)
+                    out.setdefault(f"{kind}/gt_in_top{_nc}", []).append(
+                        float(_cst.get("gt_in_cands", 0.0)))
             _rst: dict = {}
             _rend = _render_pick_rate(per_frame, frames, _cams, _gt_ref, 32,
                                       n_views=3, n_yaw=8, stats=_rst)
@@ -2000,6 +2009,111 @@ def _silhouette_yaw_series(per_frame: dict, frames: list, cams: dict,
     return np.abs(np.where(np.isfinite(d), d, 0.0))
 
 
+def _image_top_candidates(run: Path, evidence: dict, oid: str, n: int) -> list:
+    """这个物体的裁剪图在全库里按图像分排序的前 n 个资产 id。
+
+    **为什么要它。** 到目前为止所有「挑资产」的实验，候选集用的都是**形状最近邻**
+    （按包围盒边长比例），而管线真正面对的是**图像检索的前 N 名**。两者难度未必
+    一样，而后者才是这套方法的真实形态。
+
+    图像那一侧的数已经有了：静止物体自己的真值资产中位排第 **36** 名，
+    前 64 名覆盖率 0.625、前 256 名 0.750。所以「图像提候选 + 轮廓挑」这个组合
+    是有希望的，而它一次都没被整体量过。
+    """
+    from PIL import Image
+    from gwm.assets.annotate import bbox_of, best_observation, crop_object
+    from gwm.perception.run import load_masks
+
+    if "index" not in _IMG_INDEX:
+        _image_rank_of_asset(run, evidence, oid, "__warmup__")
+    index, embedder = _IMG_INDEX.get("index"), _IMG_INDEX.get("embedder")
+    if index is None or embedder is None:
+        return []
+    obj = next((o for o in evidence.get("objects") or [] if str(o.get("id")) == oid), None)
+    observation = best_observation(obj) if obj else None
+    if observation is None:
+        return []
+    try:
+        frames_j = json.loads((run / "frames" / "frames.json").read_text(encoding="utf-8"))["frames"]
+    except (OSError, ValueError, KeyError):
+        return []
+    frame = next((f for f in frames_j if f.get("index") == observation.get("frame_index")), None)
+    mask = (load_masks(run).get(oid) or {}).get(observation.get("frame_index"))
+    if not frame or mask is None:
+        return []
+    try:
+        rgb = np.asarray(Image.open(frame["file"]).convert("RGB"))
+        box, box_size = bbox_of(observation)
+        if box_size and box_size[0]:
+            k = rgb.shape[1] / float(box_size[0])
+            box = [v * k for v in box]
+        crop = crop_object(rgb, np.asarray(mask), box)
+        if crop is None:
+            return []
+        scores = index.scores(embedder.embed_images([Image.fromarray(crop)])[0])
+    except (OSError, ValueError, KeyError):
+        return []
+    return [aid for aid, _v in sorted(scores.items(), key=lambda kv: -kv[1])[:n]]
+
+
+def _combined_pick_rate(run: Path, evidence: dict, per_frame: dict, frames: list,
+                        cams: dict, oid: str, gt_ref: str, n_cand: int = 64,
+                        stats: dict | None = None) -> float | None:
+    """**这套方法的真实形态**：图像提候选（前 n_cand 名），轮廓 IoU 挑。
+
+    和之前所有挑资产的实验不同，候选集不是人造的「真值 + 形状最近邻」，而是管线
+    真正会拿到的那一批。所以这个数**包含了「正确答案可能根本不在候选里」这一项**
+    ——静止物体前 64 名的覆盖率是 0.625，所以上限就是它。
+
+    返回 1/0；候选里压根没有真值时返回 0（不是 None），因为那正是真实失败的一部分。
+    """
+    if stats is None:
+        stats = {}
+    cands = _image_top_candidates(run, evidence, oid, n_cand)
+    if not cands:
+        return None
+    stats["n_cand"] = len(cands)
+    stats["gt_in_cands"] = 1.0 if gt_ref in cands else 0.0
+    if gt_ref not in cands:
+        return 0.0                      # 真实失败的一部分，不能当缺失值丢掉
+    avail = [f for f in frames if f in per_frame and f in cams]
+    if not avail:
+        return None
+    if len(avail) > 3:
+        stride = len(avail) / 3.0
+        avail = [avail[min(len(avail) - 1, int(stride * (i + 0.5)))] for i in range(3)]
+    obs = [(f, _mask_to_grid(per_frame[f])) for f in avail]
+    obs = [(f, g) for f, g in obs if g is not None]
+    if not obs:
+        return None
+    yaws = [2.0 * np.pi * j / 8 for j in range(8)]
+    scored = []
+    for aid in cands:
+        tpl = _asset_points_by_id(aid, samples=20000)
+        if tpl is None or len(tpl) < 50:
+            continue
+        tpl = tpl - tpl.mean(0)
+        per = []
+        for f, g in obs:
+            R_wc = np.asarray(cams[f], float)[:3, :3].T
+            best = 0.0
+            for y in yaws:
+                sil = _project_silhouette(tpl, R_wc, float(y))
+                if sil is None:
+                    continue
+                union = float(np.logical_or(sil, g).sum())
+                if union > 0:
+                    best = max(best, float(np.logical_and(sil, g).sum()) / union)
+            per.append(best)
+        if per:
+            scored.append((-float(np.median(per)), aid))
+    if len(scored) < 2:
+        return None
+    scored.sort()
+    stats["n_scored"] = len(scored)
+    return 1.0 if scored[0][1] == gt_ref else 0.0
+
+
 def _shape_distance(a_id: str, b_id: str) -> float | None:
     """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
     shapes = _ASSET_CACHE.get("__shapes__") or {}
@@ -2550,7 +2664,8 @@ def main() -> int:
                 or "/respick33" in key or "/respick_noise" in key
                 or "/respick_unflat" in key or "/silpick_cands" in key
                 or key.endswith("/silpick_mismatched")
-                or key.endswith("/renderpick_33")):
+                or key.endswith("/renderpick_33")
+                or "/combined_top" in key or "/gt_in_top" in key):
             n_plus = (33 if "_hard_33" in key
                       else 33 if (key.endswith("/respick33") or "/respick_noise" in key
                                   or "/respick_unflat" in key)
@@ -2559,6 +2674,8 @@ def main() -> int:
                           or "silpick_cands" in key)
                       else 33 if (key.endswith("/silpick_mismatched")
                                   or key.endswith("/renderpick_33"))
+                      else int(key.rsplit("top", 1)[-1])
+                      if ("/combined_top" in key or "/gt_in_top" in key)
                       else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
