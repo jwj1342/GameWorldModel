@@ -1888,6 +1888,10 @@ def main() -> int:
     ap.add_argument("--rendered", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--limit", type=int, default=8)
+    ap.add_argument("--perception", default="gt", choices=("gt", "gtseg", "neural"),
+                    help="gt=全真值；gtseg=真值分割+真实几何（保住物体身份，只换深度）；"
+                         "neural=全真实。残差挑资产的数都是全真值上测的，而管线端到端"
+                         "是 0/78，必须单独验深度噪声这一条。")
     a = ap.parse_args()
     work = Path(a.work); work.mkdir(parents=True, exist_ok=True)
     clips = sorted(p for p in Path(a.rendered).iterdir() if (p / "clip.mp4").is_file())[:a.limit]
