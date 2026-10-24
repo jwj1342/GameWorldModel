@@ -255,6 +255,27 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 把相机轨迹用进配准：每帧只对「它看得见的那部分模型」配。
         # 172d5ae 排除了「对完整模型配」，理由是部分对完整更欠定；但欠定的根源是
         # **没告诉它该对哪一部分**，而相机位置正好给出这个信息，且一直现成放着没用。
+        # 转动闸：让转动「挣」出来，只有显著降低残差才认。扫几个门槛。
+        # 位置那两个数已经被时间平滑治住了（0.045→0.028、0.077→0.039），
+        # **平滑不影响转动**，所以 rot_static 才是现在挡住第三档的那一个数。
+        gated_arms = []
+        for gain in (0.02, 0.05, 0.10):
+            g = track_rigid(clouds, rotation_min_gain=gain)
+            if g["ok"] and len(g["positions"]) == len(gt):
+                tag = f"gate{int(gain * 100):02d}"
+                gp = np.array(g["positions"], float)
+                out.setdefault(f"step/{tag}", []).extend(
+                    np.linalg.norm((gp - gp[0]) - gt_rel, axis=1).tolist())
+                sm = smooth_series(gp, 15) if len(gp) >= 15 else gp
+                out.setdefault(f"step/{tag}_smooth15", []).extend(
+                    np.linalg.norm((sm - sm[0]) - gt_rel, axis=1).tolist())
+                if is_static:
+                    out.setdefault(f"drift_static/{tag}", []).append(
+                        float(np.linalg.norm(gp.max(0) - gp.min(0))))
+                    out.setdefault(f"drift_static/{tag}_smooth15", []).append(
+                        float(np.linalg.norm(sm.max(0) - sm.min(0))))
+                gated_arms.append((tag, g))     # 转角那一段在外面统一记，这里只收集
+
         vis = track_rigid(clouds, cam_positions=cams)
         if vis["ok"] and len(vis["positions"]) == len(gt):
             v_pos = np.array(vis["positions"], float)
@@ -263,13 +284,21 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             if is_static:
                 out.setdefault("drift_static/visible", []).append(
                     float(np.linalg.norm(v_pos.max(0) - v_pos.min(0))))
-                # 第三个验收数：静止物体被解出多少转角。ICP 现在给到 26.6 度，
-                # 而铰链门槛是 8 度，所以关节那一档全是假的（#7、#63）。
-                for tag, trk in (("register", tracked), ("visible", vis)):
-                    rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
-                    ang = float(np.degrees(np.arccos(
-                        np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
-                    out.setdefault(f"rot_static/{tag}", []).append(ang)
+
+        # 第三个验收数：静止物体被解出多少转角。平滑治得了位置，治不了转动，
+        # 所以这是现在挡住第三档的那一个数（铰链门槛 8 度，实测 13.5 度）。
+        #
+        # **这一段不能嵌在 vis 那个块里**——vis 失败时会把闸那几臂的转角也一起丢掉，
+        # 而且丢得悄无声息。
+        if is_static:
+            arms = [("register", tracked), *gated_arms]
+            if vis.get("ok"):
+                arms.append(("visible", vis))
+            for tag, trk in arms:
+                rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
+                ang = float(np.degrees(np.arccos(
+                    np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
+                out.setdefault(f"rot_static/{tag}", []).append(ang)
 
         plane = track_rigid(clouds, point_to_plane=True)
         if plane["ok"] and len(plane["positions"]) == len(gt):
