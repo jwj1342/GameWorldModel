@@ -195,7 +195,7 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     for oid, per_frame in masks.items():
         if oid not in truth:
             continue
-        clouds, stamps = [], []
+        clouds, stamps, cams = [], [], []
         for fi, mask in sorted(per_frame.items()):
             k, t = frame_of.get(fi), times.get(fi)
             if k is None or t is None or t not in truth[oid]:
@@ -207,6 +207,9 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts); stamps.append(t)
+                # 相机在世界坐标里的位置。配准那一侧原本完全没用上它——而可见面
+                # 为什么变？因为相机动了。见 registration.visible_subset。
+                cams.append(_fix(geom.cam_to_world[k])[:3, 3].copy())
         if len(clouds) < 6:
             continue
         tracked = track_rigid(clouds)
@@ -249,6 +252,25 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 if is_static:
                     out.setdefault(f"drift_static/{tag}", []).append(
                         float(np.linalg.norm(v.max(0) - v.min(0))))
+        # 把相机轨迹用进配准：每帧只对「它看得见的那部分模型」配。
+        # 172d5ae 排除了「对完整模型配」，理由是部分对完整更欠定；但欠定的根源是
+        # **没告诉它该对哪一部分**，而相机位置正好给出这个信息，且一直现成放着没用。
+        vis = track_rigid(clouds, cam_positions=cams)
+        if vis["ok"] and len(vis["positions"]) == len(gt):
+            v_pos = np.array(vis["positions"], float)
+            out.setdefault("step/visible", []).extend(
+                np.linalg.norm((v_pos - v_pos[0]) - gt_rel, axis=1).tolist())
+            if is_static:
+                out.setdefault("drift_static/visible", []).append(
+                    float(np.linalg.norm(v_pos.max(0) - v_pos.min(0))))
+                # 第三个验收数：静止物体被解出多少转角。ICP 现在给到 26.6 度，
+                # 而铰链门槛是 8 度，所以关节那一档全是假的（#7、#63）。
+                for tag, trk in (("register", tracked), ("visible", vis)):
+                    rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
+                    ang = float(np.degrees(np.arccos(
+                        np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
+                    out.setdefault(f"rot_static/{tag}", []).append(ang)
+
         plane = track_rigid(clouds, point_to_plane=True)
         if plane["ok"] and len(plane["positions"]) == len(gt):
             p_pos = np.array(plane["positions"], float)
