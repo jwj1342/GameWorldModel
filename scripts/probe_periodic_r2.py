@@ -86,19 +86,28 @@ def main(argv: list[str]) -> int:
                     continue
                 n_obj += 1
                 guess = obj.get("motion_guess") or {}
-                best = None
+                # **两条腿都要量。** 第一版只读 periodic_rotate 的记录，于是对一个
+                # 周期**平移**的物体，量到的是它的「转动拟合」——而那条连 0.45 都有
+                # （全场最高），说明平移拟合很可能更高，却一直没被看见。
+                # 只看一条腿，会把「转动那条坏了」误读成「周期检测整个坏了」。
+                found = {}
                 for entry in guess.get("rejected_periodic") or []:
-                    if entry.get("type") == "periodic_rotate" and entry.get("r2") is not None:
-                        best = float(entry["r2"])
+                    t, r2 = entry.get("type"), entry.get("r2")
+                    if t in ("periodic_rotate", "periodic_translate") and r2 is not None:
+                        found[t] = float(r2)
                         gate_value = entry.get("gate", gate_value)
-                if best is None:
+                if not found:
                     continue
                 n_with_r2 += 1
-                by_bucket[bucket(kinds[node])].append(best)
+                name = bucket(kinds[node])
+                for t, r2 in found.items():
+                    leg = "转动拟合" if t == "periodic_rotate" else "平移拟合"
+                    by_bucket[f"{name}｜{leg}"].append(r2)
         print(f"\n########## {label} ##########")
         print(f"  物体 {n_obj} 个，其中有 periodic_rotate 的 r² 记录的 {n_with_r2} 个"
               f"（门槛 {gate_value}）")
-        order = ["真·周期转动", "真·持续自转", "真·铰链", "真·周期平移", "真平移", "真静止"]
+        classes = ["真·周期转动", "真·持续自转", "真·铰链", "真·周期平移", "真平移", "真静止"]
+        order = [f"{c}｜{leg}" for c in classes for leg in ("转动拟合", "平移拟合")]
         for name in order:
             vs = by_bucket.get(name) or []
             if not vs:
@@ -107,14 +116,15 @@ def main(argv: list[str]) -> int:
             print(f"    {name:6s} 中位 {statistics.median(vs):.4f}  均值 {statistics.mean(vs):.4f}"
                   f"  最大 {max(vs):.4f}  过门槛比例 {over:.3f}  样本 {len(vs)}")
         # 判据只在 periodic_rotate 上成立——它是唯一「该拟合出高 r²」的类。
-        rot = by_bucket.get("真·周期转动") or []
-        sta = by_bucket.get("真静止") or []
-        if rot and sta:
-            d = statistics.median(rot) - statistics.median(sta)
-            print(f"    → **真·周期转动 减 真静止** 的中位差 {d:+.4f}"
-                  f"（{chr(0x65b9)+chr(0x5411)+chr(0x5bf9)+chr(0x4e86) if d > 0 else chr(0x8fd8)+chr(0x662f)+chr(0x53cd)+chr(0x7684)}）")
-        else:
-            print("    → 没有 periodic_rotate 的样本，这个判据算不了")
+        # 两条腿各自判一次：每条腿上，它**该管的那一类**是不是高于真静止。
+        for leg, target in (("转动拟合", "真·周期转动"), ("平移拟合", "真·周期平移")):
+            hit = by_bucket.get(f"{target}｜{leg}") or []
+            sta = by_bucket.get(f"真静止｜{leg}") or []
+            if not (hit and sta):
+                print(f"    → {leg}：样本不够，判据算不了"); continue
+            d = statistics.median(hit) - statistics.median(sta)
+            verdict = "方向对了" if d > 0 else "还是反的"
+            print(f"    → **{leg}：{target} 减 真静止** 的中位差 {d:+.4f}（{verdict}）")
     print("""
 怎么读（顺序不能颠倒）：
   一、先看「真在转 减 真静止」是不是正的。负的话分布是反的，往下调门槛只会先放进
