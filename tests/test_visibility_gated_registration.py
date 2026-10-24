@@ -62,12 +62,21 @@ from gwm.perception.registration import icp, rotation_earns_its_keep
 
 
 def box_surface(n=800, seed=0):
-    """一块有厚度的曲面片，不是闭合物体——真实的逐帧点云就是这样。"""
+    """非对称长方体的表面点。
+
+    第一版用的是 x-y 平面上一块**均匀随机**的点片，那是个退化夹具：均匀随机点云没有
+    「纹理」，绕法向转过之后每个点仍然能找到近邻，点到点 ICP 根本分不出转没转。
+    两条用例因此都失败了——不是实现错，是题目出错了。
+
+    换成三边都不等的长方体表面（1.0 x 0.6 x 0.3），朝向是良定义的。
+    """
     rng = np.random.default_rng(seed)
-    u = rng.uniform(-1, 1, n)
-    v = rng.uniform(-1, 1, n)
-    w = rng.normal(0, 0.01, n)
-    return np.stack([u, v, w], 1)
+    half = np.array([0.5, 0.3, 0.15])
+    pts = rng.uniform(-1, 1, (n, 3)) * half
+    axis = rng.integers(0, 3, n)                      # 把每个点推到某一个面上
+    sign = rng.choice([-1.0, 1.0], n)
+    pts[np.arange(n), axis] = sign * half[axis]
+    return pts + rng.normal(0, 0.002, pts.shape)
 
 
 def test_只平移这一档真的不转():
