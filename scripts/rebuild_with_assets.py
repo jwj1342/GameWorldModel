@@ -65,6 +65,7 @@ def _settle(game_dir: Path, out: Path, seconds: float, separate_seconds: float =
 
 def object_cameras(out: Path) -> dict:
     """每一帧的 cam_to_world，给轮廓挑用（只要旋转那一块，不碰深度）。"""
+    import numpy as np                      # 这个模块没有模块级的 numpy
     from gwm.perception.run import load_geometry
 
     path = out / "perception" / "geometry.npz"
