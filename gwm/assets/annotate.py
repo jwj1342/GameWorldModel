@@ -220,13 +220,124 @@ def residual_pick(clouds: list, candidates: list, root, top: int = 0,
     return best, (best_rmse if best is not None else None)
 
 
+def _project_outline(pts, R_wc, yaw: float, grid: int = 96):
+    """把候选网格按偏航转一下、用相机朝向转进相机系、正交投影成二值轮廓。
+
+    **正交投影是关键**：透视需要知道物体离相机多远，而那个距离正是深度给的，
+    而深度是坏的（实测 VGGT 沿相机视线把物体压扁到最短轴的 0.526）。
+    正交投影不需要它，物体只占几百到几千像素时形变也可忽略。
+    """
+    import numpy as _np
+
+    a = _np.asarray(pts, float)
+    c, sn = _np.cos(yaw), _np.sin(yaw)
+    R_yaw = _np.array([[c, 0.0, sn], [0.0, 1.0, 0.0], [-sn, 0.0, c]])
+    uv = ((a @ R_yaw.T) @ _np.asarray(R_wc, float).T)[:, :2]
+    lo, hi = uv.min(0), uv.max(0)
+    span = _np.maximum(hi - lo, 1e-9)
+    k = (grid - 2) / span.max()
+    ij = _np.floor((uv - lo) * k).astype(int)
+    ij[:, 0] += (grid - 1 - int(span[0] * k)) // 2
+    ij[:, 1] += (grid - 1 - int(span[1] * k)) // 2
+    ij = _np.clip(ij, 0, grid - 1)
+    out = _np.zeros((grid, grid), bool)
+    out[ij[:, 1], ij[:, 0]] = True
+    return out
+
+
+def _mask_outline(mask, grid: int = 96):
+    """观测掩码按它的二维包围盒等比归一化到同一个格子。"""
+    import numpy as _np
+
+    m = _np.asarray(mask, bool)
+    ys, xs = _np.nonzero(m)
+    if len(xs) < 20:
+        return None
+    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    k = (grid - 2) / float(max(w, h))
+    ij = _np.stack([((xs - x0) * k).astype(int), ((ys - y0) * k).astype(int)], axis=1)
+    ij[:, 0] += (grid - 1 - int(w * k)) // 2
+    ij[:, 1] += (grid - 1 - int(h * k)) // 2
+    ij = _np.clip(ij, 0, grid - 1)
+    out = _np.zeros((grid, grid), bool)
+    out[ij[:, 1], ij[:, 0]] = True
+    return out
+
+
+def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
+                    top: int = 0, n_views: int = 3, n_yaw: int = 8) -> tuple:
+    """**用轮廓 IoU 从候选里挑**，全程不碰深度。返回 (资产, IoU) 或 (None, None)。
+
+    为什么换掉深度残差。根因是 VGGT 沿相机视线把物体压扁（最短轴只剩正确比例的
+    0.526），而**沿视线的误差投影到像平面上恰好是零**。实测（真实几何，
+    33 个形状最近邻候选，随机 0.030）：
+
+        ICP 残差（三维表面，用深度）      0.041   1.4 倍
+        按观测位姿渲染轮廓 + IoU          **0.108**  **3.6 倍**
+
+    而这套方法的真实形态（图像提候选 + 轮廓挑，候选里没真值时记失败）：
+
+        图像前 64 名   覆盖率 0.284   挑对 **0.054**   条件准确率 0.19
+        图像前 256 名  覆盖率 0.419   挑对  0.014      条件准确率 0.033
+
+    **候选集要小**：前 64 名比前 256 名好近四倍，尽管后者覆盖率高一半——
+    挑的能力随候选数衰减得比覆盖率涨得快。
+
+    每个候选给同样的 n_yaw 个偏航、n_views 帧，预算严格相同，所以「取最好」
+    不会偏袒错的候选（预算不等时会，这个坑量到过）。
+    """
+    import numpy as _np
+    from .mesh import load_points
+
+    if not masks_per_frame or not candidates:
+        return None, None
+    avail = [f for f in sorted(masks_per_frame) if f in cams]
+    if not avail:
+        return None, None
+    if 0 < n_views < len(avail):
+        stride = len(avail) / float(n_views)
+        avail = [avail[min(len(avail) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
+    obs = [(f, _mask_outline(masks_per_frame[f])) for f in avail]
+    obs = [(f, g) for f, g in obs if g is not None]
+    if not obs:
+        return None, None
+    yaws = [2.0 * _np.pi * j / n_yaw for j in range(n_yaw)]
+    best, best_iou = None, -1.0
+    for asset in (candidates[:top] if top > 0 else candidates):
+        try:
+            tpl = load_points(Path(root) / asset.path, samples=20000)
+        except (OSError, ValueError):
+            continue
+        if tpl is None or len(tpl) < 50:
+            continue
+        tpl = tpl - tpl.mean(0)
+        per = []
+        for f, g in obs:
+            R_wc = _np.asarray(cams[f], float)[:3, :3].T
+            hi = 0.0
+            for y in yaws:
+                sil = _project_outline(tpl, R_wc, float(y))
+                union = float(_np.logical_or(sil, g).sum())
+                if union > 0:
+                    hi = max(hi, float(_np.logical_and(sil, g).sum()) / union)
+            per.append(hi)
+        if per:
+            score = float(_np.median(per))
+            if score > best_iou:
+                best_iou, best = score, asset
+    return best, (best_iou if best is not None else None)
+
+
 def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict,
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
                   top_k: int = 5, shapes: dict | None = None,
                   shape_weight: float = 0.0, image_admit: int = 0,
                   image_gate_rank: int = 0, clouds: dict | None = None,
-                  residual_top: int = 0, root=None) -> list[dict]:
+                  residual_top: int = 0, root=None,
+                  silhouette_top: int = 0, masks_by_obj: dict | None = None,
+                  cams: dict | None = None) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -298,8 +409,21 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                 record["observed_ratio"] = [round(v, 3) for v in obs_ratio]
         # **用配准残差从候选里挑。** 这是「连续稠密表征监督离散符号选择」的落地形式：
         # 文字和图像只负责**提候选**，谁配得上这团点由几何说了算。见 residual_pick。
+        # **轮廓挑**优先于残差挑：真实几何下 0.108 对 0.041（随机 0.030）。
+        _oid = obj["id"] if obj else None
+        _mk = (masks_by_obj or {}).get(_oid) if _oid else None
+        if silhouette_top > 0 and _mk and cams and root is not None and hits:
+            _pick, _iou = silhouette_pick(_mk, cams, [a for a, _s in hits], root,
+                                          top=silhouette_top)
+            if _pick is not None:
+                _by_id = {a.id: sc for a, sc in hits}
+                record["silhouette_iou"] = round(float(_iou), 4)
+                record["silhouette_rank"] = next(
+                    (i for i, (a, _s) in enumerate(hits) if a.id == _pick.id), None)
+                hits = [(_pick, _by_id.get(_pick.id, 0.0))] + [
+                    pr for pr in hits if pr[0].id != _pick.id]
         _cloud = (clouds or {}).get(obj["id"]) if obj else None
-        if residual_top > 0 and _cloud and root is not None and hits:
+        if silhouette_top <= 0 and residual_top > 0 and _cloud and root is not None and hits:
             _pick, _rmse = residual_pick(_cloud, [a for a, _s in hits], root,
                                          top=residual_top)
             if _pick is not None:

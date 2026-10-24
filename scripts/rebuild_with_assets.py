@@ -63,6 +63,31 @@ def _settle(game_dir: Path, out: Path, seconds: float, separate_seconds: float =
 
 
 
+def object_cameras(out: Path) -> dict:
+    """每一帧的 cam_to_world，给轮廓挑用（只要旋转那一块，不碰深度）。"""
+    from gwm.perception.run import load_geometry
+
+    path = out / "perception" / "geometry.npz"
+    if not path.is_file():
+        return {}
+    geom = load_geometry(path)
+    return {int(f): np.asarray(geom.cam_to_world[k], float)
+            for k, f in enumerate(geom.frame_indices)}
+
+
+def subsample_masks(masks: dict, max_frames: int = 9) -> dict:
+    """每个物体留均匀抽的几帧掩码，给轮廓挑用。"""
+    out: dict = {}
+    for oid, per_frame in masks.items():
+        items = sorted(per_frame.items())
+        if len(items) > max_frames:
+            step = max(1, len(items) // max_frames)
+            items = items[::step][:max_frames]
+        if items:
+            out[oid] = {int(f): m for f, m in items}
+    return out
+
+
 def object_clouds(out: Path, masks: dict, max_frames: int = 9) -> dict:
     """每个物体的逐帧世界坐标点云，给残差挑资产用。
 
@@ -191,7 +216,14 @@ def main() -> int:
                                   clouds=(object_clouds(out, masks)
                                           if int(settings.get("residual_top", 0)) > 0 else None),
                                   residual_top=int(settings.get("residual_top", 0)),
-                                  root=root)
+                                  root=root,
+                                  silhouette_top=int(settings.get("silhouette_top", 0)),
+                                  masks_by_obj=(subsample_masks(masks)
+                                                if int(settings.get("silhouette_top", 0)) > 0
+                                                else None),
+                                  cams=(object_cameras(out)
+                                        if int(settings.get("silhouette_top", 0)) > 0
+                                        else None))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"
