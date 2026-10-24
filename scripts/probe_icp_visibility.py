@@ -180,7 +180,8 @@ def make_clouds(motion: str, visibility: str, n_frames: int = 24,
     return clouds
 
 
-def make_template(kind: str, shape: str = "box") -> np.ndarray:
+def make_template(kind: str, shape: str = "box", *,
+                  scale: float = 1.0, aspect: float = 0.0) -> np.ndarray:
     """退化模板。模板的作用是提供一组**不随相机动的完整点**——它需不需要是
     *正确*的那个资产？
 
@@ -205,7 +206,15 @@ def make_template(kind: str, shape: str = "box") -> np.ndarray:
     if kind == "obb":
         # **不需要检索的那一档**：按观测包围盒搭个盒子。尺寸和比例都来自观测，
         # 形状细节一概不要。这正是点二能不能脱离点一独立推进的判据。
-        return box_surface(base)[0] + centre
+        #
+        # `scale` 和 `aspect` 是**观测误差**，不是模板设计的自由度：包围盒是估出来的，
+        # 估得不准模板就跟着不准。管线实测 scale_ok 只有 0.31、scale_ratio 中位 0.784
+        # （整体偏小两成多），shape_ok（比例误差 ≤0.2）0.69。这两条扫描就是为了
+        # 把「包围盒要准到什么程度」这条线画出来，好和那两个数对上。
+        ext = [v * scale for v in base]
+        if aspect:
+            ext = [v * f for v, f in zip(ext, (1 + aspect, 1 - aspect * 0.5, 1 + aspect / 3))]
+        return box_surface(tuple(ext))[0] + centre
     if kind == "aspect":                       # 比例错：三条边各歪 30% 左右
         return box_surface(tuple(v * f for v, f in zip(base, (1.3, 0.85, 1.1))))[0] + centre
     if kind == "cube":                         # 比例全丢，体积保持
@@ -246,7 +255,9 @@ def template_mismatch(shape: str) -> float:
 def solved_rotation_against_template(motion: str, visibility: str, n_frames: int = 24,
                                      warm_start: bool = False,
                                      template_kind: str = "perfect",
-                                     shape: str = "box") -> float:
+                                     shape: str = "box",
+                                     tmpl_scale: float = 1.0,
+                                     tmpl_aspect: float = 0.0) -> float:
     """把**完整模板**配到每一帧的局部观测上，而不是让局部观测互相配。
 
     受控实验里「完整点云」那一行是全对的（静止 0.3°、转 90° 解出 89.9°），而所有出错
@@ -261,7 +272,8 @@ def solved_rotation_against_template(motion: str, visibility: str, n_frames: int
     """
     from gwm.perception.registration import icp
     clouds = make_clouds(motion, visibility, n_frames, shape=shape)
-    template = make_template(template_kind, shape=shape)
+    template = make_template(template_kind, shape=shape,
+                             scale=tmpl_scale, aspect=tmpl_aspect)
     angles = []
     warm_R, warm_t = np.eye(3), np.zeros(3)      # 上一帧解出的位姿，当这一帧的初值
     for cloud in clouds:
@@ -411,6 +423,31 @@ def main() -> int:
                                                     template_kind=kind, shape=shape)
                    for m in ("static", "rotate") for w in (False, True)]
             print(f"  {label:<24}{row[0]:>9.1f}°{row[1]:>9.1f}°{row[2]:>10.1f}°{row[3]:>10.1f}°")
+    print()
+    print("—— 包围盒要估得多准 ——")
+    print("  上一张表说模板不需要是正确的资产，只要尺寸比例对。那「对」到什么程度？")
+    print("  这条线要和管线实测对得上：shape_ok（比例误差 ≤0.2）0.69，")
+    print("  scale_ok 只有 0.31、scale_ratio 中位 0.784（整体偏小两成多）。")
+    print("  两列都是**静止物体解出的假转动**，越小越好；对照写在每组行首。")
+    for shape, slabel in (("box", "长方体"), ("ell", "L 形"), ("tee", "T 形")):
+        clouds = make_clouds("static", "orbit_grid", n, shape=shape)
+        solved = solved_rotation_deg(clouds)
+        ctrl = float(np.ptp(solved)) if len(solved) > 1 else float("nan")
+        row_s = [solved_rotation_against_template("static", "orbit_grid", n, warm_start=True,
+                                                  template_kind="obb", shape=shape,
+                                                  tmpl_scale=v)
+                 for v in (1.0, 1.1, 1.2, 1.3, 1.5)]
+        row_a = [solved_rotation_against_template("static", "orbit_grid", n, warm_start=True,
+                                                  template_kind="obb", shape=shape,
+                                                  tmpl_aspect=v)
+                 for v in (0.0, 0.1, 0.2, 0.3)]
+        print(f"\n  ### {slabel} ###  不用模板的对照 {ctrl:.1f}°")
+        print("    尺寸估错    " + "  ".join(f"x{v:.1f}:{d:6.1f}°"
+                                           for v, d in zip((1.0, 1.1, 1.2, 1.3, 1.5), row_s)))
+        print("    比例估错    " + "  ".join(f"{v:.0%}:{d:6.1f}°"
+                                           for v, d in zip((0.0, 0.1, 0.2, 0.3), row_a)))
+    print("  （比例那一档按 (1+e, 1-e/2, 1+e/3) 三条边各歪，换算成 shape_error")
+    print("   大致是 e 的三分之一上下——所以 e=0.3 对应管线里 shape_error≈0.1。）")
     print()
     print("  怎么读。要的不是「模板档比完美档好」，而是**「按观测包围盒搭的盒子」比")
     print("  「不用模板」的对照低多少**——低，才说明不需要检索挑对资产；")
