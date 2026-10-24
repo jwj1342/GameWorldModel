@@ -5,6 +5,7 @@
 不这么分的话主表全是同分布结果，说明不了泛化。
 """
 from __future__ import annotations
+import re
 import math
 import random
 
@@ -104,7 +105,13 @@ def _asset_pool(cfg: dict | None = None) -> list:
                     if isinstance(r, list) and len(r) == 3:
                         # 类名取文件名，把分隔符换成空格——它会成为真值的 class，
                         # 检索那一侧拿到的就是这个词，所以名字和网格天然绑定。
-                        name = str(a.name).replace("-", " ").replace("_", " ").strip().lower()
+                        # **驼峰要先拆开再小写。** 直接 lower() 会把 tableCoffeeGlass
+                        # 压成 tablecoffeeglass——一个没法分词的长串，文字检索一个
+                        # 候选都给不出（实测 3/61 是这么丢的，而且这是我造数据时
+                        # 自己制造的障碍，不是检索的毛病）。
+                        raw = str(a.name).replace("-", " ").replace("_", " ")
+                        raw = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+                        name = re.sub(r"\s+", " ", raw).strip().lower()
                         # schema 给 class 定了 maxLength（40），资产文件名里有
                         # "track striped wide straight hill complete half" 这种，
                         # 不截就整条片段校验失败——实测 12 条里挂了 1 条。
