@@ -640,6 +640,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             _rst: dict = {}
             _rend = _render_pick_rate(per_frame, frames, _cams, _gt_ref, 32,
                                       n_views=3, n_yaw=8, stats=_rst)
+            # 掩码退化的容差线：真值掩码 + 膨胀/腐蚀若干格（96 格的轮廓上，
+            # 2 格约等于物体宽度的 2%）。这条给出任何分割后端要达到的指标。
+            for _mp in (1, 2, 4):
+                _md = _render_pick_rate(per_frame, frames, _cams, _gt_ref, 32,
+                                        n_views=3, n_yaw=8, mask_px=_mp)
+                if _md is not None:
+                    out.setdefault(f"{kind}/renderpick_mask{_mp}", []).append(_md)
             if _rend is not None:
                 out.setdefault(f"{kind}/renderpick_33", []).append(_rend)
                 out.setdefault(f"{kind}/render_margin", []).append(
@@ -1900,9 +1907,36 @@ def _mask_to_grid(mask: np.ndarray, grid: int = 96) -> np.ndarray | None:
     return out
 
 
+def _degrade_mask(g: np.ndarray, px: int, seed: int = 0) -> np.ndarray:
+    """把二值轮廓按 px 个格子膨胀或腐蚀，模拟神经掩码的边界误差。
+
+    **为什么要它。** 端到端把轮廓挑接进管线之后仍是 0/75，而探针上同一配置该给到
+    约 4/78。账目显示机制跑通了（93/122 条决策改由图像候选胜出），所以不是开关
+    没点着。差别在输入：**探针用真值掩码，管线用神经掩码**，而轮廓判据整个建立
+    在掩码上——掩码就是信号本身，边界一糊 IoU 比较就失效。深度残差对这个反而
+    不敏感，因为它比的是三维点。
+
+    这条扫出「掩码要准到什么程度轮廓挑才成立」，是任何分割后端要达到的指标——
+    和深度噪声那条扫描同一个用法。
+
+    正负各一半：膨胀和腐蚀对 IoU 的影响不对称，只扫一侧会读偏。
+    """
+    if px == 0:
+        return g
+    out = g.copy()
+    grow = (seed % 2 == 0)
+    for _ in range(abs(px)):
+        a = out
+        sh = np.zeros_like(a)
+        sh[1:, :] |= a[:-1, :]; sh[:-1, :] |= a[1:, :]
+        sh[:, 1:] |= a[:, :-1]; sh[:, :-1] |= a[:, 1:]
+        out = (a | sh) if grow else (a & sh)
+    return out
+
+
 def _render_pick_rate(per_frame: dict, frames: list, cams: dict, gt_ref: str,
                       n_distract: int, n_views: int = 3, n_yaw: int = 8,
-                      stats: dict | None = None) -> float | None:
+                      stats: dict | None = None, mask_px: int = 0) -> float | None:
     """**按观测位姿渲染候选轮廓**，和观测掩码比 IoU，挑最高的。
 
     上一版用资产缩略图的固定 4 视角 + Hu 矩，得 0.081（随机 0.030，2.7 倍）——
@@ -1928,6 +1962,8 @@ def _render_pick_rate(per_frame: dict, frames: list, cams: dict, gt_ref: str,
     obs = [(f, g) for f, g in obs if g is not None]
     if not obs:
         return None
+    if mask_px:
+        obs = [(f, _degrade_mask(g, mask_px, seed=i)) for i, (f, g) in enumerate(obs)]
     yaws = [2.0 * np.pi * j / n_yaw for j in range(n_yaw)]
     scored = []
     for aid in [gt_ref] + picked:
@@ -2665,7 +2701,8 @@ def main() -> int:
                 or "/respick_unflat" in key or "/silpick_cands" in key
                 or key.endswith("/silpick_mismatched")
                 or key.endswith("/renderpick_33")
-                or "/combined_top" in key or "/gt_in_top" in key):
+                or "/combined_top" in key or "/gt_in_top" in key
+                or "/renderpick_mask" in key):
             n_plus = (33 if "_hard_33" in key
                       else 33 if (key.endswith("/respick33") or "/respick_noise" in key
                                   or "/respick_unflat" in key)
@@ -2673,7 +2710,8 @@ def main() -> int:
                       if ("respick_cands" in key or "d2pick_cands" in key
                           or "silpick_cands" in key)
                       else 33 if (key.endswith("/silpick_mismatched")
-                                  or key.endswith("/renderpick_33"))
+                                  or key.endswith("/renderpick_33")
+                                  or "/renderpick_mask" in key)
                       else int(key.rsplit("top", 1)[-1])
                       if ("/combined_top" in key or "/gt_in_top" in key)
                       else int(key.rsplit("_", 1)[-1]))
