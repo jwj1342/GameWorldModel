@@ -560,6 +560,22 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 out.setdefault(f"{kind}/residual_pick_hard_33", []).append(_hard)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
+        # **形状第 k 近的邻居当模板。** 不用「管线实际选中的那个」是因为管线的物体
+        # id 来自检测器、这里是真值节点 id，连起来要配对，而配对条件含被测量。
+        #
+        # 这条给出的是一条曲线：形状差多少 → 判别比掉多少。再把管线实测的形状距离
+        # （残差挑之后中位 0.0440、上四分位 0.0844）往上一套，就知道「精确 id 挑不中」
+        # 到底要不要紧。
+        nbr_deg: dict = {}
+        if _gt_ref:
+            _nbrs = _hard_distractors(_gt_ref, 32)
+            for _k in (1, 8, 32):
+                if len(_nbrs) >= _k:
+                    nbr_deg[_k] = _template_rotation_from_points(
+                        clouds, _asset_points_by_id(_nbrs[_k - 1]))
+                    _d = _shape_distance(_gt_ref, _nbrs[_k - 1])
+                    if _d is not None:
+                        out.setdefault(f"{kind}/nbr{_k}_shape_dist", []).append(_d)
         _cam_corr = _camera_step_correlation(tracked, cam_list)
         if _cam_corr is not None and np.isfinite(_cam_corr):
             out.setdefault(f"{kind}/cam_step_corr", []).append(float(_cam_corr))
@@ -634,6 +650,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
             out.setdefault(f"{kind}/template_rmse_deg", []).append(
                 float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        for _k, _deg in nbr_deg.items():
+            if len(_deg) == len(true_deg):
+                out.setdefault(f"{kind}/nbr{_k}_range_deg", []).append(float(np.ptp(_deg)))
+                out.setdefault(f"{kind}/nbr{_k}_rmse_deg", []).append(
+                    float(np.sqrt(np.mean((_deg - true_deg) ** 2))))
         if len(gtref_deg) == len(true_deg):
             out.setdefault(f"{kind}/gtref_range_deg", []).append(float(np.ptp(gtref_deg)))
             out.setdefault(f"{kind}/gtref_rmse_deg", []).append(
@@ -1365,6 +1386,18 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _shape_distance(a_id: str, b_id: str) -> float | None:
+    """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
+    shapes = _ASSET_CACHE.get("__shapes__") or {}
+    a, b = shapes.get(a_id), shapes.get(b_id)
+    if not a or not b:
+        return None
+    try:
+        return float(np.abs(np.asarray(a, float) - np.asarray(b, float)).mean())
+    except (TypeError, ValueError):
+        return None
 
 
 def _hard_distractors(gt_ref: str, n: int) -> list[str]:
