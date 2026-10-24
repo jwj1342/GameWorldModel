@@ -620,6 +620,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 直接把图像前 128 名全过一遍残差即可。衰减多快决定下一步的形状。
             # 深度噪声的容差线：真值深度 + 可控噪声，噪声按包围盒对角线的比例给。
             # 这条曲线是任何未来几何后端的**指标**，比「再试一个后端」有用。
+            # 把压扁补偿掉：沿最短主轴拉 1/0.526≈1.9 倍。1.0 是对照。
+            for _uf in (1.0, 1.5, 1.9, 2.5):
+                _u = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
+                                         n_views=7, unflatten=_uf)
+                if _u is not None:
+                    out.setdefault(f"{kind}/respick_unflat{int(_uf * 10):02d}",
+                                   []).append(_u)
             for _nz in (0.005, 0.01, 0.02, 0.05):
                 _n = _residual_pick_rate(clouds, _gt_ref, 32, hard=True,
                                          n_views=7, noise=_nz)
@@ -1687,7 +1694,7 @@ def _hard_distractors(gt_ref: str, n: int) -> list[str]:
 def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
                         seed: int = 0, hard: bool = False,
                         n_views: int = 1, n_yaw: int = 1,
-                        noise: float = 0.0) -> float | None:
+                        noise: float = 0.0, unflatten: float = 1.0) -> float | None:
     """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
 
     这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
@@ -1751,6 +1758,26 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
         nrng = np.random.default_rng(abs(hash((gt_ref, n_distract, noise))) % (2**32))
         scale = float(np.median([np.linalg.norm(q.max(0) - q.min(0)) for q in queries]))
         queries = [q + nrng.normal(0.0, noise * scale, q.shape) for q in queries]
+    # **把已知的系统性畸变补偿掉。** 实测 VGGT 把物体沿最短轴压扁到正确比例的
+    # 0.526（中位，n=67，中间轴 0.924 基本对），而噪声扫描已经排除了「这是噪声」
+    # （5% 各向同性噪声仍有 0.108，真实 VGGT 只有 0.041）。
+    #
+    # 所以直接沿**最短主轴**拉回来：1/0.526 ≈ 1.9。用 PCA 定轴而不是坐标轴，
+    # 因为物体朝向是任意的。回得来就同时坐实诊断并拿到一个可用的修正；
+    # 回不来就说明压扁不是起作用的那个因素。
+    if unflatten and abs(unflatten - 1.0) > 1e-6:
+        fixed = []
+        for q in queries:
+            c = q.mean(0)
+            centred = q - c
+            try:
+                _u, _s, vt = np.linalg.svd(centred, full_matrices=False)
+            except np.linalg.LinAlgError:
+                fixed.append(q); continue
+            local = centred @ vt.T          # 主轴坐标系，第三根是最短的
+            local[:, 2] *= float(unflatten)
+            fixed.append(local @ vt + c)
+        queries = fixed
     best_id, best_rmse = None, float("inf")
     for aid in ids:
         tpl = _asset_points_by_id(aid)
@@ -2164,9 +2191,11 @@ def main() -> int:
             extra = f"  **覆盖率 {statistics.mean(values):.3f}**（候选集里有正确答案的比例）"
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
                 or "/respick_cands" in key or "/d2pick_cands" in key
-                or "/respick33" in key or "/respick_noise" in key):
+                or "/respick33" in key or "/respick_noise" in key
+                or "/respick_unflat" in key):
             n_plus = (33 if "_hard_33" in key
-                      else 33 if (key.endswith("/respick33") or "/respick_noise" in key)
+                      else 33 if (key.endswith("/respick33") or "/respick_noise" in key
+                                  or "/respick_unflat" in key)
                       else int(key.rsplit("cands", 1)[-1])
                       if ("respick_cands" in key or "d2pick_cands" in key)
                       else int(key.rsplit("_", 1)[-1]))
