@@ -139,7 +139,8 @@ def shape_rerank(hits: list, observed: list[float] | None, shapes: dict,
     return [(a, s) for a, s, _d in scored]
 
 
-def residual_pick(clouds: list, candidates: list, root, top: int = 0) -> tuple:
+def residual_pick(clouds: list, candidates: list, root, top: int = 0,
+                  n_views: int = 7) -> tuple:
     """**用配准残差从候选里挑**：把每个候选网格缩到观测点云的尺度，ICP 配一次，
     取残差最小的。返回 (资产, 残差) 或 (None, None)。
 
@@ -174,8 +175,25 @@ def residual_pick(clouds: list, candidates: list, root, top: int = 0) -> tuple:
     if not per_frame:
         return None, None
     obs_diag = float(_np.median(per_frame))
-    # 取中间那一帧当查询：首帧和末帧的可见面都偏。
-    query = _np.asarray(clouds[len(clouds) // 2], float)
+    # **用几帧，不是一帧。** 一帧只是一个局部视角，同一包围盒比例下完全不同的物体
+    # 在单个视角上可能都配得差不多。实测（33 个形状最接近的候选里挑对的比例）：
+    #
+    #     1 帧 0.149 ／ 3 帧 0.243 ／ **7 帧 0.297** ／ 15 帧 0.284 ／ 全部 0.311
+    #
+    # 平台在 7 帧，静止物体上 0.625。另外**起点不能放在第 0 帧**：只用首帧 0.149、
+    # 只用中间帧 0.243，首帧的可见面最偏。均匀抽时起点放到半个间隔处，避开两端。
+    #
+    # 已试过并否掉的：绕竖轴加 4/8 个初始偏航、每帧取最小残差，反而从 0.297 掉到
+    # 0.216——取最小等于给每个候选更大的搜索预算，而错的候选从中得益更多。
+    # 「挑哪个」这类任务里，候选之间的分必须可比。
+    if 0 < n_views < len(clouds):
+        stride = len(clouds) / float(n_views)
+        picks = [clouds[min(len(clouds) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
+    else:
+        picks = clouds
+    queries = [_np.asarray(c, float) for c in picks if len(_np.asarray(c, float)) >= 30]
+    if not queries:
+        return None, None
     best, best_rmse = None, float("inf")
     for asset in (candidates[:top] if top > 0 else candidates):
         try:
@@ -188,9 +206,17 @@ def residual_pick(clouds: list, candidates: list, root, top: int = 0) -> tuple:
         if diag <= 1e-9 or obs_diag <= 1e-9:
             continue
         model = (pts - pts.mean(0)) * (obs_diag / diag)
-        step = icp(query, model)
-        if step["ok"] and step["rmse"] is not None and float(step["rmse"]) < best_rmse:
-            best_rmse, best = float(step["rmse"]), asset
+        rs = []
+        for q in queries:
+            step = icp(q, model)
+            if step["ok"] and step["rmse"] is not None:
+                rs.append(float(step["rmse"]))
+        if not rs:
+            continue
+        # 取中位数不取均值：某一帧掩码漏了一块就会拉出离谱的残差。
+        score = float(_np.median(rs))
+        if score < best_rmse:
+            best_rmse, best = score, asset
     return best, (best_rmse if best is not None else None)
 
 
