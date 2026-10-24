@@ -841,7 +841,13 @@ def _dense_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> 
             m = resize_mask(m, (ga.shape[1], ga.shape[0])).astype(bool)
         if m.sum() < 40:
             out.append(out[-1]); continue
-        flow = cv2.calcOpticalFlowFarneback(ga, gb, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        # **窗口要和物体尺度匹配。** 第一版用 winsize=15，而物体只有 20~36 像素宽——
+        # 平滑窗口和物体本身一样大，算出来的流混进大量背景，跟到的是相机流不是物体流。
+        # 实测那一版误差 86~95 度且**不随物体变大而改善**，正是这个征兆。
+        # 窗口按掩码的等效边长定，无量纲地跟着物体走，不写死。
+        side = int(np.sqrt(max(int(m.sum()), 1)))
+        win = int(np.clip(side // 3, 5, 15)) | 1          # 奇数，物体三分之一左右
+        flow = cv2.calcOpticalFlowFarneback(ga, gb, None, 0.5, 3, win, 3, 5, 1.2, 0)
         vs, us = np.nonzero(m)
         pa = np.stack([us.astype(np.float32), vs.astype(np.float32)], 1)
         pb = pa + flow[vs, us]
