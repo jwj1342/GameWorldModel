@@ -839,6 +839,13 @@ def _dense_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> 
         m = np.asarray(m).astype(bool)
         if m.shape != ga.shape:
             m = resize_mask(m, (ga.shape[1], ga.shape[0])).astype(bool)
+        # **把掩码往里腐蚀再取点。** 物体只有 20~36 像素宽，很大一部分像素离边界只有
+        # 一两个像素；光流偏一个像素，_lift 在那个落点取到的深度就跳到背景上，三维点
+        # 直接飞掉。所以坏的可能不是光流，是「二维对应 + 逐像素查深度」这个抬升方式。
+        # 腐蚀之后只用物体内部的点，这个嫌疑就被排除或坐实。
+        m_in = cv2.erode(m.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
+        if m_in.sum() >= 40:
+            m = m_in
         if m.sum() < 40:
             out.append(out[-1]); continue
         # **窗口要和物体尺度匹配。** 第一版用 winsize=15，而物体只有 20~36 像素宽——
