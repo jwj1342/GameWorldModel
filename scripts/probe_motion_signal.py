@@ -63,9 +63,25 @@ def gt_series(clip_dir: Path) -> tuple[dict, dict]:
     return truth, kinds
 
 
-def perceive(clip_dir: Path, work: Path) -> dict:
-    files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml",
-             REPO / "configs/perception/gt.yaml"]
+def perceive(clip_dir: Path, work: Path, perception: str = "gt") -> dict:
+    """默认跑**真值感知**（真值掩码 + 真值深度）。
+
+    `perception="gtseg"` 保住真值分割、把几何换成真实的 VGGT；`"neural"` 全换。为什么需要这个开关：残差挑资产的所有数据都是在
+    真值感知上测的（33 个候选挑对 0.297、385 个 0.162），而管线跑的是神经感知，
+    端到端命中率 **0/78**，和按衰减曲线算出的期望（约 5/76）对不上。
+
+    残差判据比的是**表面细节**，而掩码溢出和深度噪声正好吃掉的就是这个。
+    所以「残差挑资产成不成立」这个结论目前只在干净几何上成立，必须单独验一遍
+    真实感知——这正是 [[synthetic-gains-need-a-real-data-leg]] 那条的同一类问题，
+    只不过这次的「合成」是真值感知。
+    """
+    files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml"]
+    if perception == "gt":
+        files.append(REPO / "configs/perception/gt.yaml")
+    elif perception == "gtseg":
+        # 真值分割保住物体身份（否则 id 变成检测器的证据 id，真值资产 ref 对不上，
+        # 残差那一臂根本不触发），几何换成真实的 VGGT。
+        files.append(REPO / "configs/perception/gt_segmentation.yaml")
     cfg = load_config([f for f in files if Path(f).is_file()])
     cfg["perception"]["gt_program"] = str(clip_dir / "program.json")
     return run_perception(str(clip_dir / "clip.mp4"), clip_dir.name, work / clip_dir.name, cfg)
@@ -1878,7 +1894,7 @@ def main() -> int:
     merged: dict[str, list] = {}
     for clip_dir in clips:
         try:
-            evidence = perceive(clip_dir, work)
+            evidence = perceive(clip_dir, work, perception=a.perception)
         except Exception as error:                   # 一条挂了不该拖垮整轮
             print(f"{clip_dir.name}: 失败 {type(error).__name__}: {error}"[:200], flush=True)
             continue
