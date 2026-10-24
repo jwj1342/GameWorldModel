@@ -565,6 +565,15 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 两个 N 一起报，好看出它随候选集增大怎么衰减。
         _gt_ref = _gt_asset_refs().get(oid, "")
         if _gt_ref:
+            # **这个物体自己的**真值资产在全库里的图像名次。之前报的 365 是集合判据
+            # （片段里任何一个真值资产排得靠前就算），那是放水的上界；端到端要的是
+            # 这个。两者差多少，直接决定「正确答案进不进候选集」。
+            _rank = _image_rank_of_asset(run, evidence, oid, _gt_ref)
+            if _rank is not None:
+                out.setdefault(f"{kind}/own_image_rank", []).append(float(_rank))
+                for _n in (64, 256, 384):
+                    out.setdefault(f"{kind}/own_in_top{_n}", []).append(
+                        1.0 if _rank <= _n else 0.0)
             for _n in (8, 32):
                 _hit = _residual_pick_rate(clouds, _gt_ref, _n)
                 if _hit is not None:
@@ -1409,6 +1418,74 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
     return np.asarray(out)
 
 
+_IMG_INDEX: dict = {}
+
+
+def _image_rank_of_asset(run: Path, evidence: dict, oid: str, asset_id: str) -> int | None:
+    """这个物体自己的裁剪图，在全库 4812 个资产里按图像分排序，**它自己的那个真值
+    资产**排第几。
+
+    **为什么要重量一次。** 之前报的「正确资产中位第 365 名」用的是**集合判据**——
+    本片段真值集合里排名最靠前的那个。那是放水的上界：一条片段有五六个资产，
+    问「有没有任何一个排得靠前」比问「这个物体自己的那个排第几」宽得多。
+    而端到端要的恰恰是后者：正确答案有没有进这个物体的候选集。
+
+    我拿集合判据的 365 去算端到端的期望（约 5/76），实测 0/78，对不上。
+    这是两处可能的原因之一（另一处是残差的数全在真值感知上测的）。
+
+    真值感知下物体 id 就是真值节点 id，所以不需要配对——那个坑这里绕开了。
+    """
+    from PIL import Image
+    from gwm.assets.annotate import bbox_of, best_observation, crop_object
+    from gwm.assets.embed import AssetIndex, Embedder
+    from gwm.assets.library import library_root
+    from gwm.config import load_config
+    from gwm.perception.run import load_masks
+
+    if not asset_id:
+        return None
+    if "index" not in _IMG_INDEX:
+        root = library_root()
+        cfg = load_config([REPO / "configs/default.yaml",
+                           REPO / f"configs/{site_name()}.yaml"])
+        path = Path(root) / "dinov2_index.npz" if root else None
+        _IMG_INDEX["index"] = (AssetIndex.load(path)
+                               if path and path.is_file() else None)
+        _IMG_INDEX["embedder"] = (Embedder(Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
+                                  if _IMG_INDEX["index"] is not None else None)
+    index, embedder = _IMG_INDEX["index"], _IMG_INDEX["embedder"]
+    if index is None or embedder is None:
+        return None
+    obj = next((o for o in evidence.get("objects") or [] if str(o.get("id")) == oid), None)
+    observation = best_observation(obj) if obj else None
+    if observation is None:
+        return None
+    try:
+        frames = json.loads((run / "frames" / "frames.json").read_text(encoding="utf-8"))["frames"]
+    except (OSError, ValueError, KeyError):
+        return None
+    frame = next((f for f in frames if f.get("index") == observation.get("frame_index")), None)
+    mask = (load_masks(run).get(oid) or {}).get(observation.get("frame_index"))
+    if not frame or mask is None:
+        return None
+    try:
+        rgb = np.asarray(Image.open(frame["file"]).convert("RGB"))
+        box, box_size = bbox_of(observation)
+        if box_size and box_size[0]:
+            k = rgb.shape[1] / float(box_size[0])
+            box = [v * k for v in box]
+        crop = crop_object(rgb, np.asarray(mask), box)
+        if crop is None:
+            return None
+        scores = index.scores(embedder.embed_images([Image.fromarray(crop)])[0])
+    except (OSError, ValueError, KeyError):
+        return None
+    own = float(scores.get(asset_id, -1.0))
+    if own < 0:
+        return None
+    return 1 + sum(1 for v in scores.values() if v > own)
+
+
 def _shape_distance(a_id: str, b_id: str) -> float | None:
     """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
     shapes = _ASSET_CACHE.get("__shapes__") or {}
@@ -1923,6 +2000,8 @@ def main() -> int:
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
         # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
         # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
+        if "/own_in_top" in key:
+            extra = f"  **覆盖率 {statistics.mean(values):.3f}**（候选集里有正确答案的比例）"
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
                 or "/respick_cands" in key):
             n_plus = (33 if "_hard_33" in key
