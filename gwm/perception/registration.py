@@ -115,12 +115,20 @@ def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
 
 def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         tolerance: float = 1e-4, reject_factor: float = 2.5,
-        max_points: int = 2000, seed: int = 0, point_to_plane: bool = False) -> dict:
+        max_points: int = 2000, seed: int = 0, point_to_plane: bool = False,
+        translation_only: bool = False) -> dict:
     """把 source 配准到 target。返回旋转、平移、残差和参与配准的点数。
 
     `reject_factor` 控制剔除：距离大于「中位距离乘这个系数」的对应点不参与求解。
     相邻帧之间总有一部分点是刚露出来或刚被遮住的，它们在另一帧里没有对应，必须剔掉，
     否则会把整个变换拽偏。
+
+    `translation_only=True` 时干脆不给转动这个自由度，每步只解对应点的质心差。
+    它是用来当**零假设**的：ICP 在部分曲面上总能找到一个让残差更小的转动，
+    所以静止物体也会被解出 13.5 度的假转动（#7 在另一批数据上量到 26.6 度），
+    而铰链门槛是 8 度——第三档全是假关节就是这么来的。
+    有了这一档，「这个物体到底转没转」就能变成一个**带零假设的检验**：
+    只有当允许转动显著降低残差时，才认它真的转了。
     """
     from scipy.spatial import cKDTree
 
@@ -148,6 +156,10 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
         if normals is not None:
             R_step, t_step = _point_to_plane_step(current[keep], dst[indices[keep]],
                                                   normals[indices[keep]])
+        elif translation_only:
+            # 只解平移：对应点的质心差。转动这个自由度干脆不给。
+            R_step = np.eye(3)
+            t_step = dst[indices[keep]].mean(0) - current[keep].mean(0)
         else:
             R_step, t_step = kabsch(current[keep], dst[indices[keep]])
         current = current @ R_step.T + t_step
@@ -162,9 +174,42 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
             "rmse": rmse, "pairs": int(len(current))}
 
 
+
+
+def rotation_earns_its_keep(source: np.ndarray, target: np.ndarray, *,
+                            min_gain: float = 0.05, **icp_kwargs) -> dict:
+    """转动要「挣」出来：只有显著降低残差才认它真的转了。
+
+    为什么需要。ICP 无条件享有旋转自由度，而在一块**部分曲面**上它总能找到某个转动
+    让残差更小——于是静止物体也被解出转动。实测 13.5 度（#7 在另一批数据上是
+    26.6 度），而铰链门槛是 8 度，所以第三档产出的关节全是假的。
+
+    位置那一侧已经被时间平滑治住了（位移误差 0.045 → 0.028，静止漂移 0.077 → 0.039），
+    **但平滑不影响转动**，所以这个数一直挂在那儿。它是现在挡住第三档的那一个数。
+
+    做法是把「转没转」变成一个**带零假设的检验**，而不是无条件相信 ICP：
+    零假设是「只有平移」，备择是「平移 + 转动」。只有当后者把残差压低超过
+    `min_gain`（相对比例）时，才采用带转动的解；否则返回转动为单位阵的那个。
+
+    这正是今天反复踩的那个坑的反面——报任何「更好」之前，先摆出一个什么都不做的基线。
+    """
+    free = icp(source, target, **icp_kwargs)
+    fixed = icp(source, target, translation_only=True, **icp_kwargs)
+    if not free.get("ok") or not fixed.get("ok"):
+        return free
+    r_free, r_fixed = free.get("rmse"), fixed.get("rmse")
+    if r_free is None or r_fixed is None or r_fixed <= 1e-9:
+        return free
+    gain = (r_fixed - r_free) / r_fixed
+    out = dict(free if gain >= min_gain else fixed)
+    out["rotation_gain"] = float(gain)
+    out["rotation_accepted"] = bool(gain >= min_gain)
+    return out
+
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
                 refine: int = 0, cam_positions: list | None = None,
+                rotation_min_gain: float | None = None,
                 **icp_kwargs) -> dict:
     """把一串逐帧点云配成一条轨迹。
 
@@ -218,7 +263,8 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
             keep = visible_subset(model, cam_obj)
             if len(keep) >= 50:
                 target = model[keep]
-        step = icp(guess, target, **icp_kwargs)
+        step = (rotation_earns_its_keep(guess, target, min_gain=rotation_min_gain, **icp_kwargs)
+                if rotation_min_gain is not None else icp(guess, target, **icp_kwargs))
         if step["ok"]:
             # 每步的修正量是判静止最稳的信号：累积位置会被缓慢滑移带偏，
             # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。

@@ -49,3 +49,57 @@ def test_给了相机也能跑完并且给出同样长度的轨迹():
     assert out["ok"]
     assert len(out["positions"]) == len(clouds)
     assert len(out["residuals"]) == len(clouds) - 1
+
+
+# ---------- 转动要「挣」出来 ----------
+#
+# ICP 无条件享有旋转自由度，而在一块部分曲面上它总能找到某个转动让残差更小，
+# 于是静止物体也被解出转动：实测 13.5 度（#7 在另一批数据上 26.6 度），
+# 而铰链门槛是 8 度。位置那一侧已经被时间平滑治住（0.045→0.028、0.077→0.039），
+# **但平滑不影响转动**，所以这就是现在挡住第三档的那一个数。
+
+from gwm.perception.registration import icp, rotation_earns_its_keep
+
+
+def box_surface(n=800, seed=0):
+    """一块有厚度的曲面片，不是闭合物体——真实的逐帧点云就是这样。"""
+    rng = np.random.default_rng(seed)
+    u = rng.uniform(-1, 1, n)
+    v = rng.uniform(-1, 1, n)
+    w = rng.normal(0, 0.01, n)
+    return np.stack([u, v, w], 1)
+
+
+def test_只平移这一档真的不转():
+    src = box_surface(seed=3)
+    dst = src + np.array([0.05, -0.02, 0.01])
+    out = icp(src, dst, translation_only=True)
+    assert out["ok"]
+    assert np.allclose(out["rotation"], np.eye(3), atol=1e-9), "这一档不该解出任何转动"
+
+
+def test_纯平移时转动挣不到_返回零转动():
+    src = box_surface(seed=4)
+    dst = src + np.array([0.04, 0.01, 0.0])
+    out = rotation_earns_its_keep(src, dst, min_gain=0.05)
+    ang = np.degrees(np.arccos(np.clip((np.trace(out["rotation"]) - 1) / 2, -1, 1)))
+    assert ang < 1e-6, f"纯平移却接受了 {ang:.2f} 度的转动"
+    assert out["rotation_accepted"] is False
+
+
+def test_真的转了的时候转动要被接受():
+    src = box_surface(n=1500, seed=5)
+    ang = np.radians(25.0)
+    R = np.array([[np.cos(ang), -np.sin(ang), 0],
+                  [np.sin(ang), np.cos(ang), 0],
+                  [0, 0, 1.0]])
+    dst = src @ R.T
+    out = rotation_earns_its_keep(src, dst, min_gain=0.05)
+    assert out["rotation_accepted"] is True, "真有转动时不该被零假设挡掉"
+
+
+def test_不给门槛时行为完全不变():
+    clouds = [sphere_cloud(seed=i) + np.array([0.1 * i, 0, 0]) for i in range(6)]
+    a = track_rigid(clouds, seed=0)
+    b = track_rigid(clouds, seed=0, rotation_min_gain=None)
+    assert a["positions"] == b["positions"]
