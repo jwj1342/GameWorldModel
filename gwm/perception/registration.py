@@ -69,20 +69,27 @@ def visible_subset(model: np.ndarray, cam: np.ndarray, *, k: int = 12,
     所以这里按法向朝不朝着相机来筛模型：留下正对相机的那一半，再去配准。
     这样源和目标就是**以同样的方式**局部的，欠定的根源就去掉了。
 
-    法向的符号不统一（`estimate_normals` 取的是最小主成分方向），所以不能直接看
-    点积的正负，要取绝对值之外的信息——这里用的是「法向和视线方向夹角接近 90 度的
-    丢掉」，也就是掠射面丢掉，正对或背对都先留着；背面会被 ICP 的距离剔除处理掉。
+    **法向必须先统一朝外。** `estimate_normals` 取的是邻域最小主成分方向，符号是任意
+    的，所以不能直接看点积正负。第一版用了 `|n·view| > 阈值`，结果留下的是正对**和**
+    背对两个面、只丢掉掠射的一圈——球面上留下来的点质心仍在中间，**根本没选出可见那
+    一侧**。单元测试当场抓住了这件事。
+
+    这里先按「从点云质心指向该点」的方向给法向定向（这些基本体都接近凸的，这个定向
+    是对的），再留下 `n·view > 0` 的那些，也就是法向朝着相机的面。掠射的也一并去掉
+    ——掠射面在深度图里本来就采不到点，留着只会制造假对应。
     """
     model = np.asarray(model, float)
     if len(model) < k + 1:
         return np.arange(len(model))
     n = estimate_normals(model, k=k) if normals is None else np.asarray(normals, float)
+    outward = model - model.mean(0)                   # 近似凸：质心指向表面就是朝外
+    flip = np.sign(np.einsum("ij,ij->i", n, outward))
+    flip[flip == 0] = 1.0
+    n = n * flip[:, None]
     view = np.asarray(cam, float) - model
-    norm = np.linalg.norm(view, axis=1, keepdims=True)
-    view = view / np.maximum(norm, 1e-9)
-    cos = np.abs(np.einsum("ij,ij->i", n, view))
-    # 掠射（法向几乎垂直于视线）的面在深度图里本来就采不到点，留着只会制造假对应
-    return np.flatnonzero(cos > 0.34)                 # 约 70 度以内
+    view = view / np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+    cos = np.einsum("ij,ij->i", n, view)
+    return np.flatnonzero(cos > 0.34)                 # 朝向相机且非掠射（约 70 度以内）
 
 def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
                          normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
