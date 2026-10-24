@@ -405,7 +405,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         motion_positions, motion_quaternions = c_a, q_a
         motion_source, articulation = "obb_centre", None
         if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
-            tracked = track_rigid(clouds)
+            # 转动闸：让转动「挣」出来，只有显著降低残差才认。默认关（None）。
+            # 为什么要有它：完美几何加完美掩码下，静止物体仍被 ICP 解出 13.5 度转动，
+            # 而铰链门槛是 8 度——第三档产出的关节全是假的。时间平滑治得了位置
+            # （位移 0.045→0.028、漂移 0.077→0.039），治不了转动。
+            _gate = cfg["perception"]["motion"].get("rotation_min_gain")
+            tracked = track_rigid(clouds, rotation_min_gain=_gate)
             # 配准残差按物体记下来。它和 motion_guess.residual 是两回事：那个是运动
             # 假设拟合轨迹的残差，这个是「这团点在帧间能不能当成一个刚体对齐」。
             # 后者不依赖任何运动模型，是独立的一维信息——#56 里排除掉的那八个判别子
