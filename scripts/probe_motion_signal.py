@@ -620,6 +620,19 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 直接把图像前 128 名全过一遍残差即可。衰减多快决定下一步的形状。
             # 深度噪声的容差线：真值深度 + 可控噪声，噪声按包围盒对角线的比例给。
             # 这条曲线是任何未来几何后端的**指标**，比「再试一个后端」有用。
+            # **按观测位姿渲染候选轮廓**，和观测掩码比 IoU。只用相机朝向 +
+            # 掩码，深度一点不碰——正好对上根因。
+            _cams = {f: _fix(geom.cam_to_world[frame_of[f]])
+                     for f in frames if frame_of.get(f) is not None}
+            _rst: dict = {}
+            _rend = _render_pick_rate(per_frame, frames, _cams, _gt_ref, 32,
+                                      n_views=3, n_yaw=8, stats=_rst)
+            if _rend is not None:
+                out.setdefault(f"{kind}/renderpick_33", []).append(_rend)
+                out.setdefault(f"{kind}/render_margin", []).append(
+                    float(_rst.get("margin", 0.0)))
+                out.setdefault(f"{kind}/render_n_scored", []).append(
+                    float(_rst.get("n_scored", 0)))
             # **轮廓判据**：绕开已坐实的根因（深度误差沿视线，轮廓是二维的）。
             for _c in (32, 128):
                 _st: dict = {}
@@ -1810,6 +1823,113 @@ def _gt_other_ref(oid: str) -> str:
     return others[hash(oid) % len(others)]
 
 
+def _project_silhouette(pts: np.ndarray, R_wc: np.ndarray, yaw: float,
+                        grid: int = 48) -> np.ndarray | None:
+    """把候选网格按偏航转一下、用**相机朝向**转进相机系、正交投影成二值轮廓。
+
+    **这条路一点不碰深度。** 根因是深度误差沿相机视线（物体被压扁到最短轴的
+    0.526），而沿视线的误差投影到像平面上恰好是零。所以只用相机朝向 + 掩码。
+
+    正交投影而不是透视：物体在画面里只占几百到几千像素，透视形变可以忽略，
+    而正交投影不需要知道物体离相机多远——那个距离正是深度给的、而深度是坏的。
+
+    投影后按**二维包围盒**归一化到固定格子，所以和物体的像素大小无关，
+    比的是纯形状。
+    """
+    a = np.asarray(pts, float)
+    c, sn = np.cos(yaw), np.sin(yaw)
+    R_yaw = np.array([[c, 0.0, sn], [0.0, 1.0, 0.0], [-sn, 0.0, c]])
+    cam = (a @ R_yaw.T) @ np.asarray(R_wc, float).T
+    uv = cam[:, :2]
+    lo, hi = uv.min(0), uv.max(0)
+    span = np.maximum(hi - lo, 1e-9)
+    # 等比缩放到格子里（保长宽比），居中
+    k = (grid - 2) / span.max()
+    ij = np.floor((uv - lo) * k).astype(int)
+    ij[:, 0] += (grid - 1 - int(span[0] * k)) // 2
+    ij[:, 1] += (grid - 1 - int(span[1] * k)) // 2
+    ij = np.clip(ij, 0, grid - 1)
+    out = np.zeros((grid, grid), bool)
+    out[ij[:, 1], ij[:, 0]] = True
+    return out
+
+
+def _mask_to_grid(mask: np.ndarray, grid: int = 48) -> np.ndarray | None:
+    """观测掩码按它的二维包围盒等比归一化到同一个格子。"""
+    m = np.asarray(mask, bool)
+    ys, xs = np.nonzero(m)
+    if len(xs) < 20:
+        return None
+    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    k = (grid - 2) / float(max(w, h))
+    ij = np.stack([((xs - x0) * k).astype(int), ((ys - y0) * k).astype(int)], axis=1)
+    ij[:, 0] += (grid - 1 - int(w * k)) // 2
+    ij[:, 1] += (grid - 1 - int(h * k)) // 2
+    ij = np.clip(ij, 0, grid - 1)
+    out = np.zeros((grid, grid), bool)
+    out[ij[:, 1], ij[:, 0]] = True
+    return out
+
+
+def _render_pick_rate(per_frame: dict, frames: list, cams: dict, gt_ref: str,
+                      n_distract: int, n_views: int = 3, n_yaw: int = 8,
+                      stats: dict | None = None) -> float | None:
+    """**按观测位姿渲染候选轮廓**，和观测掩码比 IoU，挑最高的。
+
+    上一版用资产缩略图的固定 4 视角 + Hu 矩，得 0.081（随机 0.030，2.7 倍）——
+    方向对但太粗。这一版直接按**这一帧的相机朝向**渲染候选，视角就对上了。
+
+    每个候选给同样的 `n_yaw` 个偏航，预算严格相同，所以「取最好」不触犯
+    [[best-of-n-init-biases-selection]]（那条针对的是预算不等）。
+    """
+    if stats is None:
+        stats = {}
+    if not gt_ref or not per_frame:
+        return None
+    picked = _hard_distractors(gt_ref, n_distract)
+    if len(picked) < n_distract:
+        return None
+    avail = [f for f in frames if f in per_frame and f in cams]
+    if not avail:
+        return None
+    if 0 < n_views < len(avail):
+        stride = len(avail) / float(n_views)
+        avail = [avail[min(len(avail) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
+    obs = [(f, _mask_to_grid(per_frame[f])) for f in avail]
+    obs = [(f, g) for f, g in obs if g is not None]
+    if not obs:
+        return None
+    yaws = [2.0 * np.pi * j / n_yaw for j in range(n_yaw)]
+    scored = []
+    for aid in [gt_ref] + picked:
+        tpl = _asset_points_by_id(aid)
+        if tpl is None or len(tpl) < 50:
+            continue
+        tpl = tpl - tpl.mean(0)
+        best_per_frame = []
+        for f, g in obs:
+            R_wc = np.asarray(cams[f], float)[:3, :3].T      # 世界 -> 相机
+            best = 0.0
+            for y in yaws:
+                sil = _project_silhouette(tpl, R_wc, y)
+                if sil is None:
+                    continue
+                inter = float(np.logical_and(sil, g).sum())
+                union = float(np.logical_or(sil, g).sum())
+                if union > 0:
+                    best = max(best, inter / union)
+            best_per_frame.append(best)
+        if best_per_frame:
+            scored.append((-float(np.median(best_per_frame)), aid))
+    if len(scored) < 2:
+        return None
+    scored.sort()
+    stats["n_scored"] = len(scored)
+    stats["margin"] = abs(scored[1][0] - scored[0][0]) / max(abs(scored[0][0]), 1e-9)
+    return 1.0 if scored[0][1] == gt_ref else 0.0
+
+
 def _shape_distance(a_id: str, b_id: str) -> float | None:
     """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
     shapes = _ASSET_CACHE.get("__shapes__") or {}
@@ -2359,14 +2479,16 @@ def main() -> int:
                 or "/respick_cands" in key or "/d2pick_cands" in key
                 or "/respick33" in key or "/respick_noise" in key
                 or "/respick_unflat" in key or "/silpick_cands" in key
-                or key.endswith("/silpick_mismatched")):
+                or key.endswith("/silpick_mismatched")
+                or key.endswith("/renderpick_33")):
             n_plus = (33 if "_hard_33" in key
                       else 33 if (key.endswith("/respick33") or "/respick_noise" in key
                                   or "/respick_unflat" in key)
                       else int(key.rsplit("cands", 1)[-1])
                       if ("respick_cands" in key or "d2pick_cands" in key
                           or "silpick_cands" in key)
-                      else 33 if key.endswith("/silpick_mismatched")
+                      else 33 if (key.endswith("/silpick_mismatched")
+                                  or key.endswith("/renderpick_33"))
                       else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
