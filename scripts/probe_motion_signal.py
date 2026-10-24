@@ -577,6 +577,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 创新点一的字面检验：残差能不能把真值资产从 N 个干扰项里挑出来。
         # 两个 N 一起报，好看出它随候选集增大怎么衰减。
         _gt_ref = _gt_asset_refs().get(oid, "")
+        _respick33 = None          # 下面按物体大小分桶时用，见 bysize/
         if _gt_ref:
             # **这个物体自己的**真值资产在全库里的图像名次。之前报的 365 是集合判据
             # （片段里任何一个真值资产排得靠前就算），那是放水的上界；端到端要的是
@@ -601,6 +602,8 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 _hard = _residual_pick_rate(clouds, _gt_ref, _c, hard=True, n_views=7)
                 if _hard is not None:
                     out.setdefault(f"{kind}/respick_cands{_c + 1}", []).append(_hard)
+                    if _c == 32:
+                        _respick33 = _hard
             # 判据换成 D2 形状分布，其余协议完全对齐（干扰项、候选数、视角数），
             # 所以可以和上面那一行直接并排比——唯一的变量是判据。
             for _c in (32, 128):
@@ -676,6 +679,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         _bucket = ("小 <200px" if _med_area < 200 else
                    "中 200~600px" if _med_area < 600 else "大 >600px")
         out.setdefault(f"area/{_bucket}", []).append(_med_area)
+        # **按物体大小分桶看残差挑对率。** 真实深度下残差和 D2 都掉到随机水平
+        # （0.027 对随机 0.030），两条解释：VGGT 的深度本身不行，或者这批物体
+        # 太小（stage_scale 0.15，掩码中位只有几百像素）已经到了它的分辨极限。
+        # 后者最便宜也最该先排除——大物体上明显更高的话，问题是尺度不是后端。
+        if _respick33 is not None:
+            out.setdefault(f"bysize/{_bucket}/respick33", []).append(_respick33)
         if len(anchor_deg) == len(true_deg):
             out.setdefault(f"{kind}/anchor_range_deg", []).append(float(np.ptp(anchor_deg)))
             out.setdefault(f"{kind}/anchor_rmse_deg", []).append(
@@ -2097,8 +2106,10 @@ def main() -> int:
         if "/own_in_top" in key:
             extra = f"  **覆盖率 {statistics.mean(values):.3f}**（候选集里有正确答案的比例）"
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
-                or "/respick_cands" in key or "/d2pick_cands" in key):
+                or "/respick_cands" in key or "/d2pick_cands" in key
+                or "/respick33" in key):
             n_plus = (33 if "_hard_33" in key
+                      else 33 if key.endswith("/respick33")
                       else int(key.rsplit("cands", 1)[-1])
                       if ("respick_cands" in key or "d2pick_cands" in key)
                       else int(key.rsplit("_", 1)[-1]))
