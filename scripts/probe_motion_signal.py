@@ -47,8 +47,18 @@ def gt_series(clip_dir: Path) -> tuple[dict, dict]:
         state = json.loads(line)
         for obj in state.get("objects", []):
             truth.setdefault(obj["id"], {})[round(float(state["t"]), 3)] = np.array(obj["pos"], float)
+    program = json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))
     kinds = {o["id"]: (o.get("motion") or {}).get("type", "static")
-             for o in json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))["objects"]}
+             for o in program["objects"]}
+    # **结构件也要算进来。** 第一版只读 program["objects"]，于是真值里的 static
+    # 节点（这批数据有 69 个，比 objects 的 59 个还多）一个都没进测量，「静止物体」
+    # 只剩 objects 里标了 static 的那 5 个——而静止转角正是最需要样本的那个量，
+    # 结构件又是最纯粹的静止物体。n=5 的中位数对任何改动都不敏感：转动闸的接受率
+    # 从 0.548 变到 0.355，rot_static 的中位数纹丝不动，看起来像「闸没用」。
+    #
+    # 「只给一半的场景打分」这个坑这个项目里记过一次，这里是第二次。
+    for o in program.get("static") or []:
+        kinds.setdefault(o["id"], "static")
     return truth, kinds
 
 
@@ -850,6 +860,12 @@ def main() -> int:
             continue
         extra = (f"  均值 {statistics.mean(values):>6.3f}"
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
+        # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
+        # 而决策真正要的是**有多少比例低于铰链门槛 8 度**——高于门槛的会产出假关节。
+        if key.startswith("rot_static/"):
+            below = sum(1 for v in values if v < 8.0) / len(values)
+            extra += (f"  均值 {statistics.mean(values):>6.2f}"
+                      f"  低于 8 度门槛 {below:.3f}")
         print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
     return 0
 
