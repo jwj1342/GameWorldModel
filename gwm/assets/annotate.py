@@ -395,7 +395,11 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
 
         # 残差挑资产要在**大候选集**上做才有意义：图像嵌入把正确资产放在中位
         # 第 365 名，前 5 个里基本不会有它。所以开了残差就把 k 放大到 residual_top。
-        _k = max(top_k, residual_top) if residual_top > 0 else top_k
+        # **两个开关都要算进去。** 第一版只看 residual_top，而轮廓挑那条配的是
+        # silhouette_top，于是 k 退回默认的 5——跑的不是「图像前 64 名里挑」，
+        # 是「文字前 5 名里挑」。冒烟时记录的候选名次全在 0~4，才露了馅。
+        _wide = max(residual_top, silhouette_top)
+        _k = max(top_k, _wide) if _wide > 0 else top_k
         hits = retrieve(query, catalog, k=_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0,
                         image_admit=image_admit)
