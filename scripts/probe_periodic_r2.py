@@ -125,6 +125,18 @@ def main(argv: list[str]) -> int:
             d = statistics.median(hit) - statistics.median(sta)
             verdict = "方向对了" if d > 0 else "还是反的"
             print(f"    → **{leg}：{target} 减 真静止** 的中位差 {d:+.4f}（{verdict}）")
+            # 方向对了之后，才谈得上「门槛该定在哪」。现在是 0.70，而这条腿上
+            # **所有类别的过门槛比例都是 0.000**——最大值才 0.609。一条能分辨的腿
+            # 被一个谁都够不到的闸废掉了，那不是调参问题，是门槛没按实际分布标定过。
+            #
+            # 扫一遍门槛，报「该进的进来多少」对「不该进的混进来多少」。
+            if d > 0:
+                print(f"       门槛   {target}进来   真静止混进来   差")
+                for thr in (0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.70):
+                    tpr = sum(1 for v in hit if v >= thr) / len(hit)
+                    fpr = sum(1 for v in sta if v >= thr) / len(sta)
+                    mark = "  ← 现在" if abs(thr - 0.70) < 1e-9 else ""
+                    print(f"       {thr:.2f}     {tpr:.3f}        {fpr:.3f}      {tpr - fpr:+.3f}{mark}")
     print("""
 怎么读（顺序不能颠倒）：
   一、先看「真在转 减 真静止」是不是正的。负的话分布是反的，往下调门槛只会先放进
