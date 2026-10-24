@@ -577,6 +577,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 创新点一的字面检验：残差能不能把真值资产从 N 个干扰项里挑出来。
         # 两个 N 一起报，好看出它随候选集增大怎么衰减。
         _gt_ref = _gt_asset_refs().get(oid, "")
+        _yaw_deg = np.array([])    # 轮廓解出的位姿，在 true_deg 算出来之后才记
         _respick33 = None          # 下面按物体大小分桶时用，见 bysize/
         # **观测点云的三轴尺寸和真值差多少。** 噪声容差扫完之后结论是：VGGT 的深度
         # 误差**不是噪声**——连 5% 的各向同性噪声都只把挑对率压到 0.108，而真实
@@ -624,6 +625,9 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             # 掩码，深度一点不碰——正好对上根因。
             _cams = {f: _fix(geom.cam_to_world[frame_of[f]])
                      for f in frames if frame_of.get(f) is not None}
+            # **用轮廓解位姿**：每帧扫一圈偏航取 IoU 最高的。全程不碰深度，
+            # 而今天所有位姿实验都建在深度点云的 ICP 上——这条一次都没试过。
+            _yaw_deg = _silhouette_yaw_series(per_frame, frames, _cams, _gt_ref)
             _rst: dict = {}
             _rend = _render_pick_rate(per_frame, frames, _cams, _gt_ref, 32,
                                       n_views=3, n_yaw=8, stats=_rst)
@@ -780,6 +784,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 out.setdefault(f"{kind}/nbr{_k}_range_deg", []).append(float(np.ptp(_deg)))
                 out.setdefault(f"{kind}/nbr{_k}_rmse_deg", []).append(
                     float(np.sqrt(np.mean((_deg - true_deg) ** 2))))
+        # 轮廓解出的位姿。放在这里是因为 true_deg 到上面几行才算出来——
+        # 第一版写在 _gt_ref 块里，那时 true_deg 还没定义。
+        if len(_yaw_deg) == len(true_deg):
+            out.setdefault(f"{kind}/silyaw_range_deg", []).append(float(np.ptp(_yaw_deg)))
+            out.setdefault(f"{kind}/silyaw_rmse_deg", []).append(
+                float(np.sqrt(np.mean((_yaw_deg - true_deg) ** 2))))
         if len(gtref_deg) == len(true_deg):
             out.setdefault(f"{kind}/gtref_range_deg", []).append(float(np.ptp(gtref_deg)))
             out.setdefault(f"{kind}/gtref_rmse_deg", []).append(
@@ -1928,6 +1938,57 @@ def _render_pick_rate(per_frame: dict, frames: list, cams: dict, gt_ref: str,
     stats["n_scored"] = len(scored)
     stats["margin"] = abs(scored[1][0] - scored[0][0]) / max(abs(scored[0][0]), 1e-9)
     return 1.0 if scored[0][1] == gt_ref else 0.0
+
+
+def _silhouette_yaw_series(per_frame: dict, frames: list, cams: dict,
+                           asset_id: str, n_yaw: int = 36) -> np.ndarray:
+    """**用轮廓解位姿**：每一帧扫一圈偏航，取和观测掩码 IoU 最高的那个。
+
+    今天所有位姿实验都建在**深度点云的 ICP** 上，而深度被证明是坏的（VGGT 沿相机
+    视线把物体压扁到最短轴的 0.526），所以那条路上静止物体的假转动一直压不下去
+    （真实几何下基线 30.72°）。
+
+    而判据那一侧已经量到：不碰深度的判据比用深度的强 2.6 倍
+    （按观测位姿渲染 + IoU 0.108 对 ICP 残差 0.041，随机 0.030）。
+    既然二维轮廓携带的可用形状信息更多，**位姿也该从轮廓解**。这条一次都没试过。
+
+    返回每帧相对第 0 帧的转角（度）。偏航的分辨率是 360/n_yaw，所以 n_yaw=36
+    时量化噪声约 ±5°——判「静止物体解出几十度假转动」够用了。
+    """
+    if not asset_id:
+        return np.array([])
+    tpl = _asset_points_by_id(asset_id)
+    if tpl is None or len(tpl) < 50:
+        return np.array([])
+    tpl = tpl - tpl.mean(0)
+    yaws = np.array([2.0 * np.pi * j / n_yaw for j in range(n_yaw)])
+    out = []
+    for f in frames:
+        if f not in per_frame or f not in cams:
+            out.append(np.nan); continue
+        g = _mask_to_grid(per_frame[f])
+        if g is None:
+            out.append(np.nan); continue
+        R_wc = np.asarray(cams[f], float)[:3, :3].T
+        best, best_y = -1.0, np.nan
+        for y in yaws:
+            sil = _project_silhouette(tpl, R_wc, float(y))
+            if sil is None:
+                continue
+            union = float(np.logical_or(sil, g).sum())
+            if union <= 0:
+                continue
+            iou = float(np.logical_and(sil, g).sum()) / union
+            if iou > best:
+                best, best_y = iou, float(np.degrees(y))
+        out.append(best_y)
+    a = np.asarray(out, float)
+    if not np.isfinite(a).any():
+        return np.array([])
+    # 相对第一个有效帧，并把角度绕回 [-180, 180]
+    base = a[np.isfinite(a)][0]
+    d = (a - base + 180.0) % 360.0 - 180.0
+    return np.abs(np.where(np.isfinite(d), d, 0.0))
 
 
 def _shape_distance(a_id: str, b_id: str) -> float | None:
