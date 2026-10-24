@@ -555,7 +555,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                     out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
             # 密度匹配的难干扰项：形状最接近真值的那 32 个。随机干扰项太好认，
             # 而真实方法面对的候选集个个都像。这一行才是可引用的数。
-            for _v in (1, 3, 7):
+            for _v in (7, 15, 0):      # 0 = 全部帧
                 _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True, n_views=_v)
                 if _hard is not None:
                     out.setdefault(f"{kind}/residual_pick_hard_33_v{_v}", []).append(_hard)
@@ -1485,10 +1485,12 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
     # 同一个包围盒比例下完全不同的物体，在单个视角上可能都配得差不多。多取几帧
     # （均匀抽），每帧各配一次取残差中位数，不同视角的证据就叠起来了。
     # 代价是线性增加 ICP 次数，而 ICP 在三千点上很便宜。
+    # **别从第 0 帧起手。** 首帧的可见面最偏，实测只用首帧挑对 0.149、只用中间帧
+    # 0.243——差 63%。均匀抽的时候把起点放到半个间隔处，避开两端。
     picks = clouds
-    if len(clouds) > n_views:
-        step = max(1, len(clouds) // n_views)
-        picks = clouds[::step][:n_views]
+    if 0 < n_views < len(clouds):
+        step = len(clouds) / float(n_views)
+        picks = [clouds[min(len(clouds) - 1, int(step * (i + 0.5)))] for i in range(n_views)]
     queries = [np.asarray(c, float) for c in picks if len(np.asarray(c, float)) >= 30]
     if not queries:
         return None
