@@ -248,6 +248,17 @@ assets:
   library: /project/aip-zhouyang/jwj/GameWorldModel/deps/assets_src/kenney
   min_score: 0.45          # 检索命中分低于这个值就退回基本体：塞一个不相干的网格比放个盒子更糟
   image_weight: 0.6          # 图像分数在融合里的权重；只有文字时退回纯文字
+  # 形状重排：用观测到的包围盒**边长比例**去挑资产。0 = 关（默认，行为不变）。
+  #
+  # 为什么是这个落点：shape_kind_accuracy 在这条管线上结构性恒零（effective_shape
+  # 对解析到资产的节点返回 "mesh"，而真值全是基本体，93% 的物体都解析到了资产），
+  # 所以它量不出改进。真正有数的是 shape_ok——它比的正是三条边的比例。而资产检索
+  # 原来只看类名和图像，Asset 里一个几何字段都没有：**观测的包围盒比例这个纯几何量
+  # 完全没参与「选哪个资产」**。这是「稠密几何监督离散程序选择」最直接的一个实例。
+  #
+  # 只重排、不改收不收——和图像分同理，量纲不同，混进阈值会误杀。
+  shape_weight: 0.0
+  shape_cache: /scratch/jwj/gwm/asset_shapes.json
   candidates: 3            # 清单里记几个候选，便于复核检索质量
   enabled: true
 synthesis:
