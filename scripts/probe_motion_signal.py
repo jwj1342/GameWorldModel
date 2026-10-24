@@ -498,6 +498,16 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         if len(clouds) < 6:
             continue
         tracked = track_rigid(clouds)
+        # 第十条：**直接解运动模型参数**，不自由解每帧位姿（172d5ae 留下的另一条路）。
+        # 前九条都是先自由解再事后修，而自由解本来就欠定，事后修只能修症状。
+        # 这条把自由度从 6N 降到 3~7，转动只有在**所有帧上同时**降低残差时才赢。
+        # 时间戳用帧序号即可——四个模型吃的是同一条时间轴，比的是相对残差。
+        mfit = _model_fit_rotation_deg(clouds, list(range(len(clouds))))
+        if mfit:
+            gt_kind = kinds.get(oid, "static")
+            out.setdefault(f"modelfit/{gt_kind}/pick_{mfit['pick']}", []).append(1.0)
+            out.setdefault(f"modelfit/{gt_kind}/gain_over_static", []).append(
+                float(mfit["gain_over_static"]))
         orientations = tracked.get("orientations") or []
         if len(orientations) != len(clouds):
             skipped["orientations_length_mismatch"] = skipped.get("orientations_length_mismatch", 0) + 1
@@ -1073,6 +1083,72 @@ def _common_visible_analytic_deg(clouds: list, frames: list, cams: list,
             R_acc = np.asarray(step["rotation"], float) @ R_acc
         out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
     return np.asarray(out)
+
+
+
+def _model_fit_rotation_deg(clouds: list, stamps: list) -> dict:
+    """**直接解运动模型参数**，而不是自由地解每帧位姿——`172d5ae` 留下的另一条路。
+
+    今天关掉的九条修法有个共同形状：都是先自由解出每帧位姿（6N 个自由度），
+    再事后去修那个解（换模板、裁可见区、加转动闸、换对应关系）。而根因是
+
+        采样格子钉在图像上，两帧之间连一个共同物理点都没有，
+
+    所以自由解本来就是欠定的，**事后修只能修症状**。
+
+    这条换一个方向：把整条轨迹参数化成一个运动模型，直接解模型的几个参数。
+    自由度从 6N 降到 3~7，欠定就消失了。具体四个模型：
+
+      static     一个位姿管所有帧；**按构造零转动**
+      linear     p(t) = p0 + v·t，零转动
+      oscillate  p(t) = p0 + A·sin(2πt/T + φ)，零转动
+      spin       绕竖轴匀速转，角速度 ω 一个参数
+
+    关键差别：转动只有在**所有帧上同时**降低残差时才赢得过 static，
+    不是每一步各自赢。我那个逐步的转动闸压不住的那部分（0.588 饱和），
+    正是因为它逐步判，而假转动恰恰是逐步都「说得通」的。
+
+    返回每个模型的残差和选中的那个。残差口径统一：把模型预测的位置和**逐帧点云
+    质心**比——质心有偏（落在可见面上），但四个模型吃的是同一个偏，所以可比。
+    """
+    if len(clouds) < 6 or len(stamps) != len(clouds):
+        return {}
+    t = np.asarray(stamps, float)
+    t = t - t[0]
+    c = np.asarray([np.asarray(p, float).mean(0) for p in clouds], float)
+
+    def rmse(pred):
+        return float(np.sqrt(np.mean(np.sum((c - pred) ** 2, axis=1))))
+
+    out: dict[str, float] = {}
+    out["static"] = rmse(np.tile(c.mean(0), (len(c), 1)))
+    # 直线：每个坐标轴上一次多项式
+    A = np.stack([np.ones_like(t), t], 1)
+    coef, *_ = np.linalg.lstsq(A, c, rcond=None)
+    out["linear"] = rmse(A @ coef)
+    # 往复：扫周期，每个周期下 sin/cos 是线性的，所以内层仍是最小二乘
+    best = float("inf")
+    span = float(t[-1] - t[0]) or 1.0
+    for period in np.linspace(span / 4, span * 1.5, 24):
+        w = 2 * np.pi / period
+        B = np.stack([np.ones_like(t), np.sin(w * t), np.cos(w * t)], 1)
+        k, *_ = np.linalg.lstsq(B, c, rcond=None)
+        best = min(best, rmse(B @ k))
+    out["oscillate"] = best
+    # 绕竖轴匀速转：质心绕某个中心转圈，所以也是「中心 + 半径 + 角速度」
+    best_spin = float("inf")
+    centre = c.mean(0)
+    for omega in np.linspace(0.1, 6.0, 24):
+        B = np.stack([np.ones_like(t), np.sin(omega * t), np.cos(omega * t)], 1)
+        k, *_ = np.linalg.lstsq(B, c - centre, rcond=None)
+        best_spin = min(best_spin, rmse(centre + B @ k))
+    out["spin"] = best_spin
+    pick = min(out, key=out.get)
+    return {"residuals": {k: round(v, 5) for k, v in out.items()},
+            "pick": pick,
+            # **零假设**：static 比最好的那个差多少。差得少就该答 static——
+            # 今天反复吃亏的地方就是没有并排摆基线。
+            "gain_over_static": round((out["static"] - out[pick]) / max(out["static"], 1e-9), 4)}
 
 def _common_visible_rotation_deg(clouds: list, frames: list, cams: list,
                                  centres: dict) -> np.ndarray:
