@@ -552,6 +552,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         _cam_spread = _camera_step_spread(cam_list)
         if _cam_spread is not None and np.isfinite(_cam_spread):
             out.setdefault(f"{kind}/cam_step_spread", []).append(float(_cam_spread))
+        # 机制的直接检验：假转动的幅度该随相机总角位移增长。
+        # 比值稳定（散度小）才说明机制解释得了这个量；散开好几倍就解释不了。
+        _cam_total = _camera_total_deg(cam_list)
+        if _cam_total:
+            out.setdefault(f"{kind}/cam_total_deg", []).append(float(_cam_total))
         # 第六条：同样裁公共可见区，但可见性用**真值基本体的解析法向**算。
         # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
         # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
@@ -602,6 +607,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
         out.setdefault(f"{kind}/true_range_deg", []).append(float(np.ptp(true_deg)))
         out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
+        # 机制的直接检验：假转动的幅度该随相机总角位移增长。比值稳定（散度小）
+        # 才说明机制解释得了这个量；散开好几倍就解释不了。
+        # 放在这里是因为 solved_deg 到这一行才算出来。
+        if _cam_total:
+            out.setdefault(f"{kind}/rot_per_cam_deg", []).append(
+                float(np.ptp(solved_deg) / _cam_total))
         out.setdefault(f"{kind}/angle_rmse_deg", []).append(
             float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
         if len(template_deg) == len(true_deg):
@@ -1325,6 +1336,34 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _camera_total_deg(cam_list: list) -> float | None:
+    """这一段相机一共转过多少度（绕物体的方位角总行程）。
+
+    **为什么换这个量。** 逐步相关系数那条路被量具自己否了：它的分母是两列的标准差，
+    而真值静止那一桶的 `cam_step_spread`（每步转角的四分位距/中位数）只有 **0.036**，
+    也就是每步角步长近似常数——相关系数算出来是噪声。合成探针里我为此特意给相机
+    加了非匀速，真实数据的相机档没有这个性质。所以 static 那个 -0.034 **不是**
+    「机制不存在」的证据，那条路没被关闭，只是量错了。
+
+    换一个不依赖「逐帧步长有方差」的形式：机制预测假转动的**幅度**随相机的**总
+    角位移**增长。拿它和 `solved_range_deg` 配对，就能直接回归。
+
+    自检同样要带：如果各物体的总角位移都差不多，这个回归也退化。所以把它本身也
+    报出来，先看它散不散得开。
+    """
+    if len(cam_list) < 2:
+        return None
+    total = 0.0
+    for a, b in zip(cam_list[:-1], cam_list[1:]):
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        na, nb = np.linalg.norm(a), np.linalg.norm(b)
+        if na < 1e-9 or nb < 1e-9:
+            continue
+        total += float(np.degrees(np.arccos(
+            np.clip(float(a @ b) / (na * nb), -1.0, 1.0))))
+    return total if total > 1e-9 else None
 
 
 def _camera_step_spread(cam_list: list) -> float | None:
