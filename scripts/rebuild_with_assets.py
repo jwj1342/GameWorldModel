@@ -134,9 +134,15 @@ def main() -> int:
         frames = json.loads((out / "perception" / "frames" / "frames.json").read_text())["frames"]
         masks = load_masks(out / "perception")
         settings = cfg.get("assets") or {}
+        # 形状重排：把观测到的边长比例用进「选哪个资产」这个离散选择。
+        # shape_weight 默认 0，缓存不存在时也自动退回原行为。
+        from gwm.assets.annotate import load_shape_cache
+        _shapes = load_shape_cache(cfg)
         decisions = choose_assets(program, evidence, frames, masks, catalog, index, embedder,
                                   image_weight=float(settings.get("image_weight", 0.6)),
-                                  min_score=float(settings.get("min_score", 0.45)))
+                                  min_score=float(settings.get("min_score", 0.45)),
+                                  shapes=_shapes,
+                                  shape_weight=float(settings.get("shape_weight", 0.0)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

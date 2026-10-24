@@ -57,6 +57,39 @@ def rotation_aligning(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.eye(3) + vx + vx @ vx * (1 / (1 + c))
 
 # ---------------- world alignment ----------------
+def reject_planes_on_camera(ok: list[dict], min_ratio: float) -> tuple[list[dict], list[int]]:
+    """丢掉「压在相机上」的地平面候选，返回 (留下的, 被丢掉的 idx)。
+
+    为什么需要。`align_world` 对相机高度原来只有 `cam_height > 0` 一条约束，太松：
+    实测有候选只有 0.035（相对单位），相机离地三厘米在物理上不成立，那是另一个面被
+    当成了地面。而选择打分 `inliers * (0.5 + 0.5*frac_obj_above)` 只看内点数，
+    贴着相机的那个面往往内点最多——ab015fix/test_00000 上它有 11350 个内点，
+    而正确的候选只有 5296——所以必然选错。
+
+    后果不是「尺度估偏了」。地面选错了 1.39 个单位，再乘上为了把相机凑到 1.2 米而
+    解出的 15.6 倍，物体就落到地下二十多米，被下陷闸一个个丢光，**整条片段产出零个
+    物体**。在评测里它表现为「召回 0」，和「检测什么都没找到」长得一样（#84）。
+
+    判据必须**无量纲**：重建是相对尺度，绝对米制阈值在这里没有意义（这个坑踩过）。
+    所以拿候选自己的 `cam_height` 中位数当标尺。
+
+    实测（24 条片段，候选都记在 evidence.json 里，所以不重跑感知也能验）：
+    0.25 恰好改动那 3 条 `world_alignment_degenerate` 亮了的，其余 21 条一条不动；
+    「相对单位 ÷ 真值相机高度」这个本该在片段间一致的比值，极差从 24.9 倍收到 6.0 倍。
+    0.15 只修得动 2 条（极差还剩 20.0 倍），0.35 和 0.25 等效。
+
+    留不下任何候选时原样返回——宁可不改，也不要改瞎。
+    """
+    if not ok:
+        return ok, []
+    median_h = float(np.median([c["cam_height"] for c in ok]))
+    kept = [c for c in ok if c["cam_height"] >= min_ratio * median_h]
+    if not kept or len(kept) == len(ok):
+        return ok, []
+    kept_ids = {id(c) for c in kept}
+    return kept, [c["idx"] for c in ok if id(c) not in kept_ids]
+
+
 def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: dict | None = None, source_video_sha256: str | None = None) -> tuple[np.ndarray, float, dict]:
     """Find the ground plane from static pixels, return (T 4x4 applied to world points, scale, info).
     Candidate planes are extracted iteratively; the ground is the large, roughly horizontal plane below the camera
@@ -138,6 +171,21 @@ def align_world(geom: Geometry, tracks: Tracks, cfg: dict, rng=None, *, replay: 
         for c in ok:  # orient the normal towards the camera so the camera ends up above the ground
             if c["cam_height"] < 0: c["n"], c["d"], c["cam_height"] = -c["n"], -c["d"], -c["cam_height"]
         if ok: info["ground_mode"] = "facing_camera"
+    # 丢掉压在相机上的候选。`cam_height > 0` 这一条太松：实测有候选只有 0.035，
+    # 相机离地三厘米在物理上不成立，那是另一个面被当成了地面。选择打分只看内点数，
+    # 而这种贴着相机的面往往内点最多（0.0768 那个有 11350 个内点，正确的那个只有
+    # 5296），于是必然选错。后果不是「尺度估偏了」：地面错了 1.39 个单位，
+    # 再乘上为了凑 1.2 米而解出的 15.6 倍，物体就落到地下二十多米，被 dropped_sunk
+    # 一个个丢光，整条片段产出零个物体（见 #84）。
+    #
+    # 判据必须**无量纲**——重建是相对尺度，绝对米制阈值在这里没有意义（这个坑踩过）。
+    # 所以拿候选自己的 cam_height 中位数当标尺。实测 24 条片段上恰好改动那 3 条
+    # 诊断亮了的，其余 21 条一条不动；而「相对单位 ÷ 真值相机高度」这个本该在片段间
+    # 一致的比值，极差从 24.9 倍收到 6.0 倍。
+    ok, rejected = reject_planes_on_camera(ok, pc.get("ground_plane_min_height_ratio", 0.25))
+    if rejected:
+        info["rejected_near_camera"] = rejected
+        info["near_camera_ratio"] = pc.get("ground_plane_min_height_ratio", 0.25)
     info["plane_candidates"] = [{k: v for k, v in c.items() if k not in ("n", "d")} for c in cands]
     # Provenance only: retain the original best-plane selection and transform.
     info["ground_candidate_count"] = len(ok)
@@ -174,18 +222,33 @@ def _fix(c2w: np.ndarray) -> np.ndarray:
 from .masks import resize_mask as _resize_mask
 
 # ---------------- OBB per frame ----------------
-def obb_from_points(P: np.ndarray) -> dict | None:
+def obb_from_points(P: np.ndarray, extent_percentile: float = 3.0) -> dict | None:
+    """点云拟合一个轴对齐（xz 里按主轴转过）的包围盒。
+
+    `extent_percentile` 是定边界时两端各切掉多少，默认 3（也就是 3/97），这是历史值。
+    它是**重建出来的物体为什么偏小**的主要原因，比「每帧只看得见一个面」大得多：
+
+      同一批跨帧汇聚的点，只换这个参数，最长边变成（74 个静止物体的中位）——
+        3/97   1.000（基准，现在的做法）      1/99   1.130
+        0/100  1.321                          0/100 且不做稳健修剪  1.516
+      而同一批物体上，「跨帧汇聚 vs 逐帧」只带来 1.084。
+
+    长维度被截断到真值的 0.70（下四分位 0.19），补平需要 1.43——这个参数一个就够，
+    汇聚远远不够。所以它拿出来可配，好做 A/B。切掉两端是为了抗深度离群点，
+    但它吃掉的显然比离群点多得多。
+    """
     if len(P) < 20: return None
     # robust trim
     med = np.median(P, 0); dev = np.linalg.norm(P - med, axis=1); keep = dev < np.percentile(dev, 90) * 1.5 + 1e-6
     P = P[keep]
     if len(P) < 20: return None
+    lo_p = float(np.clip(extent_percentile, 0.0, 49.0)); hi_p = 100.0 - lo_p
     xz = P[:, [0, 2]]; c = xz.mean(0); cov = np.cov((xz - c).T)
     w, v = np.linalg.eigh(cov); ax = v[:, 1]; yaw = math.atan2(ax[1], ax[0])  # angle of principal axis in xz
     cy, sy = math.cos(yaw), math.sin(yaw)
     Rz = np.array([[cy, sy], [-sy, cy]]); loc = (xz - c) @ Rz.T
-    lo = np.percentile(loc, 3, axis=0); hi = np.percentile(loc, 97, axis=0)
-    ylo, yhi = np.percentile(P[:, 1], 3), np.percentile(P[:, 1], 97)
+    lo = np.percentile(loc, lo_p, axis=0); hi = np.percentile(loc, hi_p, axis=0)
+    ylo, yhi = np.percentile(P[:, 1], lo_p), np.percentile(P[:, 1], hi_p)
     center_loc = (lo + hi) / 2; center_xz = c + center_loc @ Rz
     size = np.array([max(hi[0] - lo[0], 0.02), max(yhi - ylo, 0.02), max(hi[1] - lo[1], 0.02)])
     quat = R.from_euler("y", -yaw).as_quat()  # rotation about y that maps local x axis to principal axis
@@ -277,6 +340,10 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         ground = {"kind": "ground", "normal": [0, 1, 0], "offset": 0.0, "coverage": 0.0, "conf": 0.2, "center_hint": [0, 0, 0], "extent_hint": [10, 0.2, 10]}
     # per object
     use_contact = bool(cfg["perception"].get("ground_contact_centers", True)) and align_info.get("ground") not in (None, "not_found")
+    # 包围盒定边界时两端各切多少。历史值 3（3/97），实测它是「重建出来的物体偏小」
+    # 的主因：同一批点只换这一个参数，最长边中位 3/97→1.000、1/99→1.130、0/100→1.321，
+    # 而跨帧汇聚只有 1.084。见 obb_from_points 的注释。
+    extent_pct = float(cfg["perception"].get("obb_extent_percentile", 3.0))
     def contact_center(mres, k, size_y):
         """xz of the object's ground-contact point: ray through the lowest mask pixel (median column) intersected with y=0."""
         ys, xs = np.where(mres)
@@ -339,7 +406,7 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
             if m is None: continue
             mres = _resize_mask(m, (W, H)); area = float(mres.mean())
             pts = wpt(unproject(geom.depth[k], geom.intrinsics[k], mres, stride=2), k)
-            ob = obb_from_points(pts)
+            ob = obb_from_points(pts, extent_pct)
             if record_replay:
                 sample_replay = {"object_id": o.id, "frame": int(fi), "t": float(frames[fi]["t"]),
                                  "raw_obb": copy.deepcopy(ob), "point_count": len(pts),
@@ -404,7 +471,12 @@ def build_evidence(clip: str, frames: list[dict], geom: Geometry, tracks: Tracks
         motion_positions, motion_quaternions = c_a, q_a
         motion_source, articulation = "obb_centre", None
         if cfg["perception"]["motion"].get("use_registration", True) and len(clouds) >= 6:
-            tracked = track_rigid(clouds)
+            # 转动闸：让转动「挣」出来，只有显著降低残差才认。默认关（None）。
+            # 为什么要有它：完美几何加完美掩码下，静止物体仍被 ICP 解出 13.5 度转动，
+            # 而铰链门槛是 8 度——第三档产出的关节全是假的。时间平滑治得了位置
+            # （位移 0.045→0.028、漂移 0.077→0.039），治不了转动。
+            _gate = cfg["perception"]["motion"].get("rotation_min_gain")
+            tracked = track_rigid(clouds, rotation_min_gain=_gate)
             # 配准残差按物体记下来。它和 motion_guess.residual 是两回事：那个是运动
             # 假设拟合轨迹的残差，这个是「这团点在帧间能不能当成一个刚体对齐」。
             # 后者不依赖任何运动模型，是独立的一维信息——#56 里排除掉的那八个判别子

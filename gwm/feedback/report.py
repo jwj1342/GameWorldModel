@@ -36,6 +36,7 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
     scene_recalls, scene_precs = [], []
     kind_hits: list[float] = []
     shape_hits, scale_hits, scale_ratios = [], [], []
+    asset_shape_errs: list[float] = []
     scale_run_medians, geometry_unavailable = [], []
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
@@ -78,6 +79,10 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
                     ratio = float(measured["scale_ratio"])
                     scale_ratios.append(ratio)
                     scale_hits.append(float(0.8 <= ratio <= 1.25))
+                # 选中的那个**网格本身**的形状误差。现有每一列都看不见资产——
+                # 实测换掉检索之后选中的资产确实变了，而所有指标逐字节不动。
+                if measured.get("asset_shape_error") is not None:
+                    asset_shape_errs.append(float(measured["asset_shape_error"]))
         else:
             # Old reports do not retain per-object ratios. A known measured
             # count can recover binary hits, but never an object-level median.
@@ -121,6 +126,8 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "scene_precision": stat(scene_precs),
         "class_accuracy": stat(class_hits),
         "shape_ok": stat(shape_hits),
+        # 唯一看得见「挑了哪个资产」的一列
+        "asset_shape_error": stat(asset_shape_errs),
         "scale_ok": stat(scale_hits),
         "scale_ratio": stat(scale_ratios),
         "scale_ratio_run_medians": stat(scale_run_medians),

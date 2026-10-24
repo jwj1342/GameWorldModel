@@ -132,6 +132,58 @@ def effective_shape(node: dict) -> str | None:
     return None
 
 
+_ASSET_SHAPES: dict | None = None
+
+
+def _asset_shape_table() -> dict:
+    """资产 id → 边长比例（三边排序后除以最长边）。由
+    `scripts/build_asset_shape_cache.py` 预计算，路径从 `assets.shape_cache` 或
+    环境变量 `GWM_ASSET_SHAPES` 读。没有缓存就返回空，相关指标报 None。"""
+    global _ASSET_SHAPES
+    if _ASSET_SHAPES is None:
+        import os
+        path = (load_config().get("assets") or {}).get("shape_cache") or \
+            os.environ.get("GWM_ASSET_SHAPES")
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8")) if path else {}
+        except (OSError, ValueError, TypeError):
+            data = {}
+        _ASSET_SHAPES = {k: v for k, v in data.items()
+                         if isinstance(v, list) and len(v) == 3}
+    return _ASSET_SHAPES
+
+
+def asset_shape_error(gt_node: dict, pred_node: dict) -> float | None:
+    """**选中的那个资产网格**，形状和真值差多少。没有资产或没有缓存就返回 None。
+
+    为什么必须单独有这一项。实测：把资产检索的重排改掉，**选中的资产确实变了**
+    （`minigolf/ball-blue` → `food/rice-ball`、`car/debris-door` → `castle/door`），
+    而**每一个现有指标都逐字节相同**。查下来整个评测对「挑了哪个资产」是盲的——
+
+      `shape_kind_accuracy`  资产节点一律记成 "mesh"，所以恒零；
+      `shape_ok` / `scale_ok` / `shape_error`  读的是节点的 `extent`，
+          而资产节点的 extent 来自**观测**，不是来自网格；
+      `object_recall` / `precision`  只看位置；
+      `class_accuracy`  只看类名。
+
+    **没有任何一个指标看得见网格本身**，而资产决定了场景实际长什么样。这一整块
+    一直没被量过，所以「换个更好的检索」在表上永远是零变化。
+
+    这一项补上那个缺口：拿**资产自己的**边长比例和真值节点的比。口径和
+    `shape_scale_agreement` 一致（排序后除以最长边、平均绝对差），所以两个数可以并排读
+    ——一个说「我们把这个物体画成了多大多扁」，一个说「我们挑的那个网格本身多扁」。
+    """
+    geom = (pred_node or {}).get("geom") or {}
+    ref = geom.get("ref")
+    if geom.get("kind") not in ("asset", "generated") or not ref:
+        return None
+    ratios = _asset_shape_table().get(str(ref))
+    gt_ext = node_extent(gt_node)
+    if ratios is None or gt_ext is None or gt_ext.max() <= 1e-9:
+        return None
+    gt_ratio = np.sort(np.asarray(gt_ext, float))[::-1] / gt_ext.max()
+    return float(np.abs(np.asarray(ratios, float) - gt_ratio).mean())
+
 def shape_scale_agreement(gt_node: dict, pred_node: dict) -> tuple[float, float] | None:
     """(形状差, 尺度比)。形状差 0 是完美，尺度比 1 是完美。
 
@@ -579,6 +631,7 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
     # 只有基本体的基准上过拟合——而是说**这个基准没有能力奖励资产检索**，
     # 这件事得在数据集那一层解决（见 #5、#9）。见 #56。
     shape_kind_hits = shape_kind_total = 0
+    asset_shape_errs: list[float] = []
     shape_kind_confusion: dict[str, int] = {}
     for g, q, _ in matched:
         gt_node = gt_nodes[gt_tr[g]["object_id"]]
@@ -590,6 +643,12 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                                   "status": "measured" if pair else "missing_geometry"}
         if pair:
             shape_errs.append(pair[0]); scale_ratios.append(pair[1])
+        # 选中的那个**网格本身**和真值差多少。现有指标全看不见资产（见
+        # asset_shape_error 的注释），所以换检索在表上永远是零变化。
+        ase = asset_shape_error(gt_node, pred_node)
+        if ase is not None:
+            asset_shape_errs.append(ase)
+            geometry_per_object[g]["asset_shape_error"] = round(ase, 4)
         want = effective_shape(gt_node)
         got = effective_shape(pred_node)
         if want and got:
@@ -694,6 +753,11 @@ def evaluate(gt_program: dict, pred_program: dict, gt_states: list[dict], pred_s
                         # 基本体），所以 class_accuracy 在这里恒等于噪声，别拿它
                         # 当成绩也别拿它调参——换成类名有语义的数据集时它才有意义。
                         "shape_error": (float(np.median(shape_errs)) if shape_errs else None),
+                        # 选中的资产网格本身的形状误差。现有指标全看不见资产，
+                        # 所以这一项是唯一能反映「检索挑得对不对」的数。
+                        "asset_shape_error": (float(np.median(asset_shape_errs))
+                                              if asset_shape_errs else None),
+                        "asset_shape_n": len(asset_shape_errs),
                         "geometry_n": len(shape_errs),
                         "geometry_per_object": geometry_per_object,
                         "shape_ok_frac": (float(np.mean(np.asarray(shape_errs) <= 0.2))

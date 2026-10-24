@@ -87,10 +87,12 @@ def test_lossless_roundtrip_and_replay(tmp_path, optional):
 
 
 @pytest.mark.parametrize("object_depth,expected_branch", [(.7312345, "guard_rejected"), (.99, "applied")])
-def test_build_records_raw_obb_without_changing_evidence(tmp_path, monkeypatch, object_depth, expected_branch):
+@pytest.mark.parametrize("extent_percentile", [0.0, 3.0, 10.0])
+def test_build_records_raw_obb_without_changing_evidence(tmp_path, monkeypatch, object_depth, expected_branch, extent_percentile):
     from gwm.perception import overlay
     monkeypatch.setattr(overlay, "render_overlay", lambda *a, **kw: None)
     geom, tracks, frames, cfg = fixture()
+    cfg["perception"]["obb_extent_percentile"] = extent_percentile
     for depth in geom.depth: depth[24:56, 24:56] = np.float32(object_depth)
     a = build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path / "off", [], [])
     assert not (tmp_path / "off" / "geometry_replay").exists()
@@ -105,7 +107,7 @@ def test_build_records_raw_obb_without_changing_evidence(tmp_path, monkeypatch, 
         i = sample["frame"]
         mask = resize_mask(tr.objects[0].masks[i], g.size())
         P = to_world(unproject(g.depth[i], g.intrinsics[i], mask, stride=2), _fix(g.cam_to_world[i]))
-        raw = obb_from_points((P @ T[:3, :3].T + T[:3, 3]) * scale)
+        raw = obb_from_points((P @ T[:3, :3].T + T[:3, 3]) * scale, extent_percentile)
         assert raw == sample["raw_obb"]
         assert sample["contact_branch"] == expected_branch
         assert "pre_smoothing_obb" in sample
@@ -113,6 +115,34 @@ def test_build_records_raw_obb_without_changing_evidence(tmp_path, monkeypatch, 
             assert sample["raw_obb"]["center"] != sample["pre_smoothing_obb"]["center"]
     with pytest.raises(FileExistsError):
         build_evidence("synthetic", frames, geom, tracks, cfg, tmp_path / "on", [], [])
+
+
+@pytest.mark.parametrize("ratio,selected,eligible", [(0.25, 1, [False, True, True]), (0.0, 0, [True, True, True])])
+def test_replay_records_post_camera_filter_eligibility(monkeypatch, ratio, selected, eligible):
+    """Synthetic planes isolate filter/record wiring, not plane-fitting accuracy."""
+    from gwm.perception import evidence
+    geom, _, _, cfg = fixture()
+    tracks = Tracks([], (160, 160), "synthetic")
+    cfg["perception"]["ground_plane_min_height_ratio"] = ratio
+
+    def run(record=None):
+        heights = iter([.001, 1.0, 1.1])
+        def fake_fit(points, **kwargs):
+            support = np.zeros(len(points), dtype=bool)
+            support[:400] = True
+            return np.array([0., 1., 0.]), next(heights), support
+        monkeypatch.setattr(evidence, "fit_plane_ransac", fake_fit)
+        return align_world(geom, tracks, cfg, replay=record)
+
+    baseline = run()
+    record = {}
+    recorded = run(record)
+    np.testing.assert_array_equal(baseline[0], recorded[0])
+    assert baseline[1:] == recorded[1:]
+    assert record["selected"] == selected
+    assert [c["eligible"] for c in record["candidates"]] == eligible
+    assert recorded[2]["ground_candidate_count"] == sum(eligible)
+    assert recorded[2].get("rejected_near_camera", []) == ([0] if ratio else [])
 
 
 def test_missing_failed_and_legacy_are_not_success(tmp_path):

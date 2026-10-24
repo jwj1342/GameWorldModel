@@ -34,7 +34,7 @@ if str(REPO) not in sys.path:
 from gwm.config import load_config, site_name                                      # noqa: E402
 from gwm.perception.evidence import _fix, obb_from_points, to_world, unproject     # noqa: E402
 from gwm.perception.evidence import smooth_series                                  # noqa: E402
-from gwm.perception.registration import infer_articulation, looks_static, track_rigid  # noqa: E402
+from gwm.perception.registration import infer_articulation, kabsch, looks_static, track_rigid  # noqa: E402
 from gwm.perception.run import load_geometry, load_masks, run_perception           # noqa: E402
 
 
@@ -47,8 +47,18 @@ def gt_series(clip_dir: Path) -> tuple[dict, dict]:
         state = json.loads(line)
         for obj in state.get("objects", []):
             truth.setdefault(obj["id"], {})[round(float(state["t"]), 3)] = np.array(obj["pos"], float)
+    program = json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))
     kinds = {o["id"]: (o.get("motion") or {}).get("type", "static")
-             for o in json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))["objects"]}
+             for o in program["objects"]}
+    # **结构件也要算进来。** 第一版只读 program["objects"]，于是真值里的 static
+    # 节点（这批数据有 69 个，比 objects 的 59 个还多）一个都没进测量，「静止物体」
+    # 只剩 objects 里标了 static 的那 5 个——而静止转角正是最需要样本的那个量，
+    # 结构件又是最纯粹的静止物体。n=5 的中位数对任何改动都不敏感：转动闸的接受率
+    # 从 0.548 变到 0.355，rot_static 的中位数纹丝不动，看起来像「闸没用」。
+    #
+    # 「只给一半的场景打分」这个坑这个项目里记过一次，这里是第二次。
+    for o in program.get("static") or []:
+        kinds.setdefault(o["id"], "static")
     return truth, kinds
 
 
@@ -195,7 +205,7 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
     for oid, per_frame in masks.items():
         if oid not in truth:
             continue
-        clouds, stamps = [], []
+        clouds, stamps, cams = [], [], []
         for fi, mask in sorted(per_frame.items()):
             k, t = frame_of.get(fi), times.get(fi)
             if k is None or t is None or t not in truth[oid]:
@@ -207,6 +217,9 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts); stamps.append(t)
+                # 相机在世界坐标里的位置。配准那一侧原本完全没用上它——而可见面
+                # 为什么变？因为相机动了。见 registration.visible_subset。
+                cams.append(_fix(geom.cam_to_world[k])[:3, 3].copy())
         if len(clouds) < 6:
             continue
         tracked = track_rigid(clouds)
@@ -249,6 +262,71 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 if is_static:
                     out.setdefault(f"drift_static/{tag}", []).append(
                         float(np.linalg.norm(v.max(0) - v.min(0))))
+        # 把相机轨迹用进配准：每帧只对「它看得见的那部分模型」配。
+        # 172d5ae 排除了「对完整模型配」，理由是部分对完整更欠定；但欠定的根源是
+        # **没告诉它该对哪一部分**，而相机位置正好给出这个信息，且一直现成放着没用。
+        # 转动闸：让转动「挣」出来，只有显著降低残差才认。扫几个门槛。
+        # 位置那两个数已经被时间平滑治住了（0.045→0.028、0.077→0.039），
+        # **平滑不影响转动**，所以 rot_static 才是现在挡住第三档的那一个数。
+        gated_arms = []
+        for gain in (0.05, 0.10, 0.15, 0.20, 0.30):
+            g = track_rigid(clouds, rotation_min_gain=gain)
+            if g["ok"] and len(g["positions"]) == len(gt):
+                tag = f"gate{int(gain * 100):02d}"
+                gp = np.array(g["positions"], float)
+                out.setdefault(f"step/{tag}", []).extend(
+                    np.linalg.norm((gp - gp[0]) - gt_rel, axis=1).tolist())
+                # 和上面 smooth15 那一臂**同样的条件**：长度不够就不算，不要退回
+                # 不平滑。否则两边的样本population 不同（848 对 1008），横着比是
+                # 在比口径不是比方法。
+                sm = smooth_series(gp, 15) if len(gp) >= 15 else None
+                if sm is not None:
+                    out.setdefault(f"step/{tag}_smooth15", []).extend(
+                        np.linalg.norm((sm - sm[0]) - gt_rel, axis=1).tolist())
+                if is_static:
+                    out.setdefault(f"drift_static/{tag}", []).append(
+                        float(np.linalg.norm(gp.max(0) - gp.min(0))))
+                    if sm is not None:
+                        out.setdefault(f"drift_static/{tag}_smooth15", []).append(
+                            float(np.linalg.norm(sm.max(0) - sm.min(0))))
+                gated_arms.append((tag, g))     # 转角那一段在外面统一记，这里只收集
+                # 闸到底放行了多少步。三个门槛给出完全相同的 rot_static，说明增益
+                # 分布离它们都很远——「几乎总放行」还是「几乎总拦住」不能靠猜。
+                rate = g.get("rotation_gate_accept_rate")
+                if rate is not None:
+                    out.setdefault(f"gate_accept/{tag}", []).append(float(rate))
+
+        vis = track_rigid(clouds, cam_positions=cams)
+        if vis["ok"] and len(vis["positions"]) == len(gt):
+            v_pos = np.array(vis["positions"], float)
+            out.setdefault("step/visible", []).extend(
+                np.linalg.norm((v_pos - v_pos[0]) - gt_rel, axis=1).tolist())
+            if is_static:
+                out.setdefault("drift_static/visible", []).append(
+                    float(np.linalg.norm(v_pos.max(0) - v_pos.min(0))))
+
+        # 第三个验收数：静止物体被解出多少转角。平滑治得了位置，治不了转动，
+        # 所以这是现在挡住第三档的那一个数（铰链门槛 8 度，实测 13.5 度）。
+        #
+        # **这一段不能嵌在 vis 那个块里**——vis 失败时会把闸那几臂的转角也一起丢掉，
+        # 而且丢得悄无声息。
+        # 静止物体**和**会转的物体都要记。只报「静止物体的假转动被压下去了」而不报
+        # 「真转动有没有被一起压住」，是只摆好处不摆代价——今天反复在提防的那类错误。
+        #
+        # 真值里带转动的类型：spin / revolute / periodic_rotate。平移类（linear、
+        # trajectory）不算，它们本来就不该解出转动。
+        gt_kind = kinds.get(oid, "static")
+        rotating = any(k in str(gt_kind) for k in ("spin", "revolute", "rotate"))
+        bucket = "rot_static" if is_static else ("rot_rotating" if rotating else "rot_translating")
+        arms = [("register", tracked), *gated_arms]
+        if vis.get("ok"):
+            arms.append(("visible", vis))
+        for tag, trk in arms:
+            rot = np.asarray(trk.get("total_rotation") or np.eye(3), float)
+            ang = float(np.degrees(np.arccos(
+                np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0))))
+            out.setdefault(f"{bucket}/{tag}", []).append(ang)
+
         plane = track_rigid(clouds, point_to_plane=True)
         if plane["ok"] and len(plane["positions"]) == len(gt):
             p_pos = np.array(plane["positions"], float)
@@ -438,6 +516,39 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
         # 第四条：模板用**对观测拟合出来的长方体**，不需要检索也不需要真值。
         prim_deg = _primitive_template_rotation_deg(clouds)
+        # 第五条，也是合成实验里唯一三条判据全过的那条：**不换模板，换被配的那两块**
+        # ——把相邻两帧都裁到「两个相机都看得见」的公共表面再配。合成上限是
+        # 静止 12.5°→0.0°、纯平移 26.9°→0.8°、真转 90° 保住 90.4°。
+        # 这里在真实点云上验它，回答「即使前向模型完美，深度噪声会不会把收益吃掉」。
+        cam_list = [_fix(geom.cam_to_world[frame_of[f]])[:3, 3] for f in frames
+                    if frame_of.get(f) is not None]
+        # _gt_poses 返回的是 {物体: {帧号: (pos, quat)}}，取 pos 那一半
+        _p = poses.get(oid) or {}
+        centres = {f: _p[f][0] for f in frames if f in _p}
+        common_deg = (_common_visible_rotation_deg(clouds, frames, cam_list, centres)
+                      if len(cam_list) == len(clouds) else np.array([]))
+        # 第六条：同样裁公共可见区，但可见性用**真值基本体的解析法向**算。
+        # 第五条用估计法向，真实数据上比现状还差（静止 RMSE 13.07°→19.71°）——
+        # 那关闭的是「用估计法向近似可见性」，不是前向模型本身。这一条把法向估计
+        # 这个误差源整个去掉，只留深度噪声，才回答得了「噪声本身会不会吃掉收益」。
+        # 第七条，也是唯一真正去掉根因的：**跨帧特征点对应**（光流跟踪 + Kabsch），
+        # 完全不用 ICP。前六条都在「拿什么去配」上做文章，而只要两边不是同一批物理
+        # 点，那些都改变不了问题的性质。合成实验证明有精确对应就全好了。
+        flow_deg = _flow_correspondence_rotation_deg(run, geom, clouds, frames, per_frame)
+        # 第八条：稠密光流。稀疏角点在这个物体尺度上拿不到足够的点（掩码中位
+        # 264 像素、角点中位 4 个，而阈值是 8），稠密给的是每个掩码像素一个对应。
+        dense_deg = _dense_flow_rotation_deg(run, geom, frames, per_frame)
+        # 第九条，也是对应关系这条路的**公平版**：锚点固定在第 0 帧，累积对应关系
+        # 而不是累积旋转。前两条光流臂都在逐帧串，而 ICP 那侧用的是累积模型——
+        # 两边基准设定不同，那组对比不公平。
+        anchor_deg = _anchored_flow_rotation_deg(run, geom, frames, per_frame)
+        _shapes = _gt_shapes_and_extents(CURRENT_CLIP_DIR) if CURRENT_CLIP_DIR else {}
+        _node = oid if oid in _shapes else oid.rsplit("_", 1)[0]
+        analytic_deg = np.array([])
+        if _node in _shapes and len(cam_list) == len(clouds) and _p:
+            _shape, _half = _shapes[_node]
+            analytic_deg = _common_visible_analytic_deg(
+                clouds, frames, cam_list, _p, _shape, _half)
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -446,6 +557,24 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
+        # 物体在画面里多大，用来分桶。对应关系方法在小物体上必然差（孔径问题 +
+        # 邻域平滑），所以报误差之前先把尺寸摆出来——掩码中位只有 264 像素时，
+        # 「方法不行」和「物体太小」是两件事。
+        _areas = [int(np.asarray(per_frame[f]).astype(bool).sum())
+                  for f in frames if f in per_frame]
+        _med_area = float(np.median(_areas)) if _areas else 0.0
+        _bucket = ("小 <200px" if _med_area < 200 else
+                   "中 200~600px" if _med_area < 600 else "大 >600px")
+        out.setdefault(f"area/{_bucket}", []).append(_med_area)
+        if len(anchor_deg) == len(true_deg):
+            out.setdefault(f"{kind}/anchor_range_deg", []).append(float(np.ptp(anchor_deg)))
+            out.setdefault(f"{kind}/anchor_rmse_deg", []).append(
+                float(np.sqrt(np.mean((anchor_deg - true_deg) ** 2))))
+        if len(dense_deg) == len(true_deg):
+            out.setdefault(f"bysize/{_bucket}/dense_rmse_deg", []).append(
+                float(np.sqrt(np.mean((dense_deg - true_deg) ** 2))))
+        out.setdefault(f"bysize/{_bucket}/icp_rmse_deg", []).append(
+            float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
         out.setdefault(f"{kind}/true_range_deg", []).append(float(np.ptp(true_deg)))
         out.setdefault(f"{kind}/solved_range_deg", []).append(float(np.ptp(solved_deg)))
         out.setdefault(f"{kind}/angle_rmse_deg", []).append(
@@ -462,6 +591,22 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/asset_range_deg", []).append(float(np.ptp(asset_deg)))
             out.setdefault(f"{kind}/asset_rmse_deg", []).append(
                 float(np.sqrt(np.mean((asset_deg - true_deg) ** 2))))
+        if len(common_deg) == len(true_deg):
+            out.setdefault(f"{kind}/common_range_deg", []).append(float(np.ptp(common_deg)))
+            out.setdefault(f"{kind}/common_rmse_deg", []).append(
+                float(np.sqrt(np.mean((common_deg - true_deg) ** 2))))
+        if len(dense_deg) == len(true_deg):
+            out.setdefault(f"{kind}/dense_range_deg", []).append(float(np.ptp(dense_deg)))
+            out.setdefault(f"{kind}/dense_rmse_deg", []).append(
+                float(np.sqrt(np.mean((dense_deg - true_deg) ** 2))))
+        if len(flow_deg) == len(true_deg):
+            out.setdefault(f"{kind}/flow_range_deg", []).append(float(np.ptp(flow_deg)))
+            out.setdefault(f"{kind}/flow_rmse_deg", []).append(
+                float(np.sqrt(np.mean((flow_deg - true_deg) ** 2))))
+        if len(analytic_deg) == len(true_deg):
+            out.setdefault(f"{kind}/analytic_range_deg", []).append(float(np.ptp(analytic_deg)))
+            out.setdefault(f"{kind}/analytic_rmse_deg", []).append(
+                float(np.sqrt(np.mean((analytic_deg - true_deg) ** 2))))
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
@@ -588,6 +733,395 @@ def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.n
     pts = np.vstack(faces)
     return pts - pts.mean(0)
 
+
+
+
+
+
+
+
+def _flow_correspondence_rotation_deg(run, geom, clouds: list, frames: list,
+                                      masks_per_frame: dict) -> np.ndarray:
+    """**跨帧特征点对应**解刚体变换，完全不用 ICP（#79 的小版本）。
+
+    为什么是这条。当天关掉的六条修法里有五条都在「拿什么去配」或「配哪一块」上做
+    文章，全部失败；而合成实验证明**有精确对应关系就全好了**（静止 0.0°、纯平移
+    0.8°、真转 90° 保住 90.4°）。根因一直是同一句话——
+
+        采样格子钉在**图像**上不钉在物体上，相机一动，两帧之间连一个共同物理点都没有。
+
+    ICP 用最近邻**猜**对应，所以它改变不了这件事。光流跟踪的是**同一个物理点**，
+    这是六条路里唯一真正去掉根因的做法。
+
+    流程：掩码内取角点 → Lucas-Kanade 跟到下一帧 → 两端各用自己那帧的深度抬到三维
+    → Kabsch 闭式解 (R, t)。对应关系是**跟出来的**，不是猜的。
+
+    已知的弱点，先写在这里免得又把弱版本当强版本（当天栽过两次）：
+      * 光流在低纹理表面上会失败——合成渲染的物体恰恰纹理很少；
+      * 反向跟踪一致性只是必要条件，不保证对；
+      * 抬到三维用的还是同一张深度图，深度噪声没有被去掉。
+    所以这是「对应关系这条路值不值得投」的第一个数，不是落地方案。
+    """
+    import cv2
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    lk = dict(winSize=(21, 21), maxLevel=3,
+              criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ka, kb = idx_of.get(frames[i - 1]), idx_of.get(frames[i])
+        if ka is None or kb is None or ka >= len(files) or kb >= len(files):
+            out.append(out[-1]); continue
+        ga = cv2.imread(str(files[ka]), cv2.IMREAD_GRAYSCALE)
+        gb = cv2.imread(str(files[kb]), cv2.IMREAD_GRAYSCALE)
+        if ga is None or gb is None:
+            out.append(out[-1]); continue
+        m = masks_per_frame.get(frames[i - 1])
+        if m is None:
+            out.append(out[-1]); continue
+        m = np.asarray(m).astype(np.uint8)
+        if m.shape != ga.shape:
+            m = cv2.resize(m, (ga.shape[1], ga.shape[0]), interpolation=cv2.INTER_NEAREST)
+        pts = cv2.goodFeaturesToTrack(ga, maxCorners=400, qualityLevel=0.01,
+                                      minDistance=4, mask=m)
+        if pts is None or len(pts) < 8:
+            out.append(out[-1]); continue
+        nxt, st, _err = cv2.calcOpticalFlowPyrLK(ga, gb, pts, None, **lk)
+        back, st2, _ = cv2.calcOpticalFlowPyrLK(gb, ga, nxt, None, **lk)
+        # 反向跟踪一致性：跟过去再跟回来，落点偏得远的扔掉
+        ok = (st.ravel() == 1) & (st2.ravel() == 1) & \
+             (np.linalg.norm(pts - back, axis=2).ravel() < 1.0)
+        if ok.sum() < 8:
+            out.append(out[-1]); continue
+        pa, pb = pts[ok].reshape(-1, 2), nxt[ok].reshape(-1, 2)
+        P = _lift(geom, ka, pa)
+        Q = _lift(geom, kb, pb)
+        good = np.isfinite(P).all(1) & np.isfinite(Q).all(1)
+        if good.sum() < 8:
+            out.append(out[-1]); continue
+        rot, _t = kabsch(Q[good], P[good])       # 把第 i 帧配回第 i-1 帧
+        R_acc = np.asarray(rot, float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
+
+
+
+
+
+
+def _anchored_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> np.ndarray:
+    """跨帧对应的**公平版**：累积对应关系，不累积旋转。
+
+    之前那两条光流臂（稀疏、稠密）都是逐帧链式累积旋转 `R_acc = rot @ R_acc`。
+    而 `track_rigid` 的 docstring 早就写明——
+
+        **不逐帧链式配准**。实测链式每步残差只有 0.026 m，轨迹误差却比包围盒中心
+        还大——每步的小误差沿三十帧累积起来就盖过了信号。
+
+    仓库已经查明链式不行并改成了「对累积模型配准」，而我给光流臂写的正是链式。
+    `dense_range_deg` 稳定在 170°（几乎跑满量程）就是累积漂移的典型征兆。
+    **所以那组对比不公平**：ICP 那侧用累积模型，光流这侧在串。
+
+    这一版把锚点固定在第 0 帧：点从第 0 帧一路跟下去（跟踪本身是逐帧的，没办法），
+    但到第 k 帧时拿**第 0 帧的三维点和第 k 帧的三维点直接解一次 Kabsch**。
+    旋转每次都是从直接对应关系新解的，不沿帧累加——这才是和 ICP 可比的设定。
+
+    跟丢的点会越来越多，所以同时返回「还剩多少点」，点太少时后面的数不可信。
+    """
+    import cv2
+    from gwm.perception.masks import resize_mask
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    k0 = idx_of.get(frames[0])
+    m0 = masks_per_frame.get(frames[0])
+    if k0 is None or k0 >= len(files) or m0 is None:
+        return np.array([])
+    g0 = cv2.imread(str(files[k0]), cv2.IMREAD_GRAYSCALE)
+    if g0 is None:
+        return np.array([])
+    m0 = np.asarray(m0).astype(bool)
+    if m0.shape != g0.shape:
+        m0 = resize_mask(m0, (g0.shape[1], g0.shape[0])).astype(bool)
+    if m0.sum() < 40:
+        return np.array([])
+    # **只跟角点，不跟所有掩码像素。** 前两版各带一个互补的毛病：稀疏版只跟角点
+    # 但物体只有 4 个角点（点太少）；第一版锚定跟掩码内所有像素，点够多但大部分是
+    # 平坦区域，LK 在那上面必然漂移（孔径问题）。正确的组合是角点 + 锚定。
+    # 质量阈值放松到 0.003，因为物体小、角点本来就少（普查：中位 4 个）。
+    corners = cv2.goodFeaturesToTrack(g0, maxCorners=600, qualityLevel=0.003,
+                                      minDistance=2, mask=m0.astype(np.uint8))
+    if corners is None or len(corners) < 6:
+        return np.array([])
+    pts0 = corners.reshape(-1, 2).astype(np.float32)
+    P0 = _lift(geom, k0, pts0)
+    alive = np.isfinite(P0).all(1)
+    if alive.sum() < 6:
+        return np.array([])
+    lk = dict(winSize=(15, 15), maxLevel=3,
+              criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+    cur = pts0.reshape(-1, 1, 2).copy()
+    prev_img, prev_k = g0, k0
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ki = idx_of.get(frames[i])
+        if ki is None or ki >= len(files):
+            out.append(out[-1]); continue
+        gi = cv2.imread(str(files[ki]), cv2.IMREAD_GRAYSCALE)
+        if gi is None:
+            out.append(out[-1]); continue
+        nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev_img, gi, cur, None, **lk)
+        alive = alive & (st.ravel() == 1)
+        cur, prev_img, prev_k = nxt, gi, ki
+        if alive.sum() < 6:
+            out.append(out[-1]); continue
+        Pk = _lift(geom, ki, cur.reshape(-1, 2))
+        good = alive & np.isfinite(Pk).all(1)
+        if good.sum() < 6:
+            out.append(out[-1]); continue
+        # **锚点在第 0 帧**：每次都从直接对应关系解一次，不累加旋转
+        A, B = P0[good], Pk[good]
+        rot, t = kabsch(B, A)
+        res = np.linalg.norm(B @ np.asarray(rot, float).T + t - A, axis=1)
+        keep = res <= np.percentile(res, 75)
+        if keep.sum() >= 6:
+            rot, _t = kabsch(B[keep], A[keep])
+        out.append(float(np.degrees(R.from_matrix(np.asarray(rot, float)).magnitude())))
+    return np.asarray(out)
+
+def _dense_flow_rotation_deg(run, geom, frames: list, masks_per_frame: dict) -> np.ndarray:
+    """**稠密光流**的跨帧对应 + Kabsch。稀疏角点在这个物体尺度上不够用。
+
+    为什么换稠密。稀疏版（goodFeaturesToTrack + LK）两个方向同时崩：静止解出 84.9°、
+    真转 114° 的 spin 解出 0.000°。我第一反应是「合成渲染没纹理」，**数出来是错的**
+    ——587 个物体-帧样本里只有 6.6% 完全没角点，角点数中位 **4.0**，而掩码面积中位
+    只有 **264 像素**（约 16×16）。真因是**物体在画面里太小**，4 个角点过不了
+    `>= 8` 那道门，于是每帧都走「跟不到就沿用上一个值」。
+
+    稠密光流给的是掩码内**每个像素**的对应——264 个像素就是 264 个对应。
+    点数不再是瓶颈，而且 Kabsch 可以配上剔除。
+
+    注意不要把阈值从 8 降到 3 来「解决」稀疏版的问题：4 个点解 Kabsch 对噪声极敏感，
+    那是换一种方式失败。
+    """
+    import cv2
+    from gwm.perception.masks import resize_mask
+    frame_dir = Path(run) / "geom_frames"
+    files = sorted(frame_dir.glob("g_*.jpg"))
+    if len(files) < 2:
+        return np.array([])
+    idx_of = {f: i for i, f in enumerate(geom.frame_indices)}
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(frames)):
+        ka, kb = idx_of.get(frames[i - 1]), idx_of.get(frames[i])
+        if ka is None or kb is None or ka >= len(files) or kb >= len(files):
+            out.append(out[-1]); continue
+        ga = cv2.imread(str(files[ka]), cv2.IMREAD_GRAYSCALE)
+        gb = cv2.imread(str(files[kb]), cv2.IMREAD_GRAYSCALE)
+        m = masks_per_frame.get(frames[i - 1])
+        if ga is None or gb is None or m is None:
+            out.append(out[-1]); continue
+        m = np.asarray(m).astype(bool)
+        if m.shape != ga.shape:
+            m = resize_mask(m, (ga.shape[1], ga.shape[0])).astype(bool)
+        # **把掩码往里腐蚀再取点。** 物体只有 20~36 像素宽，很大一部分像素离边界只有
+        # 一两个像素；光流偏一个像素，_lift 在那个落点取到的深度就跳到背景上，三维点
+        # 直接飞掉。所以坏的可能不是光流，是「二维对应 + 逐像素查深度」这个抬升方式。
+        # 腐蚀之后只用物体内部的点，这个嫌疑就被排除或坐实。
+        m_in = cv2.erode(m.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
+        if m_in.sum() >= 40:
+            m = m_in
+        if m.sum() < 40:
+            out.append(out[-1]); continue
+        # **窗口要和物体尺度匹配。** 第一版用 winsize=15，而物体只有 20~36 像素宽——
+        # 平滑窗口和物体本身一样大，算出来的流混进大量背景，跟到的是相机流不是物体流。
+        # 实测那一版误差 86~95 度且**不随物体变大而改善**，正是这个征兆。
+        # 窗口按掩码的等效边长定，无量纲地跟着物体走，不写死。
+        side = int(np.sqrt(max(int(m.sum()), 1)))
+        win = int(np.clip(side // 3, 5, 15)) | 1          # 奇数，物体三分之一左右
+        flow = cv2.calcOpticalFlowFarneback(ga, gb, None, 0.5, 3, win, 3, 5, 1.2, 0)
+        vs, us = np.nonzero(m)
+        pa = np.stack([us.astype(np.float32), vs.astype(np.float32)], 1)
+        pb = pa + flow[vs, us]
+        P = _lift(geom, ka, pa)
+        Q = _lift(geom, kb, pb)
+        good = np.isfinite(P).all(1) & np.isfinite(Q).all(1)
+        if good.sum() < 20:
+            out.append(out[-1]); continue
+        P, Q = P[good], Q[good]
+        # 一轮剔除：先解一次，把残差大的四分之一扔掉再解一次
+        rot, t = kabsch(Q, P)
+        res = np.linalg.norm(Q @ np.asarray(rot, float).T + t - P, axis=1)
+        keep = res <= np.percentile(res, 75)
+        if keep.sum() >= 20:
+            rot, _t = kabsch(Q[keep], P[keep])
+        R_acc = np.asarray(rot, float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
+
+def _lift(geom, k: int, px: np.ndarray) -> np.ndarray:
+    """像素坐标 + 该帧深度 → 世界坐标。深度图是几何后端那一档的分辨率。"""
+    depth = geom.depth[k]
+    h, w = depth.shape
+    u = np.clip(np.round(px[:, 0]).astype(int), 0, w - 1)
+    v = np.clip(np.round(px[:, 1]).astype(int), 0, h - 1)
+    z = depth[v, u]
+    K = geom.intrinsics[k]
+    cam = np.stack([(u - K[0, 2]) * z / K[0, 0], (v - K[1, 2]) * z / K[1, 1], z], 1)
+    out = to_world(cam, _fix(geom.cam_to_world[k]))
+    out[z <= 1e-4] = np.nan
+    return out
+
+def _gt_shapes_and_extents(clip_dir) -> dict:
+    """真值节点 id → (基本体种类, 半长 3 元组)。解析法向要用。"""
+    out = {}
+    try:
+        program = json.loads((clip_dir / "program.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return out
+    for node in (program.get("objects") or []) + (program.get("static") or []):
+        geom = node.get("geom") or {}
+        if geom.get("kind") != "primitive":
+            continue
+        shape = str(geom.get("shape") or "box")
+        ext = geom.get("extent")
+        if isinstance(ext, list) and len(ext) == 3:
+            half = np.asarray(ext, float) / 2.0
+        else:
+            r = float(geom.get("radius") or 0.0)
+            h = float(geom.get("height") or (2 * r))
+            half = np.array([r, h / 2.0, r], float)
+        if (half > 0).all():
+            out[str(node.get("id"))] = (shape, half)
+    return out
+
+
+def _analytic_normals(pts_obj: np.ndarray, shape: str, half: np.ndarray) -> np.ndarray:
+    """基本体表面的**解析**外法向（物体坐标系）。
+
+    为什么必须解析算。上一版从带噪点云的邻域估法向，结果真实数据上比现状还差
+    （静止 RMSE 13.07° → 19.71°）——噪声进了法向就裁错了面。那个否定结果关闭的是
+    「用估计法向近似可见性」，**不是前向模型本身**。这里把法向估计这个误差源整个
+    去掉，只留深度噪声，才回答得了「噪声本身会不会吃掉收益」。
+    """
+    p = np.asarray(pts_obj, float)
+    if shape == "sphere":
+        n = p.copy()
+    elif shape in ("cylinder", "cone"):
+        # 侧面是径向的；靠近端盖的点按 y 给法向
+        radial = np.stack([p[:, 0], np.zeros(len(p)), p[:, 2]], 1)
+        rad_len = np.linalg.norm(radial, axis=1)
+        on_cap = np.abs(p[:, 1]) / max(half[1], 1e-9) > (rad_len / max(half[0], 1e-9))
+        n = radial
+        n[on_cap] = np.stack([np.zeros(on_cap.sum()),
+                              np.sign(p[on_cap, 1]),
+                              np.zeros(on_cap.sum())], 1)
+        if shape == "cone":                      # 锥面法向往外上方倾
+            slope = half[0] / max(2 * half[1], 1e-9)
+            n[~on_cap, 1] = rad_len[~on_cap] * slope
+    else:                                        # box：离哪个面最近就用那个面的法向
+        rel = np.abs(p) / np.maximum(half, 1e-9)
+        axis = np.argmax(rel, axis=1)
+        n = np.zeros_like(p)
+        n[np.arange(len(p)), axis] = np.sign(p[np.arange(len(p)), axis])
+    norm = np.linalg.norm(n, axis=1, keepdims=True)
+    return n / np.maximum(norm, 1e-9)
+
+
+def _common_visible_analytic_deg(clouds: list, frames: list, cams: list,
+                                 poses_obj: dict, shape: str, half: np.ndarray) -> np.ndarray:
+    """公共可见区裁剪，可见性用**解析法向**算——干净的预言机版本。
+
+    和 `_common_visible_rotation_deg` 唯一的差别就是法向从哪来，所以并排比能干净地
+    回答「上一版的失败是法向估计的锅，还是深度噪声的锅」。
+    """
+    from gwm.perception.registration import icp
+    if len(clouds) < 2 or len(cams) != len(clouds):
+        return np.array([])
+
+    def facing(cloud, f, eye):
+        entry = poses_obj.get(f)
+        if entry is None:
+            return np.ones(len(cloud), bool)
+        pos, quat = entry
+        rot = R.from_quat(quat)
+        obj = rot.inv().apply(np.asarray(cloud, float) - np.asarray(pos, float))
+        n_world = rot.apply(_analytic_normals(obj, shape, half))
+        view = np.asarray(eye, float) - cloud
+        view /= np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+        return np.einsum("ij,ij->i", n_world, view) > 0.05
+
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(clouds)):
+        keep_prev = facing(clouds[i - 1], frames[i - 1], cams[i - 1]) & \
+            facing(clouds[i - 1], frames[i - 1], cams[i])
+        keep_cur = facing(clouds[i], frames[i], cams[i]) & \
+            facing(clouds[i], frames[i], cams[i - 1])
+        src, dst = clouds[i][keep_cur], clouds[i - 1][keep_prev]
+        if len(src) < 30 or len(dst) < 30:
+            out.append(out[-1]); continue
+        step = icp(src, dst)
+        if step.get("ok"):
+            R_acc = np.asarray(step["rotation"], float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
+
+def _common_visible_rotation_deg(clouds: list, frames: list, cams: list,
+                                 centres: dict) -> np.ndarray:
+    """**前向模型在真实数据上的预言机**：相邻两帧都裁到「两个相机都看得见」的面再配。
+
+    合成实验（`probe_icp_visibility.py`）里这条是今天唯一三条判据全过的：
+    静止 12.5°→0.0°、纯平移 26.9°→0.8°、而真转 90° 保住 90.4°。但那是**合成上限**
+    ——可见性精确可算、深度无噪声。模板路线就是死在这一关（合成 5.2°、落地 81°），
+    所以不在真实点云上验，前面那个结果什么都不说明。
+
+    这里要回答的是一个更窄的问题：**即使前向模型完美，真实深度的噪声会不会把收益
+    吃掉。** 所以可见性仍然用真值（物体中心来自 gt_states，法向由点云邻域估出再朝
+    这个中心的外侧定向），而点云是真实深度 + 真实掩码得到的。
+
+    法向定向必须用**物体中心**，不能用点云自己的质心——部分可见的点云质心落在表面
+    上，「朝外」没有定义。这个坑今天踩过两次（柱面轴心、可见子集配准）。
+    """
+    from gwm.perception.registration import estimate_normals, icp
+    if len(clouds) < 2 or len(cams) != len(clouds):
+        return np.array([])
+
+    def facing(cloud, centre, eye):
+        if len(cloud) < 16:
+            return np.ones(len(cloud), bool)
+        n = estimate_normals(cloud, k=min(12, len(cloud) - 1))
+        outward = cloud - centre                       # ← 物体中心，不是点云质心
+        flip = np.sign(np.einsum("ij,ij->i", n, outward))
+        flip[flip == 0] = 1.0
+        n = n * flip[:, None]
+        view = eye - cloud
+        view /= np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+        return np.einsum("ij,ij->i", n, view) > 0.05
+
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(clouds)):
+        c_prev = np.asarray(centres.get(frames[i - 1], clouds[i - 1].mean(0)), float)
+        c_cur = np.asarray(centres.get(frames[i], clouds[i].mean(0)), float)
+        # 两帧各自裁到「**对方**相机也看得见」的那部分——公共可见区
+        keep_prev = facing(clouds[i - 1], c_prev, cams[i - 1]) & facing(clouds[i - 1], c_prev, cams[i])
+        keep_cur = facing(clouds[i], c_cur, cams[i]) & facing(clouds[i], c_cur, cams[i - 1])
+        src, dst = clouds[i][keep_cur], clouds[i - 1][keep_prev]
+        if len(src) < 30 or len(dst) < 30:
+            out.append(out[-1]); continue
+        step = icp(src, dst)
+        if step.get("ok"):
+            R_acc = np.asarray(step["rotation"], float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
 
 def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
     """和资产模板同一套流程，只把模板换成拟合出来的长方体。
@@ -794,6 +1328,16 @@ def main() -> int:
             continue
         extra = (f"  均值 {statistics.mean(values):>6.3f}"
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
+        # 静止转角那几列，中位数对改动不敏感（样本少，中间那个不动就看不出变化），
+        # 而决策真正要的是**有多少比例低于铰链门槛 8 度**——高于门槛的会产出假关节。
+        if key.startswith(("rot_static/", "rot_rotating/", "rot_translating/")):
+            # 门槛这条线对三个桶的含义是**相反的**：静止和纯平移的物体该低于门槛
+            # （高于就是假关节），而真在转的物体不该低于（低于就是真转动被压没了）。
+            # 所以这一列必须连着桶名一起读。
+            below = sum(1 for v in values if v < 8.0) / len(values)
+            want = "该高" if key.startswith("rot_rotating/") else "该低"
+            extra += (f"  均值 {statistics.mean(values):>6.2f}"
+                      f"  低于 8 度门槛 {below:.3f}（{want}）")
         print(f"  {key:<26} 中位数 {statistics.median(values):>8.3f}   样本 {len(values)}{extra}")
     return 0
 

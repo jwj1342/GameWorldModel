@@ -34,6 +34,10 @@ The record contains:
 - Candidate eligibility, ranking scores, normal orientation used for selection,
   selected index (or null), exact transform and scale, and assumed-height basis.
   Existing rounded Evidence diagnostics stay unchanged.
+- On the updated PR #76 base, eligibility is recorded after the existing
+  near-camera candidate filter. Raw OBB records use the configured
+  `perception.obb_extent_percentile`, rather than silently restoring the old
+  hard-coded percentile. The registration rotation gate remains unchanged.
 - Every attempted object/frame fit's raw OBB (or null), point count, contact
   replacement branch and candidate, and OBB before temporal smoothing.
 - Redacted effective config, relevant computation-source hashes, input archive

@@ -40,6 +40,15 @@ class SceneSpec:
                                           # 见 gwm/dataset/framing.py 和 #68
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # 真值场景用资产库搭（见 behavior._asset_geom）。给配置字典，里面要有
+    # assets.library；尺寸来自所选GLB的真实XYZ边界，不使用排序形状缓存。
+    # 留空、库不可用或所选静态几何不支持时，沿用基本体回退。
+    #
+    # 为什么需要：现在的真值是「随机名字 + 独立挑的基本体」，于是「该挑哪个资产」
+    # 没有标准答案（检索改进测不出来——实测换掉 64% 的资产，所有指标逐字节不动），
+    # 而且类名和形状脱钩导致 class_accuracy 恒等于噪声。真值改从同一个库里挑，
+    # 两件事一起修好。
+    asset_cfg: dict | None = None
 
     # 两个派生方法都用 `dataclasses.replace`，**不要逐字段重建**。
     #
@@ -132,7 +141,8 @@ def generate_scene(spec: SceneSpec) -> tuple[dict, dict]:
 
     statics, layout = sample_layout(behavior_rng, spec.family, stage_rng)
     count = spec.objects or behavior_rng.randint(1, 8)
-    objects = sample_objects(behavior_rng, layout, spec.profile, spec.duration, count)
+    objects = sample_objects(behavior_rng, layout, spec.profile, spec.duration, count,
+                             cfg=spec.asset_cfg)
 
     track = spec.camera_track or camera_rng.choice(CAMERA_TRACKS)
     camera = sample_camera(camera_rng, layout, spec.duration, track)
