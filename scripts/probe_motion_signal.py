@@ -578,6 +578,26 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 两个 N 一起报，好看出它随候选集增大怎么衰减。
         _gt_ref = _gt_asset_refs().get(oid, "")
         _respick33 = None          # 下面按物体大小分桶时用，见 bysize/
+        # **观测点云的三轴尺寸和真值差多少。** 噪声容差扫完之后结论是：VGGT 的深度
+        # 误差**不是噪声**——连 5% 的各向同性噪声都只把挑对率压到 0.108，而真实
+        # VGGT 是 0.041（随机 0.030）。衰减对噪声是平缓的，真实情况掉得狠得多，
+        # 所以是**结构性**的：重建出来的表面不是正确形状的抖动版本，形状本身就错。
+        #
+        # 最直接的验证就是三轴尺寸比——压扁、和背景粘连都会在这上面显形。
+        # 按降序比（不配对哪根轴对哪根），所以不受朝向影响。
+        _gt_ext = _gt_node_extent(oid)
+        if _gt_ext is not None and clouds:
+            _obs = np.asarray(clouds[len(clouds) // 2], float)
+            if len(_obs) >= 30:
+                _o = np.sort(_obs.max(0) - _obs.min(0))[::-1]
+                _g = np.sort(np.asarray(_gt_ext, float))[::-1]
+                if _g.min() > 1e-9 and _o.min() > 1e-9:
+                    # 先把整体尺度对齐（最长边归一），只看**比例**错多少——
+                    # 绝对尺度错是另一回事，这里问的是形状有没有被压扁。
+                    _r = (_o / _o[0]) / (_g / _g[0])
+                    out.setdefault(f"{kind}/extent_ratio_mid", []).append(float(_r[1]))
+                    out.setdefault(f"{kind}/extent_ratio_min", []).append(float(_r[2]))
+                    out.setdefault(f"{kind}/extent_scale", []).append(float(_o[0] / _g[0]))
         if _gt_ref:
             # **这个物体自己的**真值资产在全库里的图像名次。之前报的 365 是集合判据
             # （片段里任何一个真值资产排得靠前就算），那是放水的上界；端到端要的是
@@ -848,6 +868,27 @@ def _asset_points(query: str) -> np.ndarray | None:
 
 
 _GT_REF_CACHE: dict = {}
+
+
+def _gt_node_extent(oid: str):
+    """真值节点的三轴尺寸（从程序的 geom.extent 读）。配对不需要——真值感知下
+    物体 id 就是真值节点 id。"""
+    clip_dir = globals().get("CURRENT_CLIP_DIR")
+    if clip_dir is None:
+        return None
+    key = f"ext:{clip_dir}"
+    if key not in _GT_REF_CACHE:
+        out = {}
+        try:
+            program = json.loads((Path(clip_dir) / "program.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            program = {}
+        for node in (program.get("objects") or []) + (program.get("static") or []):
+            ext = (node.get("geom") or {}).get("extent")
+            if ext and len(ext) == 3:
+                out[str(node.get("id"))] = ext
+        _GT_REF_CACHE[key] = out
+    return _GT_REF_CACHE[key].get(oid)
 
 
 def _gt_asset_refs() -> dict:
