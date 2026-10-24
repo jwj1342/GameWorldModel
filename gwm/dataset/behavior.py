@@ -126,7 +126,11 @@ def _asset_geom(rng: random.Random, cfg: dict | None = None):
     ext = [round(longest * r, 3) for r in ratios]
     rng.shuffle(ext)                                   # 最长边不总是 x
     ext = [max(v, 0.05) for v in ext]
-    geom = {"kind": "asset", "ref": asset_id, "extent": ext}
+    # schema 的 assetGeom 要求 kind/query/extent 三样齐全（ref 可选）。
+    # 第一版只给了 kind/ref/extent，12 条片段全部校验失败、写出 0 个程序。
+    # query 给资产的可读名字——真值里它就是「这个物体叫什么」，
+    # 和检索那一侧拿到的查询词是同一个口径。
+    geom = {"kind": "asset", "query": name[:80], "ref": asset_id, "extent": ext}
     return geom, ext[1] / 2, max(ext[0], ext[2]) / 2, name
 
 
