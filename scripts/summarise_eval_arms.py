@@ -18,6 +18,7 @@ FRACTIONS = {"shape_kind_accuracy", "shape_ok", "scale_ok", "motion_type_accurac
              "object_recall", "object_precision", "scene_recall", "scene_precision"}
 
 COLS = ["object_recall", "object_precision", "scene_recall", "scene_precision",
+        "asset_shape_error",   # 唯一看得见「挑了哪个资产」的一列
         "shape_kind_accuracy", "shape_ok", "scale_ok", "scale_ratio",
         "motion_type_accuracy", "trajectory_m"]
 
