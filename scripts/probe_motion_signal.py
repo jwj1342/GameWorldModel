@@ -553,6 +553,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 _hit = _residual_pick_rate(clouds, _gt_ref, _n)
                 if _hit is not None:
                     out.setdefault(f"{kind}/residual_pick_of_{_n + 1}", []).append(_hit)
+            # 密度匹配的难干扰项：形状最接近真值的那 32 个。随机干扰项太好认，
+            # 而真实方法面对的候选集个个都像。这一行才是可引用的数。
+            _hard = _residual_pick_rate(clouds, _gt_ref, 32, hard=True)
+            if _hard is not None:
+                out.setdefault(f"{kind}/residual_pick_hard_33", []).append(_hard)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         _cam_corr = _camera_step_correlation(tracked, cam_list)
@@ -1362,8 +1367,43 @@ def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
     return np.asarray(out)
 
 
+def _hard_distractors(gt_ref: str, n: int) -> list[str]:
+    """**形状最接近真值资产**的那 n 个，当难干扰项用。
+
+    随机抽的干扰项太好认——随机资产长得和目标完全不像。而真实方法面对的候选集是
+    检索出来的前 N 名，**个个都像**。拿随机干扰项量出来的挑对率是偏乐观的，这正是
+    「零假设要密度匹配」那条。
+
+    用边长比例（`asset_shapes.json` 里预算好的）找最近的 n 个。它和被测的判据
+    （配准残差）不是同一个量，所以不构成「配对条件含被测量」那类泄漏。
+    """
+    shapes = _ASSET_CACHE.get("__shapes__")
+    if shapes is None:
+        import os
+        path = os.environ.get("GWM_ASSET_SHAPES", "/scratch/jwj/gwm/asset_shapes.json")
+        try:
+            shapes = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            shapes = {}
+        _ASSET_CACHE["__shapes__"] = shapes
+    target = shapes.get(gt_ref)
+    if not target:
+        return []
+    t = np.asarray(target, float)
+    scored = []
+    for aid, ratio in shapes.items():
+        if aid == gt_ref:
+            continue
+        try:
+            scored.append((float(np.abs(np.asarray(ratio, float) - t).mean()), aid))
+        except (TypeError, ValueError):
+            continue
+    scored.sort()
+    return [aid for _d, aid in scored[:n]]
+
+
 def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
-                        seed: int = 0) -> float | None:
+                        seed: int = 0, hard: bool = False) -> float | None:
     """**用配准残差挑资产**：真值资产 + N 个随机干扰项里，残差最小的是不是真值。
 
     这是创新点一的字面实现——用连续稠密几何去监督一个离散的符号选择。梯度传不过去，
@@ -1393,8 +1433,14 @@ def _residual_pick_rate(clouds: list, gt_ref: str, n_distract: int,
     others = sorted((a.id for a in catalog if a.id != gt_ref))
     if len(others) < n_distract:
         return None
-    rng = random.Random(f"{seed}:{gt_ref}:{n_distract}")
-    ids = [gt_ref] + rng.sample(others, n_distract)
+    if hard:
+        picked = _hard_distractors(gt_ref, n_distract)
+        if len(picked) < n_distract:
+            return None
+    else:
+        rng = random.Random(f"{seed}:{gt_ref}:{n_distract}")
+        picked = rng.sample(others, n_distract)
+    ids = [gt_ref] + picked
     per_frame = [np.linalg.norm(np.asarray(c, float).max(0) - np.asarray(c, float).min(0))
                  for c in clouds if len(np.asarray(c, float)) >= 10]
     if not per_frame:
@@ -1778,7 +1824,7 @@ def main() -> int:
                  if key.endswith("fired") or key == "correct_kind" or "static_detector" in key else "")
         # 0/1 序列的中位数是退化的（非 0 即 1），要的是**均值**；而且必须连着
         # 「随机猜能猜到多少」一起读——从 N+1 个里随机挑是 1/(N+1)。这个坑记过。
-        if "/residual_pick_of_" in key:
+        if "/residual_pick_of_" in key or "/residual_pick_hard_" in key:
             n_plus = int(key.rsplit("_", 1)[-1])
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
