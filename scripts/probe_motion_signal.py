@@ -516,6 +516,17 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         asset_deg = _asset_template_rotation_deg(clouds, _class_of(oid, evidence))
         # 第四条：模板用**对观测拟合出来的长方体**，不需要检索也不需要真值。
         prim_deg = _primitive_template_rotation_deg(clouds)
+        # 第五条，也是合成实验里唯一三条判据全过的那条：**不换模板，换被配的那两块**
+        # ——把相邻两帧都裁到「两个相机都看得见」的公共表面再配。合成上限是
+        # 静止 12.5°→0.0°、纯平移 26.9°→0.8°、真转 90° 保住 90.4°。
+        # 这里在真实点云上验它，回答「即使前向模型完美，深度噪声会不会把收益吃掉」。
+        cam_list = [_fix(geom.cam_to_world[frame_of[f]])[:3, 3] for f in frames
+                    if frame_of.get(f) is not None]
+        # _gt_poses 返回的是 {物体: {帧号: (pos, quat)}}，取 pos 那一半
+        _p = poses.get(oid) or {}
+        centres = {f: _p[f][0] for f in frames if f in _p}
+        common_deg = (_common_visible_rotation_deg(clouds, frames, cam_list, centres)
+                      if len(cam_list) == len(clouds) else np.array([]))
         truth_q = [series.get(f) for f in frames]
         if any(q is None for q in truth_q):
             skipped["truth_missing_for_some_frame"] = skipped.get("truth_missing_for_some_frame", 0) + 1
@@ -540,6 +551,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/asset_range_deg", []).append(float(np.ptp(asset_deg)))
             out.setdefault(f"{kind}/asset_rmse_deg", []).append(
                 float(np.sqrt(np.mean((asset_deg - true_deg) ** 2))))
+        if len(common_deg) == len(true_deg):
+            out.setdefault(f"{kind}/common_range_deg", []).append(float(np.ptp(common_deg)))
+            out.setdefault(f"{kind}/common_rmse_deg", []).append(
+                float(np.sqrt(np.mean((common_deg - true_deg) ** 2))))
         if np.ptp(true_deg) > 1e-6 and np.ptp(solved_deg) > 1e-6:
             out.setdefault(f"{kind}/corr", []).append(
                 float(np.corrcoef(solved_deg, true_deg)[0, 1]))
@@ -666,6 +681,57 @@ def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.n
     pts = np.vstack(faces)
     return pts - pts.mean(0)
 
+
+
+
+def _common_visible_rotation_deg(clouds: list, frames: list, cams: list,
+                                 centres: dict) -> np.ndarray:
+    """**前向模型在真实数据上的预言机**：相邻两帧都裁到「两个相机都看得见」的面再配。
+
+    合成实验（`probe_icp_visibility.py`）里这条是今天唯一三条判据全过的：
+    静止 12.5°→0.0°、纯平移 26.9°→0.8°、而真转 90° 保住 90.4°。但那是**合成上限**
+    ——可见性精确可算、深度无噪声。模板路线就是死在这一关（合成 5.2°、落地 81°），
+    所以不在真实点云上验，前面那个结果什么都不说明。
+
+    这里要回答的是一个更窄的问题：**即使前向模型完美，真实深度的噪声会不会把收益
+    吃掉。** 所以可见性仍然用真值（物体中心来自 gt_states，法向由点云邻域估出再朝
+    这个中心的外侧定向），而点云是真实深度 + 真实掩码得到的。
+
+    法向定向必须用**物体中心**，不能用点云自己的质心——部分可见的点云质心落在表面
+    上，「朝外」没有定义。这个坑今天踩过两次（柱面轴心、可见子集配准）。
+    """
+    from gwm.perception.registration import estimate_normals, icp
+    if len(clouds) < 2 or len(cams) != len(clouds):
+        return np.array([])
+
+    def facing(cloud, centre, eye):
+        if len(cloud) < 16:
+            return np.ones(len(cloud), bool)
+        n = estimate_normals(cloud, k=min(12, len(cloud) - 1))
+        outward = cloud - centre                       # ← 物体中心，不是点云质心
+        flip = np.sign(np.einsum("ij,ij->i", n, outward))
+        flip[flip == 0] = 1.0
+        n = n * flip[:, None]
+        view = eye - cloud
+        view /= np.maximum(np.linalg.norm(view, axis=1, keepdims=True), 1e-9)
+        return np.einsum("ij,ij->i", n, view) > 0.05
+
+    R_acc = np.eye(3)
+    out = [0.0]
+    for i in range(1, len(clouds)):
+        c_prev = np.asarray(centres.get(frames[i - 1], clouds[i - 1].mean(0)), float)
+        c_cur = np.asarray(centres.get(frames[i], clouds[i].mean(0)), float)
+        # 两帧各自裁到「**对方**相机也看得见」的那部分——公共可见区
+        keep_prev = facing(clouds[i - 1], c_prev, cams[i - 1]) & facing(clouds[i - 1], c_prev, cams[i])
+        keep_cur = facing(clouds[i], c_cur, cams[i]) & facing(clouds[i], c_cur, cams[i - 1])
+        src, dst = clouds[i][keep_cur], clouds[i - 1][keep_prev]
+        if len(src) < 30 or len(dst) < 30:
+            out.append(out[-1]); continue
+        step = icp(src, dst)
+        if step.get("ok"):
+            R_acc = np.asarray(step["rotation"], float) @ R_acc
+        out.append(float(np.degrees(R.from_matrix(R_acc).magnitude())))
+    return np.asarray(out)
 
 def _primitive_template_rotation_deg(clouds: list) -> np.ndarray:
     """和资产模板同一套流程，只把模板换成拟合出来的长方体。
