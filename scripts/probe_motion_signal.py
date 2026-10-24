@@ -601,6 +601,12 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
                 _hard = _residual_pick_rate(clouds, _gt_ref, _c, hard=True, n_views=7)
                 if _hard is not None:
                     out.setdefault(f"{kind}/respick_cands{_c + 1}", []).append(_hard)
+            # 判据换成 D2 形状分布，其余协议完全对齐（干扰项、候选数、视角数），
+            # 所以可以和上面那一行直接并排比——唯一的变量是判据。
+            for _c in (32, 128):
+                _d2 = _d2_pick_rate(clouds, _gt_ref, _c, n_views=7)
+                if _d2 is not None:
+                    out.setdefault(f"{kind}/d2pick_cands{_c + 1}", []).append(_d2)
         gtref_deg = _template_rotation_from_points(
             clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         # **形状第 k 近的邻居当模板。** 不用「管线实际选中的那个」是因为管线的物体
@@ -1499,6 +1505,81 @@ def _image_rank_of_asset(run: Path, evidence: dict, oid: str, asset_id: str) -> 
     return 1 + sum(1 for v in scores.values() if v > own)
 
 
+def _d2_signature(pts: np.ndarray, bins: int = 32, samples: int = 4000,
+                  seed: int = 0) -> np.ndarray | None:
+    """D2 形状分布：随机点对的距离直方图，按自身尺度归一化。
+
+    **为什么要它。** 残差比的是**点到点距离**，深度噪声直接打在上面——实测在真实
+    VGGT 深度下残差挑资产从 0.297 掉到 0.041（随机 0.030），而把相机位姿换成真值
+    只回到 0.054，说明主因是深度不是相机。所以要一个**不依赖逐点表面细节**的判据。
+
+    D2 是全局统计量：逐点噪声在几千个点对里被平均掉，而形状信息留着。它同时比
+    包围盒边长比例丰富得多——后者今天已经证明没有预测力（边长比例差 0.002 的网格
+    当模板就把假转动翻倍），因为边长比例相同的两个资产可以是完全不同的东西。
+
+    按点对距离的**中位数**归一化，而不是最大值：最大值由最远的那对点决定，
+    一个离群点就把整条直方图压扁。
+    """
+    a = np.asarray(pts, float)
+    if len(a) < 32:
+        return None
+    rng = np.random.default_rng(seed)
+    i = rng.integers(0, len(a), samples)
+    j = rng.integers(0, len(a), samples)
+    d = np.linalg.norm(a[i] - a[j], axis=1)
+    d = d[d > 1e-9]
+    if len(d) < 100:
+        return None
+    med = float(np.median(d))
+    if med <= 1e-9:
+        return None
+    hist, _ = np.histogram(d / med, bins=bins, range=(0.0, 3.0), density=False)
+    total = hist.sum()
+    return hist.astype(float) / total if total else None
+
+
+def _d2_pick_rate(clouds: list, gt_ref: str, n_distract: int,
+                  n_views: int = 7) -> float | None:
+    """和 `_residual_pick_rate` 同一套协议，只把判据从 ICP 残差换成 D2 距离。
+
+    干扰项同样用**形状最接近**的那批（密度匹配），候选数、视角数都对齐，所以两者
+    可以直接并排比——唯一的变量是判据。
+    """
+    from gwm.assets.library import library_root, load_catalog
+    if not gt_ref or not clouds:
+        return None
+    if library_root() is None:
+        return None
+    _ASSET_CACHE.setdefault("__catalog__", load_catalog(library_root()))
+    picked = _hard_distractors(gt_ref, n_distract)
+    if len(picked) < n_distract:
+        return None
+    if 0 < n_views < len(clouds):
+        stride = len(clouds) / float(n_views)
+        views = [clouds[min(len(clouds) - 1, int(stride * (i + 0.5)))] for i in range(n_views)]
+    else:
+        views = clouds
+    sigs = [g for g in (_d2_signature(np.asarray(c, float)) for c in views) if g is not None]
+    if not sigs:
+        return None
+    query = np.mean(np.asarray(sigs, float), axis=0)
+    best_id, best_d = None, float("inf")
+    for aid in [gt_ref] + picked:
+        tpl = _asset_points_by_id(aid)
+        if tpl is None:
+            continue
+        sig = _d2_signature(tpl, seed=1)
+        if sig is None:
+            continue
+        # 直方图之间用 L1：对单个分箱的扰动不像 L2 那样被平方放大。
+        dist = float(np.abs(sig - query).sum())
+        if dist < best_d:
+            best_d, best_id = dist, aid
+    if best_id is None:
+        return None
+    return 1.0 if best_id == gt_ref else 0.0
+
+
 def _shape_distance(a_id: str, b_id: str) -> float | None:
     """两个资产的边长比例平均绝对差。和 probe_asset_retrieval 报的「形状距离」同一个量。"""
     shapes = _ASSET_CACHE.get("__shapes__") or {}
@@ -2016,9 +2097,10 @@ def main() -> int:
         if "/own_in_top" in key:
             extra = f"  **覆盖率 {statistics.mean(values):.3f}**（候选集里有正确答案的比例）"
         if ("/residual_pick_of_" in key or "/residual_pick_hard_" in key
-                or "/respick_cands" in key):
+                or "/respick_cands" in key or "/d2pick_cands" in key):
             n_plus = (33 if "_hard_33" in key
-                      else int(key.rsplit("cands", 1)[-1]) if "respick_cands" in key
+                      else int(key.rsplit("cands", 1)[-1])
+                      if ("respick_cands" in key or "d2pick_cands" in key)
                       else int(key.rsplit("_", 1)[-1]))
             extra = (f"  **挑对的比例 {statistics.mean(values):.3f}**"
                      f"（随机猜 {1.0 / n_plus:.3f}，即 {statistics.mean(values) * n_plus:.1f} 倍）")
