@@ -38,10 +38,24 @@ def gt_motion(program: dict) -> dict[str, str]:
 
 
 def bucket(kind: str) -> str:
-    if any(k in str(kind) for k in ROTATING):
-        return "真在转"
-    if str(kind) in ("static", "", "none"):
+    """**按真值运动类型精确分桶，不要把 spin 和 periodic_rotate 并在一起。**
+
+    第一版并了，于是「真在转」的 r² 中位只有 0.13~0.20，看起来像「周期拟合对真在转
+    的物体也不灵」。但 `spin` 是**持续转动**，角度序列是一条斜坡；拿正弦去拟合斜坡，
+    r² 本来就该低。这个检验只对 `periodic_rotate` 有意义，并进 spin 是混口径——
+    会把一个可能正常的子类拖进一个假的否定结论里。
+    """
+    k = str(kind or "static")
+    if k in ("static", "", "none"):
         return "真静止"
+    if "periodic_rotate" in k:
+        return "真·周期转动"          # 只有这一类该拟合出高 r²
+    if "spin" in k:
+        return "真·持续自转"          # 斜坡，正弦拟合本来就低，不该算失败
+    if "revolute" in k:
+        return "真·铰链"
+    if "periodic" in k:
+        return "真·周期平移"
     return "真平移"
 
 
@@ -84,19 +98,23 @@ def main(argv: list[str]) -> int:
         print(f"\n########## {label} ##########")
         print(f"  物体 {n_obj} 个，其中有 periodic_rotate 的 r² 记录的 {n_with_r2} 个"
               f"（门槛 {gate_value}）")
-        for name in ("真在转", "真静止", "真平移"):
+        order = ["真·周期转动", "真·持续自转", "真·铰链", "真·周期平移", "真平移", "真静止"]
+        for name in order:
             vs = by_bucket.get(name) or []
             if not vs:
                 print(f"    {name:6s} 没有样本"); continue
             over = sum(1 for v in vs if gate_value and v >= float(gate_value)) / len(vs)
             print(f"    {name:6s} 中位 {statistics.median(vs):.4f}  均值 {statistics.mean(vs):.4f}"
                   f"  最大 {max(vs):.4f}  过门槛比例 {over:.3f}  样本 {len(vs)}")
-        rot = by_bucket.get("真在转") or []
+        # 判据只在 periodic_rotate 上成立——它是唯一「该拟合出高 r²」的类。
+        rot = by_bucket.get("真·周期转动") or []
         sta = by_bucket.get("真静止") or []
         if rot and sta:
             d = statistics.median(rot) - statistics.median(sta)
-            print(f"    → 真在转 减 真静止 的中位差 **{d:+.4f}**"
-                  f"（{'方向对了' if d > 0 else '**分布还是反的**'}）")
+            print(f"    → **真·周期转动 减 真静止** 的中位差 {d:+.4f}"
+                  f"（{chr(0x65b9)+chr(0x5411)+chr(0x5bf9)+chr(0x4e86) if d > 0 else chr(0x8fd8)+chr(0x662f)+chr(0x53cd)+chr(0x7684)}）")
+        else:
+            print("    → 没有 periodic_rotate 的样本，这个判据算不了")
     print("""
 怎么读（顺序不能颠倒）：
   一、先看「真在转 减 真静止」是不是正的。负的话分布是反的，往下调门槛只会先放进
