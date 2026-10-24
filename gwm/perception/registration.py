@@ -52,6 +52,38 @@ def estimate_normals(points: np.ndarray, k: int = 12) -> np.ndarray:
     return vectors[:, :, 0]                           # 最小特征值对应的方向
 
 
+def visible_subset(model: np.ndarray, cam: np.ndarray, *, k: int = 12,
+                   normals: np.ndarray | None = None) -> np.ndarray:
+    """模型里**从这个相机位置看得见**的那一部分（的下标）。
+
+    为什么需要它。`refine_poses` 那条「全部帧建完整模型、每帧独立对它配准」实测更差
+    （`172d5ae`），原因写得很清楚——
+
+    > 一帧只看得见一个局部表面，拿它去配准更完整的模型时，这块局部可以滑到模型上
+    > 好几个位置都说得通；而相邻两帧的可见面大小相当、重叠又多，反倒良态。
+
+    也就是说「部分对完整」欠定，**是因为没告诉它该对哪一部分**。而那个信息我们是有的：
+    可见面为什么变？因为相机动了。相机位姿是几何后端一起给出来的，现成的，
+    但 `registration.py` 里一行相机都没有——`track_rigid` 只拿到点云。
+
+    所以这里按法向朝不朝着相机来筛模型：留下正对相机的那一半，再去配准。
+    这样源和目标就是**以同样的方式**局部的，欠定的根源就去掉了。
+
+    法向的符号不统一（`estimate_normals` 取的是最小主成分方向），所以不能直接看
+    点积的正负，要取绝对值之外的信息——这里用的是「法向和视线方向夹角接近 90 度的
+    丢掉」，也就是掠射面丢掉，正对或背对都先留着；背面会被 ICP 的距离剔除处理掉。
+    """
+    model = np.asarray(model, float)
+    if len(model) < k + 1:
+        return np.arange(len(model))
+    n = estimate_normals(model, k=k) if normals is None else np.asarray(normals, float)
+    view = np.asarray(cam, float) - model
+    norm = np.linalg.norm(view, axis=1, keepdims=True)
+    view = view / np.maximum(norm, 1e-9)
+    cos = np.abs(np.einsum("ij,ij->i", n, view))
+    # 掠射（法向几乎垂直于视线）的面在深度图里本来就采不到点，留着只会制造假对应
+    return np.flatnonzero(cos > 0.34)                 # 约 70 度以内
+
 def _point_to_plane_step(source: np.ndarray, target: np.ndarray,
                          normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """点到面的一步：小角度线性化之后解一个 6x6 方程。
@@ -125,7 +157,8 @@ def icp(source: np.ndarray, target: np.ndarray, *, max_iter: int = 25,
 
 def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
                 model_points: int = 6000, model_frames: int = 6, seed: int = 0,
-                refine: int = 0, **icp_kwargs) -> dict:
+                refine: int = 0, cam_positions: list | None = None,
+                **icp_kwargs) -> dict:
     """把一串逐帧点云配成一条轨迹。
 
     点云本身已经在世界坐标里，所以帧与帧之间的变换就是物体这一步的运动。
@@ -138,6 +171,17 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
 
     返回每帧位置、每步残差和锚点。锚点默认取第一帧质心，它落在可见表面上所以绝对位置
     本来就偏；轨迹的**形状**不依赖锚点，而运动估计用的正是形状。
+
+    `cam_positions`（可选，世界坐标下每帧的相机位置）给了之后，每一帧只拿**它看得见
+    的那部分模型**去配，而不是整个模型。
+
+    为什么这条值得试。`refine_poses` 那种「全部帧建完整模型、每帧独立配」实测更差
+    （`172d5ae`）：一帧只看得见一个局部表面，拿它去配更完整的模型时，这块局部能滑到
+    好几个位置都说得通。**欠定的根源是没告诉它该对哪一部分**——而这个信息现成就有：
+    可见面为什么变？因为相机动了。相机位姿是几何后端一起给出来的，但
+    `registration.py` 里原本一行相机都没有，`track_rigid` 只拿到点云。
+
+    不给就是原来的行为，一点不变。
     """
     if not clouds:
         return {"positions": [], "residuals": [], "ok": False, "reason": "no clouds"}
@@ -158,7 +202,16 @@ def track_rigid(clouds: list[np.ndarray], *, anchor: np.ndarray | None = None,
         cloud = np.asarray(current, float)
         # 用上一帧的位姿做初值：相邻帧位姿接近，这样 ICP 从一开始就在收敛域里
         guess = cloud @ R_acc.T + t_acc
-        step = icp(guess, model, **icp_kwargs)
+        # 给了相机轨迹就只拿**这一帧看得见的那部分模型**去配。
+        # 「部分对完整」欠定（见 visible_subset 的注释和 172d5ae），而欠定的根源是
+        # 没告诉它该对哪一部分——相机位置正好给出这个信息，而且是现成的。
+        target = model
+        if cam_positions is not None and index < len(cam_positions):
+            cam_obj = R_acc @ np.asarray(cam_positions[index], float) + t_acc
+            keep = visible_subset(model, cam_obj)
+            if len(keep) >= 50:
+                target = model[keep]
+        step = icp(guess, target, **icp_kwargs)
         if step["ok"]:
             # 每步的修正量是判静止最稳的信号：累积位置会被缓慢滑移带偏，
             # 而一个真正没动的物体，每一步解出来的修正都接近单位阵。
