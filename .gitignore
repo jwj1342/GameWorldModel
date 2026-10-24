@@ -3,6 +3,8 @@ data/clips/raw/*.webm
 data/clips/raw/*.mp4
 data/clips/trimmed/
 out/
+geometry_replay_v1/
+geometry_replay/
 # node
 node_modules
 pw-browsers/
