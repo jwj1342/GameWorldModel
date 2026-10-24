@@ -540,6 +540,11 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         common_deg = (_common_visible_rotation_deg(clouds, frames, cam_list, centres)
                       if len(cam_list) == len(clouds) else np.array([]))
         # 唯一还没试过、而且直指机制的判别子：解出的转角跟不跟着相机的角步长走。
+        # **链条的预言机：拿真值资产网格当模板。** 只预言检索，不预言位姿。
+        # 回答「把点一修好之后，点二能拿到什么」——现在的 asset 那一臂量的是拿错的
+        # 网格（检索 0/71），回答不了这个。
+        gtref_deg = _template_rotation_from_points(
+            clouds, _asset_points_by_id(_gt_asset_refs().get(oid, "")))
         _cam_corr = _camera_step_correlation(tracked, cam_list)
         if _cam_corr is not None and np.isfinite(_cam_corr):
             out.setdefault(f"{kind}/cam_step_corr", []).append(float(_cam_corr))
@@ -599,6 +604,10 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{kind}/template_range_deg", []).append(float(np.ptp(template_deg)))
             out.setdefault(f"{kind}/template_rmse_deg", []).append(
                 float(np.sqrt(np.mean((template_deg - true_deg) ** 2))))
+        if len(gtref_deg) == len(true_deg):
+            out.setdefault(f"{kind}/gtref_range_deg", []).append(float(np.ptp(gtref_deg)))
+            out.setdefault(f"{kind}/gtref_rmse_deg", []).append(
+                float(np.sqrt(np.mean((gtref_deg - true_deg) ** 2))))
         if np.isfinite(box_oversize):
             out.setdefault(f"{kind}/box_oversize", []).append(float(box_oversize))
         if len(primmed_deg) == len(true_deg):
@@ -706,6 +715,88 @@ def _asset_points(query: str) -> np.ndarray | None:
     pts = load_points(Path(root) / hits[0][0].path, samples=3000) if hits else None
     _ASSET_CACHE[query] = pts
     return pts
+
+
+_GT_REF_CACHE: dict = {}
+
+
+def _gt_asset_refs() -> dict:
+    """当前片段里每个真值节点挑的是哪个资产（`geom.ref`）。
+
+    数据集用 `--use-assets` 从同一个库搭之后，真值资产 id 是已知的，于是可以问一个
+    之前问不了的问题：**假如检索全对，模板路线能不能成立**。
+
+    这是个只预言「检索」不预言「位姿」的预言机——比 `_template_rotation_deg`
+    那个用真值位姿拼模型的弱得多，也更接近「把点一修好之后能拿到什么」。
+    现在管线的检索是 0/71 全错，所以 `asset_range_deg` 那一臂量的是**拿错的网格
+    当模板**，回答不了这个问题。
+    """
+    clip_dir = globals().get("CURRENT_CLIP_DIR")
+    if clip_dir is None:
+        return {}
+    key = str(clip_dir)
+    if key in _GT_REF_CACHE:
+        return _GT_REF_CACHE[key]
+    out: dict = {}
+    try:
+        program = json.loads((Path(clip_dir) / "program.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _GT_REF_CACHE[key] = out
+        return out
+    for node in (program.get("objects") or []) + (program.get("static") or []):
+        geom = node.get("geom") or {}
+        if geom.get("kind") in ("asset", "generated") and geom.get("ref"):
+            out[str(node.get("id"))] = str(geom["ref"])
+    _GT_REF_CACHE[key] = out
+    return out
+
+
+def _asset_points_by_id(asset_id: str) -> np.ndarray | None:
+    """按**资产 id**取网格点云（检索那条是按类名查的，会查错）。"""
+    if not asset_id:
+        return None
+    key = f"__id__{asset_id}"
+    if key in _ASSET_CACHE:
+        return _ASSET_CACHE[key]
+    from gwm.assets.library import library_root, load_catalog
+    from gwm.assets.mesh import load_points
+
+    root = library_root()
+    if root is None:
+        _ASSET_CACHE[key] = None; return None
+    catalog = _ASSET_CACHE.setdefault("__catalog__", load_catalog(root))
+    match = next((a for a in catalog if a.id == asset_id), None)
+    pts = load_points(Path(root) / match.path, samples=3000) if match else None
+    _ASSET_CACHE[key] = pts
+    return pts
+
+
+def _template_rotation_from_points(clouds: list, template) -> np.ndarray:
+    """把给定模板缩到**逐帧包围盒中位对角线**上，逐帧暖启动配准，返回累积转角序列。
+
+    缩到逐帧中位而不是并帧对角线：并帧点云随视角扫动，实测大 1.89 倍，而受控扫描
+    说模板相对点云大 1.2 倍就越过对照、1.3 倍崩掉。这个坑踩过一次
+    （资产模板 RMSE 80.92°，改掉之后 32.54°）。
+    """
+    from gwm.perception.registration import icp
+    if template is None or not clouds:
+        return np.array([])
+    per_frame = [np.linalg.norm(np.asarray(c, float).max(0) - np.asarray(c, float).min(0))
+                 for c in clouds if len(np.asarray(c, float)) >= 10]
+    tpl_diag = float(np.linalg.norm(template.max(0) - template.min(0)))
+    if not per_frame or tpl_diag <= 1e-9:
+        return np.array([])
+    obs_diag = float(np.median(per_frame))
+    model = (template - template.mean(0)) * (obs_diag / tpl_diag)
+    warm_R, warm_t = np.eye(3), np.zeros(3)
+    out = []
+    for cloud in clouds:
+        moved = cloud @ warm_R.T + warm_t
+        step = icp(moved, model)
+        rot = np.asarray(step["rotation"], float)
+        warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
+        out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
+    return np.asarray(out)
 
 
 def _fitted_primitive_points(clouds: list, n: int = 4000, seed: int = 0) -> np.ndarray | None:
