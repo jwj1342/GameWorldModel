@@ -74,34 +74,29 @@ def _geom(rng: random.Random, shape: str, distinct_xz: bool = False) -> tuple[di
 # 真值改成从**我们检索的同一个资产库**里挑，两件事一起修好：资产 id 可以直接比对，
 # 类名从资产名来所以和形状天然绑定。
 #
-# 默认关。打开要给 `assets.library`，库不在就自动退回基本体，生成照常跑。
+# 默认关。打开要给 `assets.library`；直接读取所选静态GLB的XYZ边界，不依赖排序比例缓存。
 
-_ASSET_POOL: list | None = None
+_ASSET_POOL: dict = {}
 
 
 def _asset_pool(cfg: dict | None = None) -> list:
-    """(资产 id, 可读类名, 边长比例) 的列表。没有库就是空的。"""
+    """(资产 id, 可读类名, 文件路径)；按库身份缓存，不使用排序比例生成几何。"""
     global _ASSET_POOL
-    if _ASSET_POOL is None:
-        _ASSET_POOL = []
+    from ..assets.library import library_root, load_catalog
+    root = library_root(cfg or {})
+    if root is None:
+        return []
+    root = root.resolve()
+    catalog_file = root / "catalog.json"
+    stamp = catalog_file.stat() if catalog_file.is_file() else root.stat()
+    key = (str(root), stamp.st_mtime_ns, stamp.st_size)
+    if key not in _ASSET_POOL:
+        pool = []
         try:
-            import json as _json
-            import os
-            from pathlib import Path as _Path
-            from ..assets.library import library_root, load_catalog
-            root = library_root(cfg or {})
-            shapes_path = ((cfg or {}).get("assets") or {}).get("shape_cache") or \
-                os.environ.get("GWM_ASSET_SHAPES")
-            shapes = {}
-            if shapes_path:
-                try:
-                    shapes = _json.loads(_Path(shapes_path).read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    shapes = {}
             if root is not None:
                 for a in load_catalog(root):
-                    r = shapes.get(a.id)
-                    if isinstance(r, list) and len(r) == 3:
+                    asset_path = (root / a.path).resolve()
+                    if asset_path.is_relative_to(root) and asset_path.is_file():
                         # 类名取文件名，把分隔符换成空格——它会成为真值的 class，
                         # 检索那一侧拿到的就是这个词，所以名字和网格天然绑定。
                         name = str(a.name).replace("-", " ").replace("_", " ").strip().lower()
@@ -112,10 +107,11 @@ def _asset_pool(cfg: dict | None = None) -> list:
                         if len(name) > 40:
                             name = name[:40].rsplit(" ", 1)[0] or name[:40]
                         if name:
-                            _ASSET_POOL.append((a.id, name, r))
-        except Exception:                      # noqa: BLE001 — 没有库不是错误
-            _ASSET_POOL = []
-    return _ASSET_POOL
+                            pool.append((a.id, name, str(asset_path)))
+        except (OSError, ValueError, TypeError, KeyError):
+            pool = []
+        _ASSET_POOL[key] = pool
+    return _ASSET_POOL[key]
 
 
 def _asset_geom(rng: random.Random, cfg: dict | None = None):
@@ -127,11 +123,15 @@ def _asset_geom(rng: random.Random, cfg: dict | None = None):
     pool = _asset_pool(cfg)
     if not pool:
         return None
-    asset_id, name, ratios = rng.choice(pool)
+    from ..assets.mesh import load_extent
+    asset_id, name, path = rng.choice(pool)
+    dimensions = load_extent(path)
+    if dimensions is None:
+        return None
     longest = round(rng.uniform(0.5, 2.2), 3)          # 和 _geom 的盒子同量级
-    ext = [round(longest * r, 3) for r in ratios]
-    rng.shuffle(ext)                                   # 最长边不总是 x
-    ext = [max(v, 0.05) for v in ext]
+    # Scale every axis equally, retaining the mesh's XYZ order. Shuffling the
+    # dimensions does not rotate the mesh, and per-axis clamps distort its box.
+    ext = (dimensions * (longest / float(dimensions.max()))).tolist()
     # schema 的 assetGeom 要求 kind/query/extent 三样齐全（ref 可选）。
     # 第一版只给了 kind/ref/extent，12 条片段全部校验失败、写出 0 个程序。
     # query 给资产的可读名字——真值里它就是「这个物体叫什么」，

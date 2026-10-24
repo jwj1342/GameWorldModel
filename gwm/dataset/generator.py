@@ -41,7 +41,8 @@ class SceneSpec:
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
     # 真值场景用资产库搭（见 behavior._asset_geom）。给配置字典，里面要有
-    # assets.library 和 assets.shape_cache；留空或库不可用就退回基本体，行为不变。
+    # assets.library；尺寸来自所选GLB的真实XYZ边界，不使用排序形状缓存。
+    # 留空、库不可用或所选静态几何不支持时，沿用基本体回退。
     #
     # 为什么需要：现在的真值是「随机名字 + 独立挑的基本体」，于是「该挑哪个资产」
     # 没有标准答案（检索改进测不出来——实测换掉 64% 的资产，所有指标逐字节不动），

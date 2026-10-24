@@ -206,6 +206,10 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         if shape_weight > 0 and shapes:
             obs_ratio = observed_edge_ratios(obj)
             if obs_ratio:
+                # A shape score cannot make a text-ineligible asset acceptable.
+                # Rank within the eligible set so a low-text first hit cannot
+                # hide a valid hit and turn the decision into a fallback.
+                hits = [(a, score) for a, score in hits if score >= min_score]
                 hits = shape_rerank(hits, obs_ratio, shapes, weight=shape_weight)
                 record["shape_reranked"] = True
                 record["observed_ratio"] = [round(v, 3) for v in obs_ratio]
