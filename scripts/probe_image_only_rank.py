@@ -212,6 +212,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--gt-root", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
+    ap.add_argument("--pipeline-pool", action="store_true",
+                    help="额外量**管线真实候选池**（retrieve 的 text+image 融合）的覆盖率")
     ap.add_argument("--frames", type=int, default=1,
                     help="每个物体用几帧做检索（>1 就对帧取分数最大值再排序）")
     ap.add_argument("--index", default="", help="换一个索引 npz（比如灰度那个）")
@@ -269,6 +271,8 @@ def main(argv: list[str]) -> int:
     n_crops = 0
     chosen_ranks: list[int] = []
     size_rows: list[tuple[float, int]] = []   # (裁剪图短边像素, 名次)
+    pool_hit: list[int] = []                  # 管线真实候选池覆盖到没有
+    pool_wp: list[int] = []                   # 同上，只算良定义节点
     wellposed_ranks: list[int] = []
     illposed_ranks: list[int] = []
     tint_ranks: list[int] = []
@@ -447,6 +451,24 @@ def main(argv: list[str]) -> int:
                     mismatched += 1
 
             order = [aid for aid, _s in sorted(scores.items(), key=lambda kv: -kv[1])]
+            # **管线真实候选池的覆盖率。** 上面那个覆盖率只用图像分，而管线的候选
+            # 是 retrieve() 做的 text+image 融合。两者差多少直接决定分解式里的
+            # 条件准确率是不是 0.86——如果真实池覆盖率高得多，那条件准确率就低得多，
+            # 「判据不是瓶颈」这个结论就要收回。所以必须按管线那条路径量一遍。
+            if a.pipeline_pool:
+                from gwm.assets.retrieve import retrieve as _retrieve
+                _q = str(obj.get("class_guess") or "").strip() or "object"
+                _settings = (cfg.get("assets") or {})
+                _hits = _retrieve(_q, catalog, k=a.admit, image_scores=scores,
+                                  image_weight=float(_settings.get("image_weight", 0.6)),
+                                  image_admit=int(_settings.get("image_admit", 0) or a.admit))
+                _ids = {h[0].id for h in _hits}
+                _ok = 1 if (_ids & wanted) else 0
+                pool_hit.append(_ok)
+                _wr, _wo = refnodes_by_clip.get(clip, (set(), set()))
+                if str(obj["id"]) in _wr:
+                    pool_wp.append(_ok)
+
             r = best_rank(order, wanted)
             if r is not None:
                 real_ranks.append(r)
@@ -609,6 +631,15 @@ def main(argv: list[str]) -> int:
             print(f"  注意这一档**循环**（数据集等比缩放，真值 extent 的比例就是资产原生比例），"
                   f"所以 {o:.3f} 不是「几何的天花板」，是**描述子本身的天花板**："
                   f"给了精确比例也只能覆盖这么多。修几何顶不破它。")
+
+    if pool_hit:
+        print(f"\n########## 管线真实候选池（retrieve 的 text+image 融合） ##########")
+        print(f"  全部节点   覆盖 {sum(pool_hit)}/{len(pool_hit)} = {sum(pool_hit)/len(pool_hit):.3f}")
+        if pool_wp:
+            _c = sum(pool_wp) / len(pool_wp)
+            print(f"  **良定义节点 覆盖 {sum(pool_wp)}/{len(pool_wp)} = {_c:.3f}**")
+            print(f"  端到端挑对率 0.209 ÷ 这个覆盖率 = 条件准确率 {0.209/max(_c,1e-9):.2f}")
+            print(f"  （只用图像分时覆盖 0.243、条件准确率 ≤0.86。这里才是管线的真实口径）")
 
     if wellposed_ranks or illposed_ranks:
         _tot = len(wellposed_ranks) + len(illposed_ranks)
