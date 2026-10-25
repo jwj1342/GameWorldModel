@@ -511,11 +511,11 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         # 真值分割那一档的 class_guess 来自真值程序，所以文字检索等于拿着答案
         # 去找答案——候选池覆盖率 1.000 是这么来的，真实系统拿不到。
         # 设成一个通用词，候选池就只由图像分决定，不再循环。
-        if force_query:
+        _forced = bool(force_query)
+        if _forced:
             query = str(force_query)
-            record["query_source"] = "forced"
         record = {"id": node["id"], "query": query, "image_used": False}
-        record["query_source"] = "program"
+        record["query_source"] = "forced" if _forced else "program"
 
         image_scores = None
         crop = None            # 只有走到图像那一路才会赋值；裁剪图命名也要用它
