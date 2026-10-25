@@ -758,6 +758,22 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
 
+        # **沿视线反压扁之后再配准**——动观测，不是换判据。
+        # 位姿这一级所有判据都失败于同一根因：相机在动、逐帧采到的表面在变。
+        # 而那个畸变量过了、有方向（沿视线压到 0.526），而且**方向逐帧不同**，
+        # 拼起来正好长得像物体在转。沿各自的视线各自拉回来，这个不一致该被消掉。
+        if len(cam_list) == len(clouds):
+            for _f in (1.0, 1.5, 1.9):
+                _uc = _unflatten_along_ray(clouds, cam_list, factor=_f)
+                _ut = track_rigid(_uc)
+                _uo = _ut.get("orientations") or []
+                if len(_uo) != len(clouds):
+                    continue
+                _ud = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
+                                  for m in _uo])
+                _tag = f"rayunflat{int(_f * 10):02d}"
+                out.setdefault(f"{_tag}/{kind}/range_deg", []).append(float(np.ptp(_ud)))
+
         # **二次配准：用管线实际挑中的资产当模板，按文字分闸。**
         #
         # 模板路线一直卡在一个算术上：正确网格把静止/转动判别比从 2.60 提到 4.31，
@@ -2600,6 +2616,43 @@ def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
     RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
     """
     return _template_rotation_from_points(clouds, _asset_points(cls))
+
+
+def _unflatten_along_ray(clouds: list, cam_positions: list, factor: float = 1.9) -> list:
+    """**沿每一帧自己的相机视线**把点云拉回来，再去配准。
+
+    这是「换判据」之外的另一条路：**动观测本身**。位姿这一级试过的判据
+    （自由 ICP 互配、盒子模板、资产网格模板、真值位姿预言机、轮廓位姿、
+    光流对应、可见性裁剪、运动模型拟合）全都失败于同一个根因——相机在动，
+    逐帧采到的表面本身在变，于是「物体在转」永远比「没动」更能解释观测。
+    换算法治不了这个，因为错在输入。
+
+    而那个畸变是**量过的、有方向的**：VGGT 沿相机视线把物体压扁，最短轴只剩
+    正确比例的 **0.526**（所以拉回来的系数 ≈ 1/0.526 ≈ 1.9）。关键是**视线方向
+    逐帧不同**——相机在转，所以每一帧被压扁的方向不一样，拼起来就像物体在转。
+    沿**各自的视线**各自拉回来，这个逐帧不一致就该被消掉。
+
+    和既有的 `unflatten`（在 `_residual_pick_rate` 里）不是一回事：那条用 **PCA
+    最短主轴**，而最短主轴会把「被 VGGT 压扁」和「物体本来就扁」（地砖、板子）
+    混在一起。视线方向是外部已知量，不从被测数据里估，所以不会混。
+    """
+    if len(cam_positions) != len(clouds):
+        return clouds
+    out = []
+    for cloud, cam in zip(clouds, cam_positions):
+        q = np.asarray(cloud, float)
+        if len(q) < 10:
+            out.append(q); continue
+        c = q.mean(0)
+        ray = np.asarray(c, float) - np.asarray(cam, float)
+        n = float(np.linalg.norm(ray))
+        if n <= 1e-9:
+            out.append(q); continue
+        ray = ray / n
+        centred = q - c
+        along = centred @ ray                      # 沿视线的分量
+        out.append(centred + np.outer(along * (factor - 1.0), ray) + c)
+    return out
 
 
 def _gt_poses(_run: Path) -> dict:
