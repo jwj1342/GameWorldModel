@@ -167,6 +167,8 @@ def main() -> int:
                          "不给就用配置里的 synthesis.separate_seconds")
     ap.add_argument("--no-image-retrieval", action="store_true",
                     help="只用文字检索，用来和带图像检索的结果做对照")
+    ap.add_argument("--no-namer", action="store_true",
+                    help="不调 VLM 命名器，用写死的默认短语（对照用）")
     a = ap.parse_args()
 
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *a.config]
@@ -177,7 +179,21 @@ def main() -> int:
     phrases = [p.strip() for p in a.phrases.split(",") if p.strip()] or None
 
     t0 = time.time()
-    evidence = run_perception(a.video, a.clip, out / "perception", cfg, phrases=phrases)
+    # **命名器要接上。** 之前这里不传 client，于是 run_perception 里
+    # `if client is not None` 那条分支直接跳过，落到写死的 DEFAULT_PHRASES
+    # （toy train / cardboard box / cup / bottle…，来自项目早期的玩具火车视频）。
+    # 而今天量到：真值类名当检测短语能做到命中 14.9%、同套件 0.553，而默认词 0/69、
+    # 资产库高频词 0/77、闭环检索名 0/76、网格检索名 0/50——**管用的是逐物体的
+    # 具体名字，而能产出它的只有看得懂「哪里是物体」的 VLM 命名器**。
+    _client = None
+    if not phrases and not a.no_namer:
+        try:
+            from gwm.synthesis.vlm import make_client
+            _client = make_client(cfg)
+        except Exception as error:                 # 没端点就退回默认词，别让整条挂掉
+            print(f"命名器不可用（{type(error).__name__}），退回默认短语", flush=True)
+    evidence = run_perception(a.video, a.clip, out / "perception", cfg,
+                              phrases=phrases, client=_client)
     timings = {"perception_s": round(time.time() - t0, 1)}
     print(f"感知: {len(evidence['objects'])} 个物体, {timings['perception_s']}s", flush=True)
 
