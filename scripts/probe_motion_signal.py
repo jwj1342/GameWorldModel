@@ -20,6 +20,7 @@
 from __future__ import annotations
 import argparse
 import json
+import math
 import random
 import statistics
 import sys
@@ -538,6 +539,10 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
                 -1.0, 1.0)))), 3),
             "gated_axis_consistency": round(float((spec_g.get("evidence") or {}).get("axis_consistency", 0.0)), 3) if spec_g else None,
             "gated_straightness": round(float((spec_g.get("evidence") or {}).get("straightness", 0.0)), 3) if spec_g else None,
+            # **解算器之外的判据**：掩码主轴在像平面内转了多少。
+            # 既有三个判据全读解出的轨迹，而解算器会为所有物体制造像样的转动，
+            # 所以它们继承同一个假象。这一个只用掩码。
+            **(_mask_axis_turn(per_frame, sorted(per_frame)) or {}),
         })
         fired = 1.0 if spec else 0.0
         if kind in joint_types:
@@ -2745,6 +2750,56 @@ def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
     RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
     """
     return _template_rotation_from_points(clouds, _asset_points(cls))
+
+
+def _mask_axis_turn(per_frame: dict, frames: list) -> dict | None:
+    """**不经过位姿求解**，直接从掩码判断有没有转动。
+
+    为什么需要一个解算器之外的判据。关节推断用的三个量——`axis_consistency`、
+    `total_rotation_deg`、`hinge_fit_ratio`——**全都算在「解出来的轨迹」上**，
+    而实测解算器会为**所有**物体制造干净、像模像样的转动：开了转动闸之后新增
+    18 个假阳，轴一致性中位 0.907，其中真关节只有 2 个。`hinge_fit_ratio`
+    （比模型拟合优度，本来就是为绕开阈值设计的）同样分不开，真关节 0.606
+    对非关节 0.657，分布几乎重叠。**这是信息源问题，不是阈值问题。**
+
+    所以换一个**不读解算器输出**的量：掩码的**主轴方向**。二阶矩给出每帧掩码
+    在**像平面内**的朝向，物体真转起来这个角会连续变，纯平移不会。
+    它只用掩码，不用深度、不用相机、不用配准——和被检测的那个假象无关。
+
+    返回总转角（把逐帧角差累加，处理 180° 周期）和逐帧角差的一致性。
+    """
+    angs = []
+    for f in frames:
+        m = per_frame.get(f)
+        if m is None:
+            continue
+        a = np.asarray(m).astype(bool)
+        ys, xs = np.nonzero(a)
+        if len(xs) < 30:
+            continue
+        x0, y0 = xs.mean(), ys.mean()
+        dx, dy = xs - x0, ys - y0
+        cxx, cyy, cxy = (dx * dx).mean(), (dy * dy).mean(), (dx * dy).mean()
+        # 二阶矩的主轴角，周期 180°
+        angs.append(0.5 * math.atan2(2.0 * cxy, cxx - cyy))
+    if len(angs) < 4:
+        return None
+    # 逐帧角差，绕回到 (-90°, 90°]
+    steps = []
+    for i in range(1, len(angs)):
+        d = math.degrees(angs[i] - angs[i - 1])
+        while d > 90.0:
+            d -= 180.0
+        while d <= -90.0:
+            d += 180.0
+        steps.append(d)
+    total = abs(sum(steps))
+    spread = float(np.std(steps)) if len(steps) > 1 else 0.0
+    # 一致性：净转角相对总绝对变化的比例。真转动单向累积，抖动会互相抵消。
+    gross = sum(abs(x) for x in steps)
+    coherence = (total / gross) if gross > 1e-9 else 0.0
+    return {"mask_turn_deg": float(total), "mask_turn_spread": float(spread),
+            "mask_turn_coherence": float(coherence)}
 
 
 def _smooth_centres(clouds: list, win: int = 5) -> list:
