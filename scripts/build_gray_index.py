@@ -30,6 +30,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--rgb", action="store_true", help="建彩色的（对照用）")
+    ap.add_argument("--downsample", type=int, default=0,
+                    help="先把缩略图降到短边 N 像素再放回原尺寸，模拟视频里物体的真实分辨率")
     ap.add_argument("--silhouette", action="store_true",
                     help="建**轮廓**索引：黑底白形，两侧都只剩形状")
     a = ap.parse_args(argv)
@@ -38,7 +40,7 @@ def main(argv: list[str]) -> int:
     weights = Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"]
     info = build_index(a.thumbs, weights, a.out,
                        gray=(not a.rgb and not a.silhouette),
-                       silhouette=a.silhouette)
+                       silhouette=a.silhouette, downsample=a.downsample)
     print(json.dumps(info, ensure_ascii=False))
     return 0
 

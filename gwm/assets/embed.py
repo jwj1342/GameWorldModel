@@ -90,7 +90,8 @@ def _to_silhouette(img):
 
 
 def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str | Path,
-                batch: int = 32, gray: bool = False, silhouette: bool = False) -> dict:
+                batch: int = 32, gray: bool = False, silhouette: bool = False,
+                downsample: int = 0) -> dict:
     """读缩略图目录（thumbnails.mjs 的产物），嵌入后存成一个 npz。
 
     `gray=True` 时两侧都转灰度再嵌入。为什么要这个开关：这个数据集**给每个物体
@@ -122,6 +123,16 @@ def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str |
             if not file.is_file():
                 continue
             img = Image.open(file).convert("RGB")
+            if downsample > 0:
+                # **把缩略图降到视频里物体的真实尺寸再嵌入。**
+                # 实测视频里物体的裁剪图短边中位只有 16px，而缩略图是 160px。
+                # 留一视角自匹配拿 160px 对 160px 得到 0.990，它**刻意回避了
+                # 分辨率这个变量**。降采样之后再做留一视角，如果塌到 0.28 附近，
+                # 那就说明覆盖率 0.284 基本全是分辨率造成的，和颜色关系不大。
+                w, h = img.size
+                k = downsample / float(min(w, h))
+                img = img.resize((max(1, int(w * k)), max(1, int(h * k))), Image.BILINEAR)
+                img = img.resize((w, h), Image.BICUBIC)
             if silhouette:
                 # 两侧都只剩形状：数据集给物体重新上色、还改 roughness/metalness/
                 # 自发光，外观这个通道在这个数据集上天然失真。轮廓没有外观。
@@ -136,6 +147,6 @@ def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str |
     index = AssetIndex(np.array(ids, dtype=object).astype("U"),
                        np.concatenate(vectors, axis=0) if vectors else np.zeros((0, 1), dtype=np.float32))
     index.save(out_path)
-    return {"assets": len(manifest["assets"]), "views_embedded": len(ids), "gray": gray, "silhouette": silhouette,
+    return {"assets": len(manifest["assets"]), "views_embedded": len(ids), "gray": gray, "silhouette": silhouette, "downsample": downsample,
             "dim": int(index.vectors.shape[1]) if index.vectors.size else 0,
             "out": str(out_path)}
