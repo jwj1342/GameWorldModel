@@ -260,11 +260,14 @@ def main(argv: list[str]) -> int:
                             shape_null_ranks.append(srn)
                     # 并集：同样的预算 admit，一半给图像一半给形状
                     half = max(1, a.admit // 2)
-                    if r is not None and sr is not None:
+                    # 形状这条腿取**今天能拿到的最好一档**（压扁校正后），
+                    # 不是未校正那一档——拿最弱的变体去算并集会低估两条腿的互补性。
+                    sr_best = sfr if sfr is not None else sr
+                    if r is not None and sr_best is not None:
                         union_n += 1
                         in_img = r <= half
                         union_img += 1 if in_img else 0
-                        if sr <= half and not in_img:
+                        if sr_best <= half and not in_img:
                             union_shape_saves += 1
 
 
@@ -305,8 +308,23 @@ def main(argv: list[str]) -> int:
         if oracle_ranks:
             show("预言机·真值 extent", oracle_ranks,
                  sum(1 for x in oracle_ranks if x <= a.admit))
-        print("  零假设和真实打平 → 形状里没信号；"
-              "预言机远高于真实 → 是 VGGT 压扁吃掉的，修几何有用")
+        # 结论要按数说，不能无条件印——这行以前是写死的，而实测真实
+        # (1329) 和零假设 (2081) 根本没打平，写死的那句话是错的。
+        if shape_ranks and shape_null_ranks:
+            mr = statistics.median(shape_ranks); mn = statistics.median(shape_null_ranks)
+            gap = mn - mr
+            print(f"  真集合比零假设靠前 {gap:+.0f} 名"
+                  + ("（差得不明显，形状里基本没信号）" if gap < 200 else
+                     "（有分离，形状里有信号，只是进不了前几十名）"))
+        if oracle_ranks and shape_ranks:
+            o = sum(1 for x in oracle_ranks if x <= a.admit) / len(oracle_ranks)
+            r_ = sum(1 for x in shape_ranks if x <= a.admit) / len(shape_ranks)
+            f_ = (sum(1 for x in shape_fix_ranks if x <= a.admit) / len(shape_fix_ranks)
+                  if shape_fix_ranks else float("nan"))
+            print(f"  天花板 {o:.3f}（真值 extent） vs 现状 {r_:.3f} / 校正后 {f_:.3f}")
+            if o > 2 * max(r_, 0.001):
+                print(f"  → 形状这条腿的信号是**真的**，差距全在几何；"
+                      f"把几何修到位，光靠边长比例就能覆盖 {o:.1%}")
 
     if union_n:
         half = max(1, a.admit // 2)
@@ -317,8 +335,11 @@ def main(argv: list[str]) -> int:
         print(f"  形状额外救回来的    {union_shape_saves}/{union_n} = {union_shape_saves/union_n:.3f}")
         print(f"  **并集覆盖 {both:.3f}**（同样 {a.admit} 个候选的预算）")
         if union_shape_saves == 0:
-            print("  形状一个也没救回来 → 两条腿在同一批物体上失败，"
-                  "候选生成这条路别再修了")
+            print(f"  形状一个也没救回来。注意这只说明**当前几何下**两条腿一起失败；"
+                  f"真值 extent 那一档的覆盖率才是形状的天花板，别混为一谈")
+        else:
+            print(f"  两条腿在不同物体上失败 → 候选生成该用两条腿，"
+                  f"而且这是同预算下的净赚")
     print(f"""
 怎么读：
   进前 {a.admit} 名的比例是关键——那正是「图像进候选{a.admit}」能救回来的上限。
