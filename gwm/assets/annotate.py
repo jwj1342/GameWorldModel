@@ -139,7 +139,7 @@ def shape_rerank(hits: list, observed: list[float] | None, shapes: dict,
     return [(a, s) for a, s, _d in scored]
 
 
-def residual_pick(clouds: list, candidates: list, root, top: int = 0,
+def residual_pick(clouds: list, candidates: list, root, top: int = 0, fuse: bool = False,
                   n_views: int = 7) -> tuple:
     """**用配准残差从候选里挑**：把每个候选网格缩到观测点云的尺度，ICP 配一次，
     取残差最小的。返回 (资产, 残差) 或 (None, None)。
@@ -192,6 +192,20 @@ def residual_pick(clouds: list, candidates: list, root, top: int = 0,
     else:
         picks = clouds
     queries = [_np.asarray(c, float) for c in picks if len(_np.asarray(c, float)) >= 30]
+    # **把多帧并成一个模型再比，而不是逐帧各比各的。**
+    #
+    # 为什么。实测非循环池（干扰项是**图像近邻**）下，残差判据等于随机
+    # （0.018 对池内随机 0.0184），**而且换成真值几何也一样 0.018**——
+    # 几何质量不是原因。原因是：**逐帧的点云只有那个视角看得见的那片表面**，
+    # 而「图像近邻」按定义就是**可见表面长得像**的那些资产。
+    # 区分它们的信息在**别的视角才看得见的部分**，只有并起来的模型里才有。
+    #
+    # 这也解释了真值几何为什么救不了：完美的深度给的仍然是**部分**表面。
+    #
+    # 点云已经在世界坐标系里（to_world 过），静止物体直接并起来就是融合后的模型。
+    # 会动的物体会被抹开，所以这是个开关而不是默认——先验有没有用。
+    if fuse and len(queries) > 1:
+        queries = [_np.vstack(queries)]
     if not queries:
         return None, None
     best, best_rmse = None, float("inf")
@@ -486,7 +500,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   mask_largest_component: bool = False,
                   crop_namer=None, three_way_rrf: bool = False,
                   gray_query: bool = False, silhouette_views: int = 3,
-                  force_query: str = "",
+                  force_query: str = "", residual_fuse: bool = False,
                   silhouette_agg: str = "median",
                   silhouette_yaw: int = 8) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
@@ -610,7 +624,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         _cloud = (clouds or {}).get(obj["id"]) if obj else None
         if silhouette_top <= 0 and residual_top > 0 and _cloud and root is not None and hits:
             _pick, _rmse = residual_pick(_cloud, [a for a, _s in hits], root,
-                                         top=residual_top)
+                                         top=residual_top, fuse=residual_fuse)
             if _pick is not None:
                 _by_id = {a.id: s for a, s in hits}
                 record["residual_rmse"] = round(float(_rmse), 5)
