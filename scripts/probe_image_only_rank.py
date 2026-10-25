@@ -85,6 +85,32 @@ def gt_refs_by_tint(program: dict) -> tuple[set[str], set[str]]:
     return tinted, native
 
 
+def gt_nodes_with_ref(program: dict) -> tuple[set[str], set[str]]:
+    """真值节点 id 分两堆：**有资产真值的**和**没有的**。
+
+    为什么要分。实测 assetgt60：`obj_*` 290 个**全部**有 ref，而 `rail_*`(249)、
+    `block_*`(60)、`ground_*`(60) **一个都没有**——真值明说结构件是基本体，
+    不是资产，**没有「正确答案」可挑**。
+
+    但管线在真值分割这一档会拿到真值的掩码和 id（结构件也在里面），然后把它们
+    统统当成 asset 节点送进检索。实测 273 个决策里 **151 个（55.3%）是结构件，
+    命中率恒为 0**——那不是检索失败，是**根本不该做的决策**。
+
+    只有真值分割这一档 id 能对上（id 来自真值程序）。神经分割那档对不上，
+    这时两堆的重叠会很小，调用方应当据此跳过这个分桶。
+    """
+    with_ref, without = set(), set()
+    for n in (program.get("objects") or []) + (program.get("static") or []):
+        nid = str(n.get("id") or "")
+        if not nid:
+            continue
+        if ((n.get("geom") or {}).get("ref") or "").strip():
+            with_ref.add(nid)
+        else:
+            without.add(nid)
+    return with_ref, without
+
+
 def best_rank(order: list[str], wanted: set[str]) -> int | None:
     """`order` 是按图像分降序的全库 id。返回 wanted 里最靠前那个的名次（1 起）。"""
     for i, aid in enumerate(order):
@@ -223,6 +249,7 @@ def main(argv: list[str]) -> int:
     # 先把每条片段的真值集合读齐，零假设要从别的片段里抽
     gt_by_clip: dict[str, set[str]] = {}
     tint_by_clip: dict[str, tuple[set[str], set[str]]] = {}
+    refnodes_by_clip: dict[str, tuple[set[str], set[str]]] = {}
     for clip_dir in sorted(Path(a.report).glob("*test_*")):
         clip = clip_dir.name.split("test_")[-1]
         p = Path(a.gt_root) / f"test_{clip}" / "program.json"
@@ -230,6 +257,7 @@ def main(argv: list[str]) -> int:
             _pg = json.loads(p.read_text(encoding="utf-8"))
             gt_by_clip[clip] = gt_refs(_pg)
             tint_by_clip[clip] = gt_refs_by_tint(_pg)
+            refnodes_by_clip[clip] = gt_nodes_with_ref(_pg)
 
     rng = random.Random(20261023)
     real_ranks: list[int] = []
@@ -239,6 +267,8 @@ def main(argv: list[str]) -> int:
     n_crops = 0
     chosen_ranks: list[int] = []
     size_rows: list[tuple[float, int]] = []   # (裁剪图短边像素, 名次)
+    wellposed_ranks: list[int] = []
+    illposed_ranks: list[int] = []
     tint_ranks: list[int] = []
     native_ranks: list[int] = []
     shape_ranks: list[int] = []
@@ -355,6 +385,13 @@ def main(argv: list[str]) -> int:
                 real_ranks.append(r)
                 in_topn += 1 if r <= a.admit else 0
                 size_rows.append((_short, r))
+                # 这个节点在真值里到底有没有资产答案
+                _wr, _wo = refnodes_by_clip.get(clip, (set(), set()))
+                _oid = str(obj["id"])
+                if _oid in _wr:
+                    wellposed_ranks.append(r)
+                elif _oid in _wo:
+                    illposed_ranks.append(r)
             if others:
                 # 零假设的集合**大小匹配**：别用一个更大的集合去比，名次天然会靠前
                 donor = gt_by_clip[rng.choice(others)]
@@ -503,6 +540,19 @@ def main(argv: list[str]) -> int:
             print(f"  注意这一档**循环**（数据集等比缩放，真值 extent 的比例就是资产原生比例），"
                   f"所以 {o:.3f} 不是「几何的天花板」，是**描述子本身的天花板**："
                   f"给了精确比例也只能覆盖这么多。修几何顶不破它。")
+
+    if wellposed_ranks or illposed_ranks:
+        _tot = len(wellposed_ranks) + len(illposed_ranks)
+        print(f"\n########## 这个节点在真值里有没有资产答案 ##########")
+        print(f"  能对上真值 id 的 {_tot} 个（对不上说明不是真值分割那一档，别读这节）")
+        if wellposed_ranks:
+            show("有资产真值（obj_*）", wellposed_ranks,
+                 sum(1 for x in wellposed_ranks if x <= a.admit))
+        if illposed_ranks:
+            show("真值说是基本体（rail/block/ground）", illposed_ranks,
+                 sum(1 for x in illposed_ranks if x <= a.admit))
+            print(f"  后者占 {len(illposed_ranks)/max(_tot,1):.1%}——**真值里没有正确答案**，"
+                  f"它们进分母只会把覆盖率稀释掉")
 
     if len(size_rows) >= 20:
         print(f"\n########## 按裁剪图短边分桶（分辨率是不是主因） ##########")
