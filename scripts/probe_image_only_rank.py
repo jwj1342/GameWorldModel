@@ -438,8 +438,10 @@ def main(argv: list[str]) -> int:
             n_crops += 1
 
             rec = recorded.get(str(obj["id"]))
-            # 换了索引就别和 rebuild.json 里记的彩色分数对账——那本来就该对不上
-            if rec is not None and not a.index:
+            # 换了索引、或者多帧聚合，都别和 rebuild.json 对账——
+            # 那条记录是**单帧**跑出来的 image_score_best，多帧取 max 之后
+            # 本来就该不一样（实测 363 个里 343 个对不上，自检正确地拦了下来）。
+            if rec is not None and not a.index and a.frames <= 1:
                 checked += 1
                 if abs(float(max(scores.values())) - float(rec["image_score_best"])) > 1e-3:
                     mismatched += 1
@@ -542,8 +544,10 @@ def main(argv: list[str]) -> int:
 
 
     print(f"\n自检：对上官方记录的裁剪图 {checked} 个，其中分数对不上的 {mismatched} 个")
-    if a.index:
-        print("（换了索引，跳过和 rebuild.json 的分数对账）")
+    if a.index or a.frames > 1:
+        print(f"（{'换了索引' if a.index else ''}{'、' if a.index and a.frames > 1 else ''}"
+              f"{'多帧聚合' if a.frames > 1 else ''}，跳过和 rebuild.json 的分数对账；"
+              f"替代自检是：单帧那一臂必须复现出已知的 0.243）")
     elif checked == 0 or mismatched:
         print("**自检没过，不出数。** 说明这里跑的不是官方那条路径。")
         return 1
