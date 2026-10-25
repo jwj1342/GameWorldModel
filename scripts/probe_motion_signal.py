@@ -470,6 +470,14 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
             continue
         tracked = track_rigid(clouds)
         spec = infer_articulation(tracked)
+        # **同一批点云再跑一遍「开了转动闸」的版本。**
+        # 关节推断的铰链门槛是 8°，而 ICP 在部分曲面上凭空解出的转动是 13.5~26.6°
+        # ——所以「可用率只有 0.333、默认关掉」这个结论是在**闸关着**的情况下得出的。
+        # 闸（rotation_min_gain，零假设「只有平移」）已经验过：真值不转的物体上
+        # err_rmse 24.19→17.28（79 好/18 差，p<0.0001），真值在转的没有显著损害。
+        # 把两版都 dump 出来，sweep_articulation 就能在同一批物体上比可用率。
+        tracked_g = track_rigid(clouds, rotation_min_gain=0.10)
+        spec_g = infer_articulation(tracked_g)
         # 原始判据一并记下来：这样扫阈值不用重跑感知，一次测量能回答「阈值定多少」
         total_rot = float(np.degrees(np.arccos(np.clip(
             (np.trace(np.asarray(tracked.get("total_rotation") or np.eye(3), float)) - 1.0) / 2.0, -1.0, 1.0))))
@@ -523,6 +531,13 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
             "straightness": round(float((spec.get("evidence") or {}).get("straightness", 0.0)), 3) if spec else None,
             "travel_m": round(float(np.linalg.norm(np.asarray(tracked.get("total_translation") or np.zeros(3), float))), 3),
             "residual": round(float(np.median([r for r in tracked.get("residuals") or [] if r is not None] or [0.0])), 4),
+            # 开了转动闸的那一版，同一个物体、同一批点云
+            "gated_fired": spec_g["grab"] if spec_g else None,
+            "gated_total_rotation_deg": round(float(np.degrees(np.arccos(np.clip(
+                (np.trace(np.asarray(tracked_g.get("total_rotation") or np.eye(3), float)) - 1.0) / 2.0,
+                -1.0, 1.0)))), 3),
+            "gated_axis_consistency": round(float((spec_g.get("evidence") or {}).get("axis_consistency", 0.0)), 3) if spec_g else None,
+            "gated_straightness": round(float((spec_g.get("evidence") or {}).get("straightness", 0.0)), 3) if spec_g else None,
         })
         fired = 1.0 if spec else 0.0
         if kind in joint_types:
