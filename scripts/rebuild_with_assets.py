@@ -214,7 +214,16 @@ def main() -> int:
     if root and asset_nodes:
         t1 = time.time()
         catalog = load_catalog(root)
-        index_file = Path(root) / "dinov2_index.npz"
+        # 索引可以换（比如灰度那个）。为什么要能换：这个数据集给每个物体**重新
+        # 上色**，而库里的缩略图是资产原生外观，所以查询和库里那一项在一个对外观
+        # 敏感的嵌入里看起来像两个东西。留一视角自匹配（纯渲染对纯渲染）前 64 名
+        # 覆盖 0.990，而视频裁剪图对缩略图只有 0.284——差的是域不是模型。
+        # 用灰度索引时 assets.gray_query 必须一起开，两侧口径要一致。
+        _idx_name = str((cfg.get("assets") or {}).get("index_name")
+                        or "dinov2_index.npz")
+        index_file = Path(_idx_name)
+        if not index_file.is_absolute():
+            index_file = Path(root) / _idx_name
         if not a.no_image_retrieval and index_file.is_file():
             index = AssetIndex.load(index_file)
             embedder = Embedder(Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
@@ -249,7 +258,8 @@ def main() -> int:
                                               if settings.get("crop_namer", False)
                                               else None),
                                   three_way_rrf=bool(
-                                      settings.get("three_way_rrf", False)))
+                                      settings.get("three_way_rrf", False)),
+                                  gray_query=bool(settings.get("gray_query", False)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

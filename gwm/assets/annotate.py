@@ -458,7 +458,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   silhouette_top: int = 0, masks_by_obj: dict | None = None,
                   cams: dict | None = None,
                   mask_largest_component: bool = False,
-                  crop_namer=None, three_way_rrf: bool = False) -> list[dict]:
+                  crop_namer=None, three_way_rrf: bool = False,
+                  gray_query: bool = False) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -508,7 +509,13 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                         box = [v * k for v in box]
                     crop = crop_object(rgb, np.asarray(mask), box)
                     if crop is not None:
-                        vector = embedder.embed_images([Image.fromarray(crop)])[0]
+                        _q = Image.fromarray(crop)
+                        if gray_query:
+                            # 两侧都去掉颜色。数据集给每个物体重新上色，而库里
+                            # 是资产原生外观；留一视角自匹配证明嵌入本身没问题
+                            # （前 64 覆盖 0.990），差的是这个域。
+                            _q = _q.convert("L").convert("RGB")
+                        vector = embedder.embed_images([_q])[0]
                         image_scores = index.scores(vector)
                         record["image_used"] = True
                         record["frame_index"] = observation.get("frame_index")
