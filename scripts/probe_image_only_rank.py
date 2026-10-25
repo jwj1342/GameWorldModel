@@ -65,6 +65,21 @@ def best_rank(order: list[str], wanted: set[str]) -> int | None:
     return None
 
 
+def _ratios(extent) -> list[float] | None:
+    """边长比例：降序 + 归一化到最长边 = 1。只看形状，不看尺度。"""
+    try:
+        e = sorted((abs(float(x)) for x in extent), reverse=True)
+    except Exception:
+        return None
+    if len(e) != 3 or e[0] <= 1e-9:
+        return None
+    return [x / e[0] for x in e]
+
+
+def _shape_order(obs: list[float], shapes: dict) -> list[str]:
+    return sorted(shapes, key=lambda k: sum(abs(x - y) for x, y in zip(obs, shapes[k])))
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -72,6 +87,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--gt-root", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
+    ap.add_argument("--shapes", default="/scratch/jwj/gwm/asset_shapes.json",
+                    help="资产边长比例缓存；加上它就同时量形状这条腿和两条腿的并集")
     a = ap.parse_args(argv)
 
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *a.config]
@@ -83,6 +100,15 @@ def main(argv: list[str]) -> int:
     index = AssetIndex.load(Path(root) / "dinov2_index.npz")
     embedder = Embedder(Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
     print(f"库 {len(catalog)} 个资产", flush=True)
+    shapes: dict[str, list[float]] = {}
+    if a.shapes and Path(a.shapes).is_file():
+        for k, v in json.loads(Path(a.shapes).read_text()).items():
+            r = _ratios(v)
+            if r is not None:
+                shapes[k] = r
+        print(f"形状库 {len(shapes)} 条可用", flush=True)
+    else:
+        print("没有形状缓存，只量图像这一条腿", flush=True)
 
     # 先把每条片段的真值集合读齐，零假设要从别的片段里抽
     gt_by_clip: dict[str, set[str]] = {}
@@ -99,6 +125,10 @@ def main(argv: list[str]) -> int:
     checked = mismatched = 0
     n_crops = 0
     chosen_ranks: list[int] = []
+    shape_ranks: list[int] = []
+    shape_null_ranks: list[int] = []
+    oracle_ranks: list[int] = []
+    union_n = union_img = union_shape_saves = 0
 
     for clip_dir in sorted(Path(a.report).glob("*test_*")):
         clip = clip_dir.name.split("test_")[-1]
@@ -114,6 +144,23 @@ def main(argv: list[str]) -> int:
         frames = json.loads(frames_path.read_text(encoding="utf-8"))["frames"]
         frame_by_index = {f.get("index"): f for f in frames}
         masks = load_masks(clip_dir / "perception")
+        # 重建出来的盒子边长（带 VGGT 压扁）和真值边长（预言机），按节点 id 索引
+        ext_pred: dict[str, list[float]] = {}
+        pp = clip_dir / "program.json"
+        if pp.is_file():
+            _pg = json.loads(pp.read_text(encoding="utf-8"))
+            for _n in (_pg.get("objects") or []) + (_pg.get("static") or []):
+                _r = _ratios((_n.get("geom") or {}).get("extent"))
+                if _r is not None:
+                    ext_pred[str(_n.get("id"))] = _r
+        ext_gt: list[list[float]] = []
+        _gp = Path(a.gt_root) / f"test_{clip}" / "program.json"
+        if _gp.is_file():
+            _gg = json.loads(_gp.read_text(encoding="utf-8"))
+            for _n in (_gg.get("objects") or []) + (_gg.get("static") or []):
+                _r = _ratios((_n.get("geom") or {}).get("extent"))
+                if _r is not None:
+                    ext_gt.append(_r)
         # 官方记下来的那一路，用来自检
         recorded = {}
         rb = clip_dir / "rebuild.json"
@@ -125,6 +172,14 @@ def main(argv: list[str]) -> int:
             for r in recs:
                 if isinstance(r, dict) and r.get("image_score_best") is not None:
                     recorded[str(r.get("evidence_id") or r.get("id"))] = r
+
+        # 预言机：拿**真值**边长去全库排序，形状这条腿的天花板。
+        # 逐个真值节点算，和预测物体不做任何配对（配对条件含被测量，坑踩过）。
+        if shapes:
+            for _r in ext_gt:
+                _o = best_rank(_shape_order(_r, shapes), wanted)
+                if _o is not None:
+                    oracle_ranks.append(_o)
 
         for obj in evidence.get("objects") or []:
             observation = best_observation(obj)
@@ -170,6 +225,30 @@ def main(argv: list[str]) -> int:
                 if cr is not None:
                     chosen_ranks.append(cr)
 
+            # ---- 形状这条腿：全库按边长比例排序，同样的集合判据 ----
+            if shapes and rec is not None:
+                obs = ext_pred.get(str(rec.get("id")))
+                if obs is not None:
+                    sorder = _shape_order(obs, shapes)
+                    sr = best_rank(sorder, wanted)
+                    if sr is not None:
+                        shape_ranks.append(sr)
+                    if others:
+                        donor2 = gt_by_clip[rng.choice(others)]
+                        fake2 = set(rng.sample(sorted(donor2), min(len(wanted), len(donor2))))
+                        srn = best_rank(sorder, fake2)
+                        if srn is not None:
+                            shape_null_ranks.append(srn)
+                    # 并集：同样的预算 admit，一半给图像一半给形状
+                    half = max(1, a.admit // 2)
+                    if r is not None and sr is not None:
+                        union_n += 1
+                        in_img = r <= half
+                        union_img += 1 if in_img else 0
+                        if sr <= half and not in_img:
+                            union_shape_saves += 1
+
+
     print(f"\n自检：对上官方记录的裁剪图 {checked} 个，其中分数对不上的 {mismatched} 个")
     if checked == 0 or mismatched:
         print("**自检没过，不出数。** 说明这里跑的不是官方那条路径。")
@@ -194,6 +273,30 @@ def main(argv: list[str]) -> int:
         d = statistics.median(null_ranks) - statistics.median(real_ranks)
         print(f"\n  **真集合比零假设靠前 {d:+.0f} 名**"
               f"（随机的话该是 0 附近）")
+
+    if shape_ranks:
+        print(f"\n########## 形状这条腿（全库按边长比例） ##########")
+        show("真·重建 extent", shape_ranks,
+             sum(1 for x in shape_ranks if x <= a.admit))
+        show("零假设·别片段的集合", shape_null_ranks,
+             sum(1 for x in shape_null_ranks if x <= a.admit))
+        if oracle_ranks:
+            show("预言机·真值 extent", oracle_ranks,
+                 sum(1 for x in oracle_ranks if x <= a.admit))
+        print("  零假设和真实打平 → 形状里没信号；"
+              "预言机远高于真实 → 是 VGGT 压扁吃掉的，修几何有用")
+
+    if union_n:
+        half = max(1, a.admit // 2)
+        both = (union_img + union_shape_saves) / union_n
+        print(f"\n########## 两条腿是不是在同一批物体上失败 ##########")
+        print(f"  同时有两种名次的节点 {union_n} 个，预算 {a.admit} 拆成 {half}+{half}")
+        print(f"  只用图像前 {half}      覆盖 {union_img}/{union_n} = {union_img/union_n:.3f}")
+        print(f"  形状额外救回来的    {union_shape_saves}/{union_n} = {union_shape_saves/union_n:.3f}")
+        print(f"  **并集覆盖 {both:.3f}**（同样 {a.admit} 个候选的预算）")
+        if union_shape_saves == 0:
+            print("  形状一个也没救回来 → 两条腿在同一批物体上失败，"
+                  "候选生成这条路别再修了")
     print(f"""
 怎么读：
   进前 {a.admit} 名的比例是关键——那正是「图像进候选{a.admit}」能救回来的上限。
