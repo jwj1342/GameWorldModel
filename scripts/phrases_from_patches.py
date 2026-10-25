@@ -35,11 +35,23 @@ from gwm.config import load_config, site_name           # noqa: E402
 
 
 def asset_phrase(asset_id: str) -> str:
-    """资产 id 转短语：驼峰拆词 + 去掉纯数字片段。和数据集生成器同一套规则。"""
+    """资产 id 转短语。返回空串表示**这个名字当检测短语没有信息，应该丢掉**。
+
+    第一版只拆驼峰、滤纯数字 token，于是 `tile210` 原样留下——八个槽位里一半被
+    `tile210 tile134 tile109 tile071` 这种纯编号名占了，当检测短语毫无信息，
+    而 `bed bunk`、`door garage`、`cliff waterfall rock` 这种有语义的被挤掉。
+
+    所以：字母和数字之间也要拆（和 `gwm/assets/retrieve.py` 的 tokenize 同一套），
+    拆完只剩一个通用词（tile / wall / block 这类）的直接丢掉——今天量过通用类别词
+    不管用（资产库高频词 0/77），槽位要留给具体的。
+    """
     raw = asset_id.split("/")[-1].replace("-", " ").replace("_", " ")
-    raw = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+    raw = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", raw)
+    raw = re.sub(r"(?<=[A-Za-z])(?=[0-9])", " ", raw)      # tile210 -> tile 210
     toks = [t.lower() for t in re.split(r"[^A-Za-z0-9]+", raw)
             if t and not t.isdigit()]
+    if len(toks) < 2:
+        return ""                                          # 只剩一个通用词，丢掉
     return " ".join(toks[:3])
 
 
@@ -88,10 +100,14 @@ def main(argv: list[str]) -> int:
                     continue
                 if not scores:
                     continue
-                best = max(scores.items(), key=lambda kv: kv[1])[0]
-                p = asset_phrase(best)
-                if p:
-                    votes[p] += 1
+                # 取前几名而不是只取第一名：第一名常是地形瓷砖（网格 patch
+                # 大量落在地面和背景上），而我们要的是有语义的那些。
+                top = sorted(scores.items(), key=lambda kv: -kv[1])[:5]
+                for aid, _v in top:
+                    p = asset_phrase(aid)
+                    if p:
+                        votes[p] += 1
+                        break
     cap.release()
     # 按出现次数取前几个：一个资产在多块 patch 上都赢，说明它真的在画面里。
     print(",".join(p for p, _n in votes.most_common(a.max_phrases)))
