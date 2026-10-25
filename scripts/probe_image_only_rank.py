@@ -250,7 +250,9 @@ def main(argv: list[str]) -> int:
                 if isinstance(r, dict) and r.get("image_score_best") is not None:
                     recorded[str(r.get("evidence_id") or r.get("id"))] = r
 
-        # 预言机：拿**真值**边长去全库排序，形状这条腿的天花板。
+        # 拿**真值**边长去全库排序。注意这是**循环**的（见下方说明）：数据集
+        # 等比缩放，真值 extent 的比例就是资产原生比例。保留它是因为它回答了
+        # 另一个问题——「描述子本身最多能分辨到什么程度」。
         # 逐个真值节点算，和预测物体不做任何配对（配对条件含被测量，坑踩过）。
         if shapes:
             for _r in ext_gt:
@@ -394,7 +396,7 @@ def main(argv: list[str]) -> int:
             show("重建 extent + 压扁校正", shape_fix_ranks,
                  sum(1 for x in shape_fix_ranks if x <= a.admit))
         if oracle_ranks:
-            show("预言机·真值 extent", oracle_ranks,
+            show("真值 extent（循环·描述子上限）", oracle_ranks,
                  sum(1 for x in oracle_ranks if x <= a.admit))
         # 结论要按数说，不能无条件印——这行以前是写死的，而实测真实
         # (1329) 和零假设 (2081) 根本没打平，写死的那句话是错的。
@@ -404,15 +406,23 @@ def main(argv: list[str]) -> int:
             print(f"  真集合比零假设靠前 {gap:+.0f} 名"
                   + ("（差得不明显，形状里基本没信号）" if gap < 200 else
                      "（有分离，形状里有信号，只是进不了前几十名）"))
+        # **这一档是循环的，别当「几何的天花板」读。** 实测这个数据集对资产是
+        # **等比缩放**：真值 extent 的边长比例和资产原生比例 L1 差中位 0.0003。
+        # 所以「拿真值 extent 去全库排序」= 拿资产自己的比例去找它自己。
+        # 和类名那个坑同构：真值派生出来的量，同时当了查询和键。
+        #
+        # 但它仍然有用，读法要反过来：**即使给了精确的边长比例，前 64 名也只覆盖
+        # 0.350**——4812 个资产里长宽比撞车的太多。所以三个数的边长比例描述子
+        # **本身就太粗**，这和几何好不好无关，修几何也顶不破这个数。
         if oracle_ranks and shape_ranks:
             o = sum(1 for x in oracle_ranks if x <= a.admit) / len(oracle_ranks)
             r_ = sum(1 for x in shape_ranks if x <= a.admit) / len(shape_ranks)
             f_ = (sum(1 for x in shape_fix_ranks if x <= a.admit) / len(shape_fix_ranks)
                   if shape_fix_ranks else float("nan"))
             print(f"  天花板 {o:.3f}（真值 extent） vs 现状 {r_:.3f} / 校正后 {f_:.3f}")
-            if o > 2 * max(r_, 0.001):
-                print(f"  → 形状这条腿的信号是**真的**，差距全在几何；"
-                      f"把几何修到位，光靠边长比例就能覆盖 {o:.1%}")
+            print(f"  注意这一档**循环**（数据集等比缩放，真值 extent 的比例就是资产原生比例），"
+                  f"所以 {o:.3f} 不是「几何的天花板」，是**描述子本身的天花板**："
+                  f"给了精确比例也只能覆盖这么多。修几何顶不破它。")
 
     if sil_ranks:
         print(f"\n########## 轮廓这条腿（全库按 Hu 矩） ##########")
