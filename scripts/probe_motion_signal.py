@@ -2551,13 +2551,23 @@ def _template_rotation_from_points(clouds: list, template) -> np.ndarray:
     return np.asarray(out)
 
 
+DECISIONS_ROOT: Path | None = None          # --decisions-from，见 _chosen_assets
+
+
 def _chosen_assets(run: Path) -> dict:
     """管线**实际挑中**的资产和它的文字分，按物体 id 索引。
 
     读 `rebuild.json` 的 decisions。这是「二次配准」那条路要的输入：
     配准跑在感知里、在检索**之前**，所以要用检索结果当模板只能再跑一遍。
+
+    **这个探针自己只跑感知，不跑检索**，所以它的 work 目录里没有 rebuild.json。
+    用 `--decisions-from` 指到一次**已经跑过的管线产出**（里面按片段名分子目录），
+    从那里取 decisions。两边的感知档位必须一致（都是 gtseg），否则物体 id 对不上。
     """
-    rb = run.parent / "rebuild.json"
+    if DECISIONS_ROOT is not None and CURRENT_CLIP_DIR is not None:
+        rb = DECISIONS_ROOT / CURRENT_CLIP_DIR.name / "rebuild.json"
+    else:
+        rb = run.parent / "rebuild.json"
     if not rb.is_file():
         return {}
     try:
@@ -2720,11 +2730,16 @@ def main() -> int:
     ap.add_argument("--rendered", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--limit", type=int, default=8)
+    ap.add_argument("--decisions-from", default="",
+                    help="已跑过的管线产出根（按片段名分子目录），二次配准从这里取 decisions")
     ap.add_argument("--perception", default="gt", choices=("gt", "gtcamseg", "gtseg", "neural"),
                     help="gt=全真值；gtseg=真值分割+真实几何（保住物体身份，只换深度）；"
                          "neural=全真实。残差挑资产的数都是全真值上测的，而管线端到端"
                          "是 0/78，必须单独验深度噪声这一条。")
     a = ap.parse_args()
+    if a.decisions_from:
+        globals()["DECISIONS_ROOT"] = Path(a.decisions_from)
+        print(f"二次配准的 decisions 取自 {a.decisions_from}", flush=True)
     work = Path(a.work); work.mkdir(parents=True, exist_ok=True)
     clips = sorted(p for p in Path(a.rendered).iterdir() if (p / "clip.mp4").is_file())[:a.limit]
     merged: dict[str, list] = {}
