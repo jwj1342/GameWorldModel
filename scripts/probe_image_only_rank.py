@@ -212,6 +212,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--gt-root", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
+    ap.add_argument("--frames", type=int, default=1,
+                    help="每个物体用几帧做检索（>1 就对帧取分数最大值再排序）")
     ap.add_argument("--index", default="", help="换一个索引 npz（比如灰度那个）")
     ap.add_argument("--silhouette-index", action="store_true",
                     help="查询侧也转成黑底白形的二值轮廓（和轮廓索引配对用）")
@@ -341,6 +343,69 @@ def main(argv: list[str]) -> int:
             mask = (masks.get(obj["id"]) or {}).get(observation.get("frame_index"))
             if not frame or mask is None:
                 continue
+            # **多帧检索。** 一个物体在视频里被看了几十帧，而这里一直只用
+            # 「框最大的那一帧」一张裁剪图。残差判据那边量过多视角的收益很大
+            # （1/3/7 帧 = 0.149/0.243/0.311），图像检索这一路从没试过。
+            # 对帧取**分数最大值**再排序：库侧本来就是对 4 个视角取 max，
+            # 两边聚合方式一致；而且物体朝向任意，只要有一帧对得上就算像。
+            _obs_list = [observation]
+            if a.frames > 1:
+                _cands = []
+                for _ob in (obj.get("observations") or []):
+                    _fi = _ob.get("frame_index")
+                    if _fi is None or _fi not in (masks.get(obj["id"]) or {}):
+                        continue
+                    if frame_by_index.get(_fi) is None:
+                        continue
+                    _cands.append(_ob)
+                if len(_cands) > a.frames:
+                    _st = len(_cands) / float(a.frames)
+                    _cands = [_cands[min(len(_cands) - 1, int(_st * (i + 0.5)))]
+                              for i in range(a.frames)]
+                if _cands:
+                    _obs_list = _cands
+            _scores_acc: dict[str, float] = {}
+            _short = None
+            _got = 0
+            for _ob in _obs_list:
+                _fr = frame_by_index.get(_ob.get("frame_index"))
+                _mk = (masks.get(obj["id"]) or {}).get(_ob.get("frame_index"))
+                if not _fr or _mk is None:
+                    continue
+                _rgb = np.asarray(Image.open(_fr["file"]).convert("RGB"))
+                _bx, _bs = bbox_of(_ob)
+                if _bs and _bs[0]:
+                    _k = _rgb.shape[1] / float(_bs[0])
+                    _bx = [v * _k for v in _bx]
+                _cr = crop_object(_rgb, np.asarray(_mk), _bx)
+                if _cr is None:
+                    continue
+                if _short is None:
+                    _short = float(min(_cr.shape[0], _cr.shape[1]))
+                _im = Image.fromarray(_cr)
+                if a.silhouette_index:
+                    _m2 = np.asarray(_mk).astype(bool)
+                    if _m2.shape != _rgb.shape[:2]:
+                        from gwm.perception.masks import resize_mask
+                        _m2 = resize_mask(_m2, (_rgb.shape[1], _rgb.shape[0])).astype(bool)
+                    _x0, _y0, _x1, _y1 = (int(v) for v in _bx)
+                    _x0, _y0 = max(0, _x0), max(0, _y0)
+                    _x1, _y1 = min(_rgb.shape[1], _x1), min(_rgb.shape[0], _y1)
+                    if _x1 - _x0 < 8 or _y1 - _y0 < 8:
+                        continue
+                    _sub = _m2[_y0:_y1, _x0:_x1]
+                    _im = Image.fromarray(
+                        np.where(_sub[:, :, None], 255, 0).astype(np.uint8).repeat(3, axis=2))
+                elif a.gray:
+                    _im = _im.convert("L").convert("RGB")
+                _v = embedder.embed_images([_im])[0]
+                for _aid, _sc in index.scores(_v).items():
+                    if _sc > _scores_acc.get(_aid, -1.0):
+                        _scores_acc[_aid] = _sc
+                _got += 1
+            if not _got or _short is None:
+                continue
+
             rgb = np.asarray(Image.open(frame["file"]).convert("RGB"))
             box, box_size = bbox_of(observation)
             if box_size and box_size[0]:
@@ -349,7 +414,6 @@ def main(argv: list[str]) -> int:
             crop = crop_object(rgb, np.asarray(mask), box)
             if crop is None:
                 continue
-            _short = float(min(crop.shape[0], crop.shape[1]))
             _img = Image.fromarray(crop)
             if a.silhouette_index:
                 # 查询侧的轮廓直接用掩码裁出来——掩码本来就是前景，
@@ -369,7 +433,8 @@ def main(argv: list[str]) -> int:
             elif a.gray:
                 _img = _img.convert("L").convert("RGB")
             vector = embedder.embed_images([_img])[0]
-            scores = index.scores(vector)
+            # 多帧那一路已经把分数按帧取过最大值了，直接用它；单帧时两者等价。
+            scores = _scores_acc if a.frames > 1 else index.scores(vector)
             n_crops += 1
 
             rec = recorded.get(str(obj["id"]))
