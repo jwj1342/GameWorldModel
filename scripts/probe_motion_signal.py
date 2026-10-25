@@ -817,6 +817,28 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
 
+        # **转动要「挣」出来：带零假设的闸。**
+        #
+        # 病因已经窄到「逐帧看到的是物体的不同部分」——中心散布被证明传不到转动上
+        # （ICP 开头就对齐质心，对平移不变），深度尺度那条越修越差。而 ICP 在
+        # **部分曲面**上总能找到某个转动让残差更小，静止物体于是被解出转动。
+        #
+        # `rotation_earns_its_keep` 正是为这件事写的：零假设「只有平移」，
+        # 备择「平移+转动」，只有后者把残差压低超过 min_gain 才认转动。
+        # 它**已经实现、已经接进 evidence.py**，但 configs/default.yaml 里写着
+        # 「端到端 A/B 没做之前默认不开」——**那个 A/B 一直没做**，
+        # 而我今天所有假转动的数（27.98°、32.03°…）都是在闸**关着**的情况下量的。
+        #
+        # None 是对照档，和另外两档在同一条代码路径上。
+        for _g in (None, 0.05, 0.10):
+            _gt_ = track_rigid(clouds) if _g is None else track_rigid(clouds, rotation_min_gain=_g)
+            _go = _gt_.get("orientations") or []
+            if len(_go) != len(clouds):
+                continue
+            _gd = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude() for m in _go])
+            _tag = "gate_off" if _g is None else f"gate{int(_g * 100):03d}"
+            out.setdefault(f"{_tag}/{kind}/range_deg", []).append(float(np.ptp(_gd)))
+
         # **把逐帧重心的高频抖动抹掉再配准。** 这是对齐后的误差分解直接指出来的
         # 修法：残差是沿视线 ≈0、垂直视线 ≈ 一个物体长度，也就是**像平面内的
         # 中心散布**。反压扁修的是那个已经 ≈0 的分量，所以越修越差；
