@@ -186,7 +186,9 @@ def main() -> int:
     # 资产库高频词 0/77、闭环检索名 0/76、网格检索名 0/50——**管用的是逐物体的
     # 具体名字，而能产出它的只有看得懂「哪里是物体」的 VLM 命名器**。
     _client = None
-    if not phrases and not a.no_namer:
+    _want_client = (not phrases and not a.no_namer) or bool(
+        (cfg.get("assets") or {}).get("crop_namer", False))
+    if _want_client:
         try:
             from gwm.synthesis.vlm import make_client
             _client = make_client(cfg)
@@ -242,7 +244,10 @@ def main() -> int:
                                         if int(settings.get("silhouette_top", 0)) > 0
                                         else None),
                                   mask_largest_component=bool(
-                                      settings.get("mask_largest_component", False)))
+                                      settings.get("mask_largest_component", False)),
+                                  crop_namer=(_client
+                                              if settings.get("crop_namer", False)
+                                              else None))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

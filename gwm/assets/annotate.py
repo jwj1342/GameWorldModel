@@ -378,6 +378,57 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
     return best, (best_iou if best is not None else None)
 
 
+CROP_NAMER_PROMPT = (
+    "You see one object cut out of a 3D scene. Reply with a JSON object "
+    '{"name": "..."} giving the most specific noun phrase that identifies this '
+    "object as a 3D asset would be named: include the subtype and distinguishing "
+    "detail, 2-4 words, lowercase. Examples of the level of detail wanted: "
+    "\"bunk bed\", \"sports sedan\", \"pine tree\", \"garage door\", "
+    "\"waterfall rock\", \"corner wall panel\". Do not answer with a bare "
+    "category like \"object\", \"box\" or \"block\"."
+)
+
+
+def name_crop(client, crop) -> str:
+    """让 VLM 看**单个物体的裁剪图**说出具体名字，当检索的查询词。
+
+    **为什么是这一步。** 物体级指标量下来：神经分割的 `object_recall` 是 **0.901**
+    ——检测器找得到这些物体，过检也只是中等（精确率 0.683）。真正分开两臂的是
+    `class_accuracy`：神经 **0.000** 对真值分割 0.170。**物体找到了，但贴给它的
+    类名是错的**，而类名就是文字检索的查询词 → 候选集里没有正确答案 → 0 命中。
+
+    此前的命名器是**整帧**级的，产出的短语拿去做检测；这里是**单物体**级的，
+    产出的名字拿去做检索。两件事不一样，后者此前一次都没试过。
+
+    提示词明确要「子类 + 区分性细节」，并禁掉 object/box/block 这种裸类别——
+    因为 `prompts/namer.md` 里那句 `no colours, no adjectives about size`
+    正好禁掉了今天量到值钱的那一维（真值类名里管用的是 sedan sports、tree pine、
+    candy cane red 这种）。
+    """
+    import json as _json
+
+    schema = {"type": "object", "properties": {"name": {"type": "string"}},
+              "required": ["name"]}
+    try:
+        from PIL import Image
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            Image.fromarray(crop).save(tmp.name, quality=92)
+            path = tmp.name
+        try:
+            r = client.chat(CROP_NAMER_PROMPT, "Object attached.", images=[path],
+                            json_schema=schema, temperature=0.2)
+        finally:
+            os.unlink(path)
+        name = str((r.get("json") or {}).get("name", "")).strip().lower()
+    except Exception:
+        return ""
+    # 裸类别挡掉：它们正是现在失败的样子，放过去等于没改
+    if name in {"object", "box", "block", "thing", "item", "shape", "part", ""}:
+        return ""
+    return name[:60]
+
+
 def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict,
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
@@ -387,7 +438,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   residual_top: int = 0, root=None,
                   silhouette_top: int = 0, masks_by_obj: dict | None = None,
                   cams: dict | None = None,
-                  mask_largest_component: bool = False) -> list[dict]:
+                  mask_largest_component: bool = False,
+                  crop_namer=None) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -406,8 +458,10 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
             continue
         query = geom.get("query") or node.get("class") or ""
         record = {"id": node["id"], "query": query, "image_used": False}
+        record["query_source"] = "program"
 
         image_scores = None
+        crop = None            # 只有走到图像那一路才会赋值；裁剪图命名也要用它
         obj = by_id.get(node["id"])
         observation = best_observation(obj) if obj else None
         # 走不到图像这一路的时候要说清楚卡在哪一步。只写一个「没用图像」的话，
@@ -450,6 +504,15 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         # 是「文字前 5 名里挑」。冒烟时记录的候选名次全在 0~4，才露了馅。
         _wide = max(residual_top, silhouette_top)
         _k = max(top_k, _wide) if _wide > 0 else top_k
+        # **用裁剪图重新命名**，再拿新名字当检索查询词。检测没问题（召回 0.901），
+        # 坏的是贴给物体的类名（class_accuracy 0.000），而类名就是查询词。
+        if crop_namer is not None and crop is not None:
+            _n = name_crop(crop_namer, crop)
+            if _n:
+                record["crop_name"] = _n
+                record["query_source"] = "crop_namer"
+                query = _n
+                record["query"] = _n
         hits = retrieve(query, catalog, k=_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0,
                         image_admit=image_admit)
