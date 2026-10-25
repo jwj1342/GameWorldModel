@@ -259,7 +259,8 @@ def main() -> int:
                                               else None),
                                   three_way_rrf=bool(
                                       settings.get("three_way_rrf", False)),
-                                  gray_query=bool(settings.get("gray_query", False)))
+                                  gray_query=bool(settings.get("gray_query", False)),
+                                  silhouette_views=int(settings.get("silhouette_views", 3)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"
