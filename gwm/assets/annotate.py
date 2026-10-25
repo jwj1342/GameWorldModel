@@ -486,6 +486,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   mask_largest_component: bool = False,
                   crop_namer=None, three_way_rrf: bool = False,
                   gray_query: bool = False, silhouette_views: int = 3,
+                  force_query: str = "",
                   silhouette_agg: str = "median",
                   silhouette_yaw: int = 8) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
@@ -505,6 +506,14 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         if geom.get("kind") != "asset":
             continue
         query = geom.get("query") or node.get("class") or ""
+        # **打断循环**：这个数据集的真值类名**就是资产文件名**（实测 86.5% 的
+        # class_guess 的词直接覆盖文件名，`chinese` → `food/chinese`）。
+        # 真值分割那一档的 class_guess 来自真值程序，所以文字检索等于拿着答案
+        # 去找答案——候选池覆盖率 1.000 是这么来的，真实系统拿不到。
+        # 设成一个通用词，候选池就只由图像分决定，不再循环。
+        if force_query:
+            query = str(force_query)
+            record["query_source"] = "forced"
         record = {"id": node["id"], "query": query, "image_used": False}
         record["query_source"] = "program"
 
