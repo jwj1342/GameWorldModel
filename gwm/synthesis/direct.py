@@ -6,7 +6,7 @@ from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
 from ..perception.color import measured_color
 
-from ..taxonomy import is_ground_class, is_static_class, slug
+from ..taxonomy import is_ground_class, is_rigid_structure, is_static_class, slug
 
 def guess_material(cls: str) -> str:
     c = cls.lower()
@@ -171,7 +171,11 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         # 二元标志不算。名字不像结构件的走原来那条，`moves` 仍然生效。
         _typed_motion = guess.get("type") in {
             "prismatic", "trajectory", "revolute", "spin", "periodic_translate", "periodic_rotate"}
-        looks_structural = is_static_class(cls, cfg) and not _typed_motion
+        # 刚性结构件（墙/地板/轨道/方块）忽略二元的 moves，只认明确的运动类型；
+        # 传送带、桌子这种「通常不动但可以动」的仍然按原来那条走。
+        _moving = _typed_motion if is_rigid_structure(cls) else (
+            guess.get("moves") is True or _typed_motion)
+        looks_structural = is_static_class(cls, cfg) and not _moving
         if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             #
