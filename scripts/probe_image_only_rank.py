@@ -238,6 +238,7 @@ def main(argv: list[str]) -> int:
     checked = mismatched = 0
     n_crops = 0
     chosen_ranks: list[int] = []
+    size_rows: list[tuple[float, int]] = []   # (裁剪图短边像素, 名次)
     tint_ranks: list[int] = []
     native_ranks: list[int] = []
     shape_ranks: list[int] = []
@@ -318,6 +319,7 @@ def main(argv: list[str]) -> int:
             crop = crop_object(rgb, np.asarray(mask), box)
             if crop is None:
                 continue
+            _short = float(min(crop.shape[0], crop.shape[1]))
             _img = Image.fromarray(crop)
             if a.silhouette_index:
                 # 查询侧的轮廓直接用掩码裁出来——掩码本来就是前景，
@@ -352,6 +354,7 @@ def main(argv: list[str]) -> int:
             if r is not None:
                 real_ranks.append(r)
                 in_topn += 1 if r <= a.admit else 0
+                size_rows.append((_short, r))
             if others:
                 # 零假设的集合**大小匹配**：别用一个更大的集合去比，名次天然会靠前
                 donor = gt_by_clip[rng.choice(others)]
@@ -500,6 +503,35 @@ def main(argv: list[str]) -> int:
             print(f"  注意这一档**循环**（数据集等比缩放，真值 extent 的比例就是资产原生比例），"
                   f"所以 {o:.3f} 不是「几何的天花板」，是**描述子本身的天花板**："
                   f"给了精确比例也只能覆盖这么多。修几何顶不破它。")
+
+    if len(size_rows) >= 20:
+        print(f"\n########## 按裁剪图短边分桶（分辨率是不是主因） ##########")
+        print("  资产缩略图 160x160，DINOv2 输入 224x224；视频里的物体要小得多。")
+        size_rows.sort(key=lambda t: t[0])
+        m, b = len(size_rows), 4
+        for i in range(b):
+            lo, hi = i * m // b, (i + 1) * m // b
+            ch = size_rows[lo:hi]
+            if not ch:
+                continue
+            cov = sum(1 for _s, r in ch if r <= a.admit) / len(ch)
+            med = statistics.median([r for _s, r in ch])
+            note = "  （样本太少，不解读）" if len(ch) < 10 else ""
+            print(f"  第{i+1}桶 短边 [{ch[0][0]:.0f}, {ch[-1][0]:.0f}]px  "
+                  f"进前 {a.admit} 名 {cov:.3f}  中位名次 {med:.0f}  n={len(ch)}{note}")
+        big = size_rows[3 * m // 4:]
+        small = size_rows[:m // 4]
+        if len(big) >= 10 and len(small) >= 10:
+            cb = sum(1 for _s, r in big if r <= a.admit) / len(big)
+            cs = sum(1 for _s, r in small if r <= a.admit) / len(small)
+            print(f"  最大那 25% {cb:.3f} vs 最小那 25% {cs:.3f}")
+            if cb > 2 * max(cs, 0.001):
+                print(f"  → **分辨率是主因**。渲染分辨率是 render_dataset.py 的一个"
+                      f"默认值（640x360），调大就能直接验。")
+            elif abs(cb - cs) < 0.05:
+                print(f"  → 大小没关系，分辨率不是主因")
+            else:
+                print(f"  → 分辨率占一部分")
 
     if tint_ranks and native_ranks:
         print(f"\n########## 染色的 vs 原生材质的（大小匹配） ##########")
