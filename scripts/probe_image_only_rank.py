@@ -57,6 +57,34 @@ def gt_refs(program: dict) -> set[str]:
     return out
 
 
+def gt_refs_by_tint(program: dict) -> tuple[set[str], set[str]]:
+    """真值资产分两堆：**渲染时会被染色的**和**用 GLB 原生材质的**。
+
+    判据直接抄渲染那一侧 `kernel/scene.js`：
+
+        const measured = typeof spec.material === 'object' && spec.material
+                         ? spec.material.base_color : null;
+        group.add(measured && TINT_ASSETS ? tintToMeasured(fitted, measured) : fitted);
+
+    **只有 material 是带 base_color 的字典时才染色。** 是字符串时（包括
+    十六进制字符串 "#4fce98"）typeof 是 string，measured 为 null，用原生材质。
+    实测 assetgt60 里只有 37.6% 会被染色。
+
+    这个分桶是**免费的对照**：如果 0.284 的锅主要在颜色，原生那一堆该明显好。
+    """
+    tinted, native = set(), set()
+    for n in (program.get("objects") or []) + (program.get("static") or []):
+        ref = ((n.get("geom") or {}).get("ref") or "").strip()
+        if not ref:
+            continue
+        m = n.get("material")
+        if isinstance(m, dict) and m.get("base_color"):
+            tinted.add(ref)
+        else:
+            native.add(ref)
+    return tinted, native
+
+
 def best_rank(order: list[str], wanted: set[str]) -> int | None:
     """`order` 是按图像分降序的全库 id。返回 wanted 里最靠前那个的名次（1 起）。"""
     for i, aid in enumerate(order):
@@ -194,11 +222,14 @@ def main(argv: list[str]) -> int:
 
     # 先把每条片段的真值集合读齐，零假设要从别的片段里抽
     gt_by_clip: dict[str, set[str]] = {}
+    tint_by_clip: dict[str, tuple[set[str], set[str]]] = {}
     for clip_dir in sorted(Path(a.report).glob("*test_*")):
         clip = clip_dir.name.split("test_")[-1]
         p = Path(a.gt_root) / f"test_{clip}" / "program.json"
         if p.is_file():
-            gt_by_clip[clip] = gt_refs(json.loads(p.read_text(encoding="utf-8")))
+            _pg = json.loads(p.read_text(encoding="utf-8"))
+            gt_by_clip[clip] = gt_refs(_pg)
+            tint_by_clip[clip] = gt_refs_by_tint(_pg)
 
     rng = random.Random(20261023)
     real_ranks: list[int] = []
@@ -207,6 +238,8 @@ def main(argv: list[str]) -> int:
     checked = mismatched = 0
     n_crops = 0
     chosen_ranks: list[int] = []
+    tint_ranks: list[int] = []
+    native_ranks: list[int] = []
     shape_ranks: list[int] = []
     shape_fix_ranks: list[int] = []
     sil_ranks: list[int] = []
@@ -327,6 +360,20 @@ def main(argv: list[str]) -> int:
                 if rn is not None:
                     null_ranks.append(rn)
                     null_in_topn += 1 if rn <= a.admit else 0
+            # 染色 / 原生 分桶。两堆**大小匹配**后再比——
+            # 「集合里最靠前的那个」的期望名次本来就随集合大小变，
+            # 不匹配的话比的是集合大小不是颜色。
+            _t, _n = tint_by_clip.get(clip, (set(), set()))
+            _k = min(len(_t), len(_n))
+            if _k > 0:
+                _ts = set(rng.sample(sorted(_t), _k))
+                _ns = set(rng.sample(sorted(_n), _k))
+                _tr, _nr = best_rank(order, _ts), best_rank(order, _ns)
+                if _tr is not None:
+                    tint_ranks.append(_tr)
+                if _nr is not None:
+                    native_ranks.append(_nr)
+
             if rec is not None and rec.get("chosen"):
                 cr = best_rank(order, {str(rec["chosen"])})
                 if cr is not None:
@@ -453,6 +500,22 @@ def main(argv: list[str]) -> int:
             print(f"  注意这一档**循环**（数据集等比缩放，真值 extent 的比例就是资产原生比例），"
                   f"所以 {o:.3f} 不是「几何的天花板」，是**描述子本身的天花板**："
                   f"给了精确比例也只能覆盖这么多。修几何顶不破它。")
+
+    if tint_ranks and native_ranks:
+        print(f"\n########## 染色的 vs 原生材质的（大小匹配） ##########")
+        show("会被染色的真值资产", tint_ranks,
+             sum(1 for x in tint_ranks if x <= a.admit))
+        show("用 GLB 原生材质的", native_ranks,
+             sum(1 for x in native_ranks if x <= a.admit))
+        _tc = sum(1 for x in tint_ranks if x <= a.admit) / len(tint_ranks)
+        _nc = sum(1 for x in native_ranks if x <= a.admit) / len(native_ranks)
+        if _nc > 2 * max(_tc, 0.001):
+            print(f"  原生那堆明显好（{_nc:.3f} vs {_tc:.3f}）→ 颜色是主因，去色有救")
+        elif abs(_nc - _tc) < 0.05:
+            print(f"  两堆基本一样（{_nc:.3f} vs {_tc:.3f}）→ **颜色不是主因**，"
+                  f"锅在光照/分辨率/遮挡/掩码边缘，去色那条帮不上")
+        else:
+            print(f"  原生略好（{_nc:.3f} vs {_tc:.3f}）→ 颜色占一部分，但不是全部")
 
     if sil_ranks:
         print(f"\n########## 轮廓这条腿（全库按 Hu 矩） ##########")
