@@ -845,6 +845,18 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             out.setdefault(f"{_tag}/{kind}/true_range", []).append(float(np.ptp(true_deg)))
             out.setdefault(f"{_tag}/{kind}/err_rmse", []).append(
                 float(np.sqrt(np.mean((_gd - true_deg) ** 2))))
+            # **逐物体记一行，按真转角连续分桶用。**
+            # 按**类别名**分桶拿不到样本：45 条片段里真值 spin 有 20 个，
+            # 而通过点云过滤（≥6 帧、每帧 ≥30 点）的只有 5 个。要 spin n≈30
+            # 得跑约 180 条，而数据集只有 60 条——**那个条件达不到**。
+            # 而我真正关心的是「**真转动大的**物体会不会被压掉」，
+            # 那就直接按 true_range 这个连续量分桶，把所有大转动的并进来。
+            out.setdefault("rows", []).append({
+                "clip": CURRENT_CLIP_DIR.name if CURRENT_CLIP_DIR else "?",
+                "oid": oid, "kind": kind, "gate": _tag,
+                "true_range": float(np.ptp(true_deg)),
+                "solved_range": float(np.ptp(_gd)),
+                "err_rmse": float(np.sqrt(np.mean((_gd - true_deg) ** 2)))})
 
         # **把逐帧重心的高频抖动抹掉再配准。** 这是对齐后的误差分解直接指出来的
         # 修法：残差是沿视线 ≈0、垂直视线 ≈ 一个物体长度，也就是**像平面内的
