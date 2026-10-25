@@ -641,6 +641,16 @@ def main(argv: list[str]) -> int:
             print(f"  端到端挑对率 0.209 ÷ 这个覆盖率 = 条件准确率 {0.209/max(_c,1e-9):.2f}")
             print(f"  （只用图像分时覆盖 0.243、条件准确率 ≤0.86。这里才是管线的真实口径）")
 
+    if wellposed_ranks:
+        print(f"\n########## 候选生成的余量：覆盖率随候选数怎么走 ##########")
+        print("  （只算良定义节点 obj_*；这是**不依赖类名**的纯图像检索）")
+        for k in (16, 32, 64, 128, 256, 512, 1024, 2048, 4812):
+            c = sum(1 for x in wellposed_ranks if x <= k) / len(wellposed_ranks)
+            bar = "#" * int(c * 40)
+            print(f"    前 {k:>4} 名  覆盖 {c:.3f}  {bar}")
+        print("  读法：曲线在哪里变平，就是「多给候选」这条路的尽头；")
+        print("  平得早 => 要换嵌入或换信号，不是加候选数。")
+
     if wellposed_ranks or illposed_ranks:
         _tot = len(wellposed_ranks) + len(illposed_ranks)
         print(f"\n########## 这个节点在真值里有没有资产答案 ##########")
