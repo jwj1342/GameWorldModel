@@ -486,7 +486,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   mask_largest_component: bool = False,
                   crop_namer=None, three_way_rrf: bool = False,
                   gray_query: bool = False, silhouette_views: int = 3,
-                  silhouette_agg: str = "median") -> list[dict]:
+                  silhouette_agg: str = "median",
+                  silhouette_yaw: int = 8) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -587,6 +588,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                 _mk, cams, [a for a, _s in hits], root,
                 top=silhouette_top, largest_component=mask_largest_component,
                 n_views=silhouette_views, frame_agg=silhouette_agg,
+                n_yaw=silhouette_yaw,
                 text_scores=({a.id: sc for a, sc in hits} if three_way_rrf else None),
                 image_scores=(image_scores if three_way_rrf else None))
             if _pick is not None:
