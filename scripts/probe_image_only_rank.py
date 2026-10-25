@@ -158,6 +158,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--gt-root", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
+    ap.add_argument("--index", default="", help="换一个索引 npz（比如灰度那个）")
+    ap.add_argument("--gray", action="store_true",
+                    help="查询侧也转灰度；必须和 --index 指的那个索引同口径，否则量的是噪声")
     ap.add_argument("--silhouette", action="store_true",
                     help="再加一条腿：观测轮廓的 Hu 矩在全库里排序（绕开压扁那个根因）")
     ap.add_argument("--shapes", default="/scratch/jwj/gwm/asset_shapes.json",
@@ -170,7 +173,11 @@ def main(argv: list[str]) -> int:
     if root is None:
         print("没有资产库，量不了"); return 2
     catalog = load_catalog(root)
-    index = AssetIndex.load(Path(root) / "dinov2_index.npz")
+    index_path = Path(a.index) if a.index else (Path(root) / "dinov2_index.npz")
+    index = AssetIndex.load(index_path)
+    print(f"索引 {index_path.name}（查询侧{'转灰度' if a.gray else '不转'}）", flush=True)
+    if a.gray and "gray" not in index_path.name:
+        print("!! 查询转了灰度但索引名里没有 gray，两侧口径可能对不上", flush=True)
     embedder = Embedder(Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"])
     print(f"库 {len(catalog)} 个资产", flush=True)
     shapes: dict[str, list[float]] = {}
@@ -276,12 +283,16 @@ def main(argv: list[str]) -> int:
             crop = crop_object(rgb, np.asarray(mask), box)
             if crop is None:
                 continue
-            vector = embedder.embed_images([Image.fromarray(crop)])[0]
+            _img = Image.fromarray(crop)
+            if a.gray:
+                _img = _img.convert("L").convert("RGB")
+            vector = embedder.embed_images([_img])[0]
             scores = index.scores(vector)
             n_crops += 1
 
             rec = recorded.get(str(obj["id"]))
-            if rec is not None:
+            # 换了索引就别和 rebuild.json 里记的彩色分数对账——那本来就该对不上
+            if rec is not None and not a.index:
                 checked += 1
                 if abs(float(max(scores.values())) - float(rec["image_score_best"])) > 1e-3:
                     mismatched += 1
@@ -362,7 +373,9 @@ def main(argv: list[str]) -> int:
 
 
     print(f"\n自检：对上官方记录的裁剪图 {checked} 个，其中分数对不上的 {mismatched} 个")
-    if checked == 0 or mismatched:
+    if a.index:
+        print("（换了索引，跳过和 rebuild.json 的分数对账）")
+    elif checked == 0 or mismatched:
         print("**自检没过，不出数。** 说明这里跑的不是官方那条路径。")
         return 1
 
