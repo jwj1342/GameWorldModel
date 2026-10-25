@@ -757,6 +757,37 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         true_deg = np.degrees([(base * R.from_quat(q)).magnitude() for q in truth_q])
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
+
+        # **二次配准：用管线实际挑中的资产当模板，按文字分闸。**
+        #
+        # 模板路线一直卡在一个算术上：正确网格把静止/转动判别比从 2.60 提到 4.31，
+        # 但检索命中只有 9%，整体开 = 9% 受益、91% 受害，必然净亏。
+        # 实测文字分能闸出一个子集：最高 25%（score>=1.0）里**检索命中 0.625**
+        # （整体 0.209），而且与裁剪尺寸无关（r=+0.038，不是「大物体」的代名词）。
+        # 静止那一侧算过盈亏平衡点是 p*=0.312，0.625 富余两倍。
+        #
+        # 真转动那一侧**不能靠加权平均推**——模板对真转动是均匀阻尼，而判别比是
+        # 人群统计量不是逐物体量。所以必须实测，这就是这一臂存在的理由。
+        #
+        # 配准跑在感知里、在检索**之前**，所以这是货真价实的「第二遍」：
+        # 拿第一遍产出的 decisions 回头再配一次。两臂都**配对记基线**，
+        # 免得比的是不同的物体。
+        _pick = _chosen_assets(run).get(oid)
+        if _pick:
+            _pid, _pscore = _pick
+            _ptpl = _asset_points_by_id(_pid)
+            if _ptpl is not None:
+                _pdeg = _template_rotation_from_points(clouds, _ptpl)
+                if len(_pdeg) == len(true_deg):
+                    _arm = "gated" if _pscore >= 0.999 else "open"
+                    _pfx = f"pick2/{_arm}/{kind}"
+                    out.setdefault(f"{_pfx}/tmpl_range", []).append(float(np.ptp(_pdeg)))
+                    out.setdefault(f"{_pfx}/base_range", []).append(float(np.ptp(solved_deg)))
+                    out.setdefault(f"{_pfx}/tmpl_rmse", []).append(
+                        float(np.sqrt(np.mean((_pdeg - true_deg) ** 2))))
+                    out.setdefault(f"{_pfx}/base_rmse", []).append(
+                        float(np.sqrt(np.mean((solved_deg - true_deg) ** 2))))
+                    out.setdefault(f"{_pfx}/true_range", []).append(float(np.ptp(true_deg)))
         # 物体在画面里多大，用来分桶。对应关系方法在小物体上必然差（孔径问题 +
         # 邻域平滑），所以报误差之前先把尺寸摆出来——掩码中位只有 264 像素时，
         # 「方法不行」和「物体太小」是两件事。
@@ -2491,23 +2522,13 @@ def _per_frame_box_rotation_deg(clouds: list) -> tuple[np.ndarray, float]:
     return np.asarray(out), oversize
 
 
-def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
-    """拿检索到的资产网格当模板，逐帧把观测配上去。
+def _template_rotation_from_points(clouds: list, template) -> np.ndarray:
+    """给定模板点集，逐帧把观测配上去，返回累积转角序列。
 
-    资产的尺度和物体未必一致（检索只保证类别像），所以配准前先按两边的包围盒
-    对角线把模板缩到同一尺度——ICP 解的是刚体变换，尺度不对会被旋转和平移吸收。
-
-    **缩到哪个对角线上要紧，这里原来是错的。** 第一版用 `np.vstack(clouds)`，也就是
-    所有帧并起来的那团点云的对角线。但那团点云随视角扫动，比物体大一圈——实测
-    并帧对角线是逐帧包围盒中位对角线的 **1.89 倍**。于是资产模板被统一放大了 1.89 倍，
-    而受控扫描说模板相对点云大 1.2 倍就越过对照、大 1.3 倍崩到 88.5°。
-
-    也就是说那次「资产网格当模板，静止假转动 63.71°、RMSE 80.92°」量的不是资产
-    模板，是一个被放大 1.89 倍的资产模板。拟合长方体那一臂换成逐帧中位之后
-    RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
+    尺度按**逐帧包围盒对角线的中位**对齐，不是并帧点云的对角线——后者随视角扫动，
+    实测比前者大 **1.89 倍**，而受控扫描说模板大 1.2 倍就越过对照、1.3 倍崩掉。
     """
     from gwm.perception.registration import icp
-    template = _asset_points(cls)
     if template is None or not clouds:
         return np.array([])
     per_frame = [np.linalg.norm(np.asarray(c, float).max(0) - np.asarray(c, float).min(0))
@@ -2528,6 +2549,47 @@ def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
         warm_R, warm_t = rot @ warm_R, rot @ warm_t + np.asarray(step["translation"], float)
         out.append(float(np.degrees(R.from_matrix(warm_R).magnitude())))
     return np.asarray(out)
+
+
+def _chosen_assets(run: Path) -> dict:
+    """管线**实际挑中**的资产和它的文字分，按物体 id 索引。
+
+    读 `rebuild.json` 的 decisions。这是「二次配准」那条路要的输入：
+    配准跑在感知里、在检索**之前**，所以要用检索结果当模板只能再跑一遍。
+    """
+    rb = run.parent / "rebuild.json"
+    if not rb.is_file():
+        return {}
+    try:
+        recs = json.loads(rb.read_text(encoding="utf-8")).get("decisions") or []
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for r in recs:
+        if not isinstance(r, dict) or not r.get("chosen"):
+            continue
+        key = str(r.get("evidence_id") or r.get("id") or "")
+        if key:
+            out[key] = (str(r["chosen"]), float(r.get("score") or 0.0))
+    return out
+
+
+def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
+    """拿检索到的资产网格当模板，逐帧把观测配上去。
+
+    资产的尺度和物体未必一致（检索只保证类别像），所以配准前先按两边的包围盒
+    对角线把模板缩到同一尺度——ICP 解的是刚体变换，尺度不对会被旋转和平移吸收。
+
+    **缩到哪个对角线上要紧，这里原来是错的。** 第一版用 `np.vstack(clouds)`，也就是
+    所有帧并起来的那团点云的对角线。但那团点云随视角扫动，比物体大一圈——实测
+    并帧对角线是逐帧包围盒中位对角线的 **1.89 倍**。于是资产模板被统一放大了 1.89 倍，
+    而受控扫描说模板相对点云大 1.2 倍就越过对照、大 1.3 倍崩到 88.5°。
+
+    也就是说那次「资产网格当模板，静止假转动 63.71°、RMSE 80.92°」量的不是资产
+    模板，是一个被放大 1.89 倍的资产模板。拟合长方体那一臂换成逐帧中位之后
+    RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
+    """
+    return _template_rotation_from_points(clouds, _asset_points(cls))
 
 
 def _gt_poses(_run: Path) -> dict:
