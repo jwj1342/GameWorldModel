@@ -247,7 +247,9 @@ def main() -> int:
                                       settings.get("mask_largest_component", False)),
                                   crop_namer=(_client
                                               if settings.get("crop_namer", False)
-                                              else None))
+                                              else None),
+                                  three_way_rrf=bool(
+                                      settings.get("three_way_rrf", False)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

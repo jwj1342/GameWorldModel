@@ -297,7 +297,9 @@ def _mask_outline(mask, grid: int = 96, largest_only: bool = False):
 
 def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
                     top: int = 0, n_views: int = 3, n_yaw: int = 8,
-                    largest_component: bool = False) -> tuple:
+                    largest_component: bool = False,
+                    text_scores: dict | None = None,
+                    image_scores: dict | None = None) -> tuple:
     """**用轮廓 IoU 从候选里挑**，全程不碰深度。返回 (资产, IoU) 或 (None, None)。
 
     为什么换掉深度残差。根因是 VGGT 沿相机视线把物体压扁（最短轴只剩正确比例的
@@ -368,11 +370,28 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
     # k=60 是 RRF 的常用值；名次从 1 起算。
     by_iou = {a.id: i for i, (_v, a) in enumerate(sorted(scored, key=lambda t: -t[0]))}
     order_in = {a.id: i for i, a in enumerate(candidates[:top] if top > 0 else candidates)}
+    # **三路都用名次。** 原来是两步混的：retrieve() 先用**分数**把文字和图像混成
+    # 一个顺序（order_in），这里再用名次把轮廓 IoU 和那个顺序融合。
+    # 而实测文字分和图像分的量纲可比（中位 0.504 对 0.501），但 **IoU 和它们完全
+    # 不可比**——所以分数融合那一步是把两种可比的和一种不可比的混在一起。
+    # 给了 text_scores / image_scores 就三路各自排名次再 RRF，去掉最后一处分数混合。
+    ids = [a.id for _v, a in scored]
+    def _rank(d):
+        if not d:
+            return None
+        order = sorted(ids, key=lambda i: -float(d.get(i, 0.0)))
+        return {i: k for k, i in enumerate(order)}
+    r_text, r_img = _rank(text_scores), _rank(image_scores)
     best, best_rrf, best_iou = None, -1.0, None
     for iou, asset in scored:
-        r1 = by_iou.get(asset.id, len(scored)) + 1
-        r2 = order_in.get(asset.id, len(order_in)) + 1
-        rrf = 1.0 / (60.0 + r1) + 1.0 / (60.0 + r2)
+        rrf = 1.0 / (60.0 + by_iou.get(asset.id, len(scored)) + 1)
+        if r_text is None and r_img is None:
+            rrf += 1.0 / (60.0 + order_in.get(asset.id, len(order_in)) + 1)
+        else:
+            if r_text is not None:
+                rrf += 1.0 / (60.0 + r_text.get(asset.id, len(ids)) + 1)
+            if r_img is not None:
+                rrf += 1.0 / (60.0 + r_img.get(asset.id, len(ids)) + 1)
         if rrf > best_rrf:
             best_rrf, best, best_iou = rrf, asset, iou
     return best, (best_iou if best is not None else None)
@@ -439,7 +458,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   silhouette_top: int = 0, masks_by_obj: dict | None = None,
                   cams: dict | None = None,
                   mask_largest_component: bool = False,
-                  crop_namer=None) -> list[dict]:
+                  crop_namer=None, three_way_rrf: bool = False) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -530,9 +549,11 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         _oid = obj["id"] if obj else None
         _mk = (masks_by_obj or {}).get(_oid) if _oid else None
         if silhouette_top > 0 and _mk and cams and root is not None and hits:
-            _pick, _iou = silhouette_pick(_mk, cams, [a for a, _s in hits], root,
-                                          top=silhouette_top,
-                                          largest_component=mask_largest_component)
+            _pick, _iou = silhouette_pick(
+                _mk, cams, [a for a, _s in hits], root,
+                top=silhouette_top, largest_component=mask_largest_component,
+                text_scores=({a.id: sc for a, sc in hits} if three_way_rrf else None),
+                image_scores=(image_scores if three_way_rrf else None))
             if _pick is not None:
                 _by_id = {a.id: sc for a, sc in hits}
                 record["silhouette_iou"] = round(float(_iou), 4)
