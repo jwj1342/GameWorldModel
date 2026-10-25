@@ -20,6 +20,12 @@
   排名也很差 → 嵌入本身就做不了这件事，是 (A)，换模型才有戏。
 
 全程只用存好的 .npz 向量，不跑模型、不碰管线。
+
+`--index` 指到灰度索引时，这个探针变成**灰度实验的对照**：灰度把颜色从两侧
+一起去掉，所以「灰度之后覆盖率没涨」有两种读法——颜色本来就不是主因，或者
+灰度在修好域的同时也毁掉了同样多的分辨力。跑一遍灰度版的留一视角就能分开：
+灰度 LOO 仍然接近 0.99 → 分辨力没丢，覆盖率的变化可以全算到颜色头上；
+灰度 LOO 明显掉 → 两件事混在一起了，那个对比不能用。
 """
 from __future__ import annotations
 
@@ -40,6 +46,7 @@ from gwm.config import load_config, site_name        # noqa: E402
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", action="append", default=[])
+    ap.add_argument("--index", default="", help="换一个索引 npz（比如灰度那个）")
     ap.add_argument("--sample", type=int, default=600, help="抽多少个资产来问")
     ap.add_argument("--admit", type=int, default=64)
     a = ap.parse_args(argv)
@@ -49,7 +56,9 @@ def main(argv: list[str]) -> int:
     root = library_root(cfg)
     if root is None:
         print("没有资产库"); return 2
-    data = np.load(Path(root) / "dinov2_index.npz", allow_pickle=False)
+    index_path = Path(a.index) if a.index else (Path(root) / "dinov2_index.npz")
+    print(f"索引 {index_path.name}")
+    data = np.load(index_path, allow_pickle=False)
     ids = np.asarray([str(x) for x in data["asset_ids"]])
     vecs = np.asarray(data["vectors"], dtype=np.float32)
     vecs /= (np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-9)
