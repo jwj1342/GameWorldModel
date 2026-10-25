@@ -817,6 +817,20 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         solved_deg = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
                                  for m in orientations])
 
+        # **把逐帧重心的高频抖动抹掉再配准。** 这是对齐后的误差分解直接指出来的
+        # 修法：残差是沿视线 ≈0、垂直视线 ≈ 一个物体长度，也就是**像平面内的
+        # 中心散布**。反压扁修的是那个已经 ≈0 的分量，所以越修越差；
+        # 这一条修的是实测占主导的那个。win=1 是同一条代码路径上的对照。
+        for _w in (1, 3, 5):
+            _sc = clouds if _w <= 1 else _smooth_centres(clouds, win=_w)
+            _st = track_rigid(_sc)
+            _so = _st.get("orientations") or []
+            if len(_so) != len(clouds):
+                continue
+            _sd = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude()
+                              for m in _so])
+            out.setdefault(f"smoothctr{_w}/{kind}/range_deg", []).append(float(np.ptp(_sd)))
+
         # **沿视线反压扁之后再配准**——动观测，不是换判据。
         # 位姿这一级所有判据都失败于同一根因：相机在动、逐帧采到的表面在变。
         # 而那个畸变量过了、有方向（沿视线压到 0.526），而且**方向逐帧不同**，
@@ -2675,6 +2689,35 @@ def _asset_template_rotation_deg(clouds: list, cls: str) -> np.ndarray:
     RMSE 从 81.07° 掉到 12.42°，这一臂理应同样受益。
     """
     return _template_rotation_from_points(clouds, _asset_points(cls))
+
+
+def _smooth_centres(clouds: list, win: int = 5) -> list:
+    """把每帧点云**重心的高频抖动**抹掉，再把点云按平滑后的重心摆回去。
+
+    为什么是这个修法。相似变换对齐之后量到的残差结构是：
+
+        沿视线   -0.019 m （≈0）
+        垂直视线  0.206 m （≈一个物体长度，物体中位 0.212 m）
+
+    也就是**逐帧中心的散布主要在像平面内**，不是沿视线的压扁。
+    所以「沿视线反压扁」修错了分量（实测单调变差 32.03°→46.38°）。
+
+    而真实的物体运动是**低频**的（平移、转动都连续），这个散布是**高频**的
+    （掩码边界逐帧跳），两者可分。用滑动中位（对偶发的大跳稳健，均值不行）
+    压掉高频分量，保留低频的真运动。
+
+    注意**只动重心，不动点云内部的相对坐标**——形状不碰，只把整团摆正。
+    """
+    if len(clouds) < 3:
+        return clouds
+    cs = np.asarray([np.asarray(c, float).mean(0) for c in clouds])
+    k = max(3, int(win) | 1)                    # 取奇数
+    half = k // 2
+    sm = np.empty_like(cs)
+    for i in range(len(cs)):
+        lo, hi = max(0, i - half), min(len(cs), i + half + 1)
+        sm[i] = np.median(cs[lo:hi], axis=0)
+    return [np.asarray(c, float) - cs[i] + sm[i] for i, c in enumerate(clouds)]
 
 
 def _unflatten_along_ray(clouds: list, cam_positions: list, factor: float = 1.9) -> list:
