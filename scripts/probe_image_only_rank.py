@@ -159,6 +159,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
     ap.add_argument("--index", default="", help="换一个索引 npz（比如灰度那个）")
+    ap.add_argument("--silhouette-index", action="store_true",
+                    help="查询侧也转成黑底白形的二值轮廓（和轮廓索引配对用）")
     ap.add_argument("--gray", action="store_true",
                     help="查询侧也转灰度；必须和 --index 指的那个索引同口径，否则量的是噪声")
     ap.add_argument("--silhouette", action="store_true",
@@ -284,7 +286,22 @@ def main(argv: list[str]) -> int:
             if crop is None:
                 continue
             _img = Image.fromarray(crop)
-            if a.gray:
+            if a.silhouette_index:
+                # 查询侧的轮廓直接用掩码裁出来——掩码本来就是前景，
+                # 比再从裁剪图按背景色抠一遍准，而且两侧都只剩形状。
+                _m = np.asarray(mask).astype(bool)
+                if _m.shape != rgb.shape[:2]:
+                    from gwm.perception.masks import resize_mask
+                    _m = resize_mask(_m, (rgb.shape[1], rgb.shape[0])).astype(bool)
+                _x0, _y0, _x1, _y1 = (int(v) for v in box)
+                _x0, _y0 = max(0, _x0), max(0, _y0)
+                _x1, _y1 = min(rgb.shape[1], _x1), min(rgb.shape[0], _y1)
+                if _x1 - _x0 < 8 or _y1 - _y0 < 8:
+                    continue
+                _sub = _m[_y0:_y1, _x0:_x1]
+                _img = Image.fromarray(
+                    np.where(_sub[:, :, None], 255, 0).astype(np.uint8).repeat(3, axis=2))
+            elif a.gray:
                 _img = _img.convert("L").convert("RGB")
             vector = embedder.embed_images([_img])[0]
             scores = index.scores(vector)

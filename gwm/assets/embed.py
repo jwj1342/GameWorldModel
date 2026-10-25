@@ -73,8 +73,24 @@ class AssetIndex:
         return best
 
 
+def _to_silhouette(img):
+    """缩略图 -> 黑底白形的二值轮廓图。
+
+    **不能用 alpha 通道抠**：这批缩略图的 alpha 全是 255（有 alpha 通道不等于
+    用了它）。背景是均匀浅灰 (242,242,242)，按离背景色的距离抠前景。
+    这个坑踩过一次，当时造出了「74/74 全对」的假结果。
+    """
+    import numpy as _np
+    from PIL import Image as _Image
+    a = _np.asarray(img.convert("RGB"), dtype=_np.int16)
+    bg = _np.median(_np.stack([a[0, 0], a[0, -1], a[-1, 0], a[-1, -1]]), axis=0)
+    fg = (_np.abs(a - bg[None, None, :]).max(axis=2) > 24)
+    out = _np.where(fg[:, :, None], 255, 0).astype(_np.uint8).repeat(3, axis=2)
+    return _Image.fromarray(out)
+
+
 def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str | Path,
-                batch: int = 32, gray: bool = False) -> dict:
+                batch: int = 32, gray: bool = False, silhouette: bool = False) -> dict:
     """读缩略图目录（thumbnails.mjs 的产物），嵌入后存成一个 npz。
 
     `gray=True` 时两侧都转灰度再嵌入。为什么要这个开关：这个数据集**给每个物体
@@ -106,7 +122,11 @@ def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str |
             if not file.is_file():
                 continue
             img = Image.open(file).convert("RGB")
-            if gray:
+            if silhouette:
+                # 两侧都只剩形状：数据集给物体重新上色、还改 roughness/metalness/
+                # 自发光，外观这个通道在这个数据集上天然失真。轮廓没有外观。
+                img = _to_silhouette(img)
+            elif gray:
                 img = img.convert("L").convert("RGB")
             pending_images.append(img)
             pending_ids.append(asset["id"])
@@ -116,6 +136,6 @@ def build_index(thumbs_dir: str | Path, weights_dir: str | Path, out_path: str |
     index = AssetIndex(np.array(ids, dtype=object).astype("U"),
                        np.concatenate(vectors, axis=0) if vectors else np.zeros((0, 1), dtype=np.float32))
     index.save(out_path)
-    return {"assets": len(manifest["assets"]), "views_embedded": len(ids), "gray": gray,
+    return {"assets": len(manifest["assets"]), "views_embedded": len(ids), "gray": gray, "silhouette": silhouette,
             "dim": int(index.vectors.shape[1]) if index.vectors.size else 0,
             "out": str(out_path)}

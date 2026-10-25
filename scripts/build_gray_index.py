@@ -30,11 +30,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--rgb", action="store_true", help="建彩色的（对照用）")
+    ap.add_argument("--silhouette", action="store_true",
+                    help="建**轮廓**索引：黑底白形，两侧都只剩形状")
     a = ap.parse_args(argv)
     files = [REPO / "configs/default.yaml", REPO / f"configs/{site_name()}.yaml", *a.config]
     cfg = load_config([f for f in files if Path(f).is_file()])
     weights = Path(cfg["paths"]["weights"]) / cfg["weights"]["dinov2"]
-    info = build_index(a.thumbs, weights, a.out, gray=not a.rgb)
+    info = build_index(a.thumbs, weights, a.out,
+                       gray=(not a.rgb and not a.silhouette),
+                       silhouette=a.silhouette)
     print(json.dumps(info, ensure_ascii=False))
     return 0
 
