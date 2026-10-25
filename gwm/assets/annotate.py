@@ -366,8 +366,24 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
             # 取**最小值**才是多视角**约束**：候选在任何一帧上对不上就被否掉。
             # 错的候选常能在某个视角下凑合匹配，但很难所有视角都匹配。
             # residual_pick 那边多视角真有收益，靠的是累积表面覆盖，不是平均。
-            scored.append((float(_np.min(per) if frame_agg == "min"
-                                 else _np.median(per)), asset))
+            # **min 太严，median 不是约束，取低分位数。**
+            # 配对分析（150 个物体）显示 min 相对 median 的优劣**随可用观测帧数
+            # 单调翻转**：帧数 10~19 时 min 赢 14 输 10（净 +2.271），
+            # 帧数 32 时 min 赢 7 输 **14**（净 −0.425）。
+            #
+            # 机制：min 取**最差的那一帧**。可用观测越多，抽到的帧视角跨度越大，
+            # **连正确资产也总会有一帧匹配得差**（自遮挡、被别的物体挡），
+            # 于是 min 把正确答案一起罚掉。
+            #
+            # 低分位数（q25）保留「视角有否决权」的约束性——错候选在多数视角下
+            # 都对不上，低分位仍然低——同时对个别坏帧稳健。
+            if frame_agg == "min":
+                _v = float(_np.min(per))
+            elif frame_agg == "q25":
+                _v = float(_np.quantile(per, 0.25))
+            else:
+                _v = float(_np.median(per))
+            scored.append((_v, asset))
     if not scored:
         return None, None
     # **倒数名次融合**，不是只按 IoU 挑。
