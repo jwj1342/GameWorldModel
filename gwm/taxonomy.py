@@ -27,9 +27,26 @@ RIGID_STRUCTURE_CLASSES = {"wall", "floor", "ground", "terrain", "rail", "track"
 
 
 def is_rigid_structure(name: str) -> bool:
-    """类名是不是「建筑的一部分」。按词匹配，和 is_static_class 一致。"""
-    tokens = {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t}
-    return any(w in tokens for w in RIGID_STRUCTURE_CLASSES)
+    """类名是不是「建筑的一部分」。**用完全相等，不是按词匹配。**
+
+    和 `is_ground_class` 同一个道理（那里也写了）：这一条直接改归属、而且故意
+    忽略运动证据，强度太高，宁可漏不可错。
+
+    按词匹配量过，不能用——**资产库里的类名本身就带这些词**：
+
+        wall  23/290 个资产（wall wood window stone、display wall）
+        road  16/290      track 11/290      floor 6/290
+        block  4/290（block snow large slope steep）
+        rail   3/290（trainset rail detailed bend、balcony rail）
+
+    而真值里的结构件类名是**单个词**（`rail`、`block`、`ground`）。
+    换成完全相等之后：
+
+        抓到结构件  369/369 = **100%**
+        误伤资产      1/290 = **0.3%**（唯一那个类名就叫 floor 的资产，
+                                        而它本来就被 is_ground_class 捞走了）
+    """
+    return (name or "").strip().lower() in RIGID_STRUCTURE_CLASSES
 
 
 def is_ground_class(name: str) -> bool:
