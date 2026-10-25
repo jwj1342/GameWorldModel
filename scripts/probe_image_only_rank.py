@@ -91,6 +91,62 @@ def _unflatten(r: list[float], k: float = 0.526) -> list[float]:
     return [x / e[0] for x in e] if e[0] > 1e-9 else r
 
 
+_SIL_MATRIX = None
+
+
+def _sil_matrix(catalog):
+    """全库轮廓描述子矩阵：(资产数 x 4 视角, D)、每行属于哪个资产的整数下标、资产 id 表。
+
+    **为什么要这条腿。** 已经坐实根因是 VGGT 沿相机视线把物体压扁（最短轴只剩
+    0.526），而**沿视线的误差投影到像平面上恰好是零**——轮廓是唯一一个绕开这个
+    根因的判据，实测也确实比深度残差好 2.6 倍。
+
+    但到今天为止轮廓只被用来**重排一个由外观生成的 64 人池子**，从没被允许
+    **在全库 4812 个里生成候选**。而那个池子的覆盖率 0.284 正是端到端的天花板。
+    """
+    global _SIL_MATRIX
+    if _SIL_MATRIX is not None:
+        return _SIL_MATRIX
+    from scripts.probe_motion_signal import _asset_silhouettes
+    rows, idx, ids = [], [], []
+    for asset in catalog:
+        descs = _asset_silhouettes(asset.id)
+        if not descs:
+            continue
+        here = len(ids)
+        ids.append(asset.id)
+        for d in descs:
+            rows.append(d)
+            idx.append(here)
+    if not rows:
+        _SIL_MATRIX = (None, None, None)
+        return _SIL_MATRIX
+    _SIL_MATRIX = (np.stack(rows), np.asarray(idx), ids)
+    print(f"轮廓库 {len(ids)} 个资产 / {len(rows)} 个视角", flush=True)
+    return _SIL_MATRIX
+
+
+def _sil_order(obs_descs, catalog) -> list[str] | None:
+    """观测轮廓对**全库**排序。协议和 _silhouette_pick_rate 一致：
+    对资产的 4 个视角取最近，对帧取中位；距离是描述子上的 L1。
+
+    用 np.minimum.at 做分组最小值——逐行 Python 循环是 4800x4x帧数x物体数 次，
+    跑不完。
+    """
+    mat, idx, ids = _sil_matrix(catalog)
+    if mat is None or not obs_descs:
+        return None
+    per_frame = []
+    for o in obs_descs:
+        d = np.abs(mat - o[None, :]).sum(axis=1)
+        best = np.full(len(ids), np.inf)
+        np.minimum.at(best, idx, d)
+        per_frame.append(best)
+    agg = np.median(np.stack(per_frame), axis=0)
+    order = np.argsort(agg)
+    return [ids[i] for i in order]
+
+
 def _shape_order(obs: list[float], shapes: dict) -> list[str]:
     return sorted(shapes, key=lambda k: sum(abs(x - y) for x, y in zip(obs, shapes[k])))
 
@@ -102,6 +158,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--gt-root", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--admit", type=int, default=32, help="报「前 N 名里有没有」的那个 N")
+    ap.add_argument("--silhouette", action="store_true",
+                    help="再加一条腿：观测轮廓的 Hu 矩在全库里排序（绕开压扁那个根因）")
     ap.add_argument("--shapes", default="/scratch/jwj/gwm/asset_shapes.json",
                     help="资产边长比例缓存；加上它就同时量形状这条腿和两条腿的并集")
     a = ap.parse_args(argv)
@@ -142,6 +200,9 @@ def main(argv: list[str]) -> int:
     chosen_ranks: list[int] = []
     shape_ranks: list[int] = []
     shape_fix_ranks: list[int] = []
+    sil_ranks: list[int] = []
+    sil_null_ranks: list[int] = []
+    union_sil_saves = 0
     shape_null_ranks: list[int] = []
     oracle_ranks: list[int] = []
     union_n = union_img = union_shape_saves = 0
@@ -241,6 +302,33 @@ def main(argv: list[str]) -> int:
                 if cr is not None:
                     chosen_ranks.append(cr)
 
+            # ---- 轮廓这条腿：全库按 Hu 矩排序 ----
+            sil_r = None
+            if a.silhouette:
+                from scripts.probe_motion_signal import _hu_moments
+                per_obj = masks.get(obj["id"]) or {}
+                avail = sorted(per_obj)
+                if len(avail) > 5:
+                    st = len(avail) / 5.0
+                    avail = [avail[min(len(avail) - 1, int(st * (i + 0.5)))]
+                             for i in range(5)]
+                descs = [d for d in (_hu_moments(np.asarray(per_obj[f]).astype(bool))
+                                     for f in avail) if d is not None]
+                sorder = _sil_order(descs, catalog)
+                if sorder:
+                    sil_r = best_rank(sorder, wanted)
+                    if sil_r is not None:
+                        sil_ranks.append(sil_r)
+                    if others:
+                        donor3 = gt_by_clip[rng.choice(others)]
+                        fake3 = set(rng.sample(sorted(donor3), min(len(wanted), len(donor3))))
+                        srn3 = best_rank(sorder, fake3)
+                        if srn3 is not None:
+                            sil_null_ranks.append(srn3)
+                    half3 = max(1, a.admit // 2)
+                    if r is not None and sil_r <= half3 and r > half3:
+                        union_sil_saves += 1
+
             # ---- 形状这条腿：全库按边长比例排序，同样的集合判据 ----
             if shapes and rec is not None:
                 obs = ext_pred.get(str(rec.get("id")))
@@ -325,6 +413,21 @@ def main(argv: list[str]) -> int:
             if o > 2 * max(r_, 0.001):
                 print(f"  → 形状这条腿的信号是**真的**，差距全在几何；"
                       f"把几何修到位，光靠边长比例就能覆盖 {o:.1%}")
+
+    if sil_ranks:
+        print(f"\n########## 轮廓这条腿（全库按 Hu 矩） ##########")
+        show("真·观测轮廓", sil_ranks, sum(1 for x in sil_ranks if x <= a.admit))
+        show("零假设·别片段的集合", sil_null_ranks,
+             sum(1 for x in sil_null_ranks if x <= a.admit))
+        if real_ranks:
+            ri = sum(1 for x in real_ranks if x <= a.admit) / len(real_ranks)
+            rs = sum(1 for x in sil_ranks if x <= a.admit) / len(sil_ranks)
+            print(f"  对比图像那条腿：轮廓 {rs:.3f} vs 图像 {ri:.3f}（同样前 {a.admit} 名）")
+        if union_sil_saves:
+            print(f"  图像没覆盖、轮廓前 {max(1, a.admit//2)} 覆盖了的："
+                  f"{union_sil_saves} 个 → 两条腿互补")
+        else:
+            print("  轮廓没有救回任何一个图像漏掉的物体")
 
     if union_n:
         half = max(1, a.admit // 2)
