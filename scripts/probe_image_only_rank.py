@@ -76,6 +76,21 @@ def _ratios(extent) -> list[float] | None:
     return [x / e[0] for x in e]
 
 
+def _unflatten(r: list[float], k: float = 0.526) -> list[float]:
+    """把已知的压扁补回去再比形状。
+
+    VGGT 沿相机视线把物体压扁，实测**最短轴只剩正确比例的 0.526**。
+    形状这条腿拿重建边长的比例去和资产库比，那个系统偏差是直接带进去的。
+    最短轴除以 0.526 再归一化，是对这个已知偏差的一阶校正——不是新信号，
+    是把一个量过的常数用上。校正后仍不动，说明偏差不是靠常数能修的
+    （比如它随视角变），那就得修几何本身。
+    """
+    e = sorted(r, reverse=True)
+    e[-1] = e[-1] / k if k > 1e-6 else e[-1]
+    e = sorted(e, reverse=True)
+    return [x / e[0] for x in e] if e[0] > 1e-9 else r
+
+
 def _shape_order(obs: list[float], shapes: dict) -> list[str]:
     return sorted(shapes, key=lambda k: sum(abs(x - y) for x, y in zip(obs, shapes[k])))
 
@@ -126,6 +141,7 @@ def main(argv: list[str]) -> int:
     n_crops = 0
     chosen_ranks: list[int] = []
     shape_ranks: list[int] = []
+    shape_fix_ranks: list[int] = []
     shape_null_ranks: list[int] = []
     oracle_ranks: list[int] = []
     union_n = union_img = union_shape_saves = 0
@@ -233,6 +249,9 @@ def main(argv: list[str]) -> int:
                     sr = best_rank(sorder, wanted)
                     if sr is not None:
                         shape_ranks.append(sr)
+                    sfr = best_rank(_shape_order(_unflatten(obs), shapes), wanted)
+                    if sfr is not None:
+                        shape_fix_ranks.append(sfr)
                     if others:
                         donor2 = gt_by_clip[rng.choice(others)]
                         fake2 = set(rng.sample(sorted(donor2), min(len(wanted), len(donor2))))
@@ -280,6 +299,9 @@ def main(argv: list[str]) -> int:
              sum(1 for x in shape_ranks if x <= a.admit))
         show("零假设·别片段的集合", shape_null_ranks,
              sum(1 for x in shape_null_ranks if x <= a.admit))
+        if shape_fix_ranks:
+            show("重建 extent + 压扁校正", shape_fix_ranks,
+                 sum(1 for x in shape_fix_ranks if x <= a.admit))
         if oracle_ranks:
             show("预言机·真值 extent", oracle_ranks,
                  sum(1 for x in oracle_ranks if x <= a.admit))
