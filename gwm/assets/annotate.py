@@ -297,6 +297,7 @@ def _mask_outline(mask, grid: int = 96, largest_only: bool = False):
 
 def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
                     top: int = 0, n_views: int = 3, n_yaw: int = 8,
+                    frame_agg: str = "median",
                     largest_component: bool = False,
                     text_scores: dict | None = None,
                     image_scores: dict | None = None) -> tuple:
@@ -357,7 +358,16 @@ def silhouette_pick(masks_per_frame: dict, cams: dict, candidates: list, root,
                     hi = max(hi, float(_np.logical_and(sil, g).sum()) / union)
             per.append(hi)
         if per:
-            scored.append((float(_np.median(per)), asset))
+            # **跨帧怎么合，决定了多帧是「重采样」还是「约束」。**
+            # 原来用中位：把每帧当成同一个测试的独立样本取稳健平均，
+            # 所以**加帧只是重采样**。实测 3→7 帧三个指标里两个变差
+            # （命中 0.213→0.177、形状距离 0.0798→0.0925）。
+            #
+            # 取**最小值**才是多视角**约束**：候选在任何一帧上对不上就被否掉。
+            # 错的候选常能在某个视角下凑合匹配，但很难所有视角都匹配。
+            # residual_pick 那边多视角真有收益，靠的是累积表面覆盖，不是平均。
+            scored.append((float(_np.min(per) if frame_agg == "min"
+                                 else _np.median(per)), asset))
     if not scored:
         return None, None
     # **倒数名次融合**，不是只按 IoU 挑。
@@ -459,7 +469,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   cams: dict | None = None,
                   mask_largest_component: bool = False,
                   crop_namer=None, three_way_rrf: bool = False,
-                  gray_query: bool = False, silhouette_views: int = 3) -> list[dict]:
+                  gray_query: bool = False, silhouette_views: int = 3,
+                  silhouette_agg: str = "median") -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -559,7 +570,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
             _pick, _iou = silhouette_pick(
                 _mk, cams, [a for a, _s in hits], root,
                 top=silhouette_top, largest_component=mask_largest_component,
-                n_views=silhouette_views,
+                n_views=silhouette_views, frame_agg=silhouette_agg,
                 text_scores=({a.id: sc for a, sc in hits} if three_way_rrf else None),
                 image_scores=(image_scores if three_way_rrf else None))
             if _pick is not None:
