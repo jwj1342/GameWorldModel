@@ -153,9 +153,25 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         guess = o["motion_guess"]
         # Legacy Evidence has no `moves` field. A known motion type is positive
         # evidence too; even a conflicting binary flag must not erase it.
-        has_motion = guess.get("moves") is True or guess.get("type") in {
+        #
+        # **但 `moves` 不能用在这里。** 当初把与条件换成 `moves` 的理由是它
+        # 「真值感知上查全 0.925」——**只量了查全，没量精确率**，而这里需要的
+        # 恰恰是精确率（「有没有**证据表明**它会动」）。实测 25 条片段的 evidence：
+        #
+        #     rail_*   moves=True  60/68 = **88.2%**   真值里全是 static
+        #     block_*  moves=True  19/26 = 73%         真值里全是 static
+        #
+        # 多半是 ICP 在相机运动下无中生有解出转动。后果是结构件规则被这条假阳
+        # 整个关掉：rail 进 objects、标成 kind=asset、送进资产检索——而真值里
+        # 结构件是 primitive，**根本没有「该挑哪个」这个答案**。实测 273 个资产
+        # 决策里 151 个（55.3%）是这么来的，命中率恒为 0，把整体准确率从
+        # 0.230 稀释到 0.103。
+        #
+        # 所以对**名字就像结构件**的东西，只有**明确的运动类型**才算证据，
+        # 二元标志不算。名字不像结构件的走原来那条，`moves` 仍然生效。
+        _typed_motion = guess.get("type") in {
             "prismatic", "trajectory", "revolute", "spin", "periodic_translate", "periodic_rotate"}
-        looks_structural = is_static_class(cls, cfg) and not has_motion
+        looks_structural = is_static_class(cls, cfg) and not _typed_motion
         if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             #
