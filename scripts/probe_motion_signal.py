@@ -838,6 +838,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             _gd = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude() for m in _go])
             _tag = "gate_off" if _g is None else f"gate{int(_g * 100):03d}"
             out.setdefault(f"{_tag}/{kind}/range_deg", []).append(float(np.ptp(_gd)))
+            # **真值一起记，否则转动那一侧读不了。** 静止那侧「越小越好」没歧义，
+            # 但真会转的物体上，解出的幅度变小可能是「去掉了假转动」，
+            # 也可能是「把真转动一起压没了」——模板路线就是死在后者。
+            # 不记真值就分不开这两种，n 再大也没用。
+            out.setdefault(f"{_tag}/{kind}/true_range", []).append(float(np.ptp(true_deg)))
+            out.setdefault(f"{_tag}/{kind}/err_rmse", []).append(
+                float(np.sqrt(np.mean((_gd - true_deg) ** 2))))
 
         # **把逐帧重心的高频抖动抹掉再配准。** 这是对齐后的误差分解直接指出来的
         # 修法：残差是沿视线 ≈0、垂直视线 ≈ 一个物体长度，也就是**像平面内的
