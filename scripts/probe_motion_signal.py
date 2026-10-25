@@ -100,11 +100,69 @@ def perceive(clip_dir: Path, work: Path, perception: str = "gt") -> dict:
     return run_perception(str(clip_dir / "clip.mp4"), clip_dir.name, work / clip_dir.name, cfg)
 
 
+def _similarity_fit(src, dst):
+    """Umeyama：求把 src 对齐到 dst 的相似变换（尺度 + 旋转 + 平移）。
+
+    **为什么必须先对齐。** 管线的 `metric_scale` 实测是
+    `{"factor": 1.0, "source": "none", "reason": "only 0 objects had a size prior"}`
+    ——也就是**根本没做米制归一**，证据里的坐标是 VGGT 的任意尺度，而真值是米。
+    直接相减得到的「误差」里绝大部分是**尺度和坐标系差**，不是定位误差。
+
+    实测后果：没对齐时中心误差中位 **1.303 m**，而物体最长边中位只有 **0.212 m**
+    （误差是物体的 6 倍、接近整个场景宽度 3 m）。而且**一个固定的世界系偏移在
+    视线随相机旋转时分解，天然就是「垂直分量远大于沿视线分量」**——所以那组
+    perp≫along 根本是错配的指纹，不是物理结论，差点据此下了强结论。
+    """
+    a = np.asarray(src, float); b = np.asarray(dst, float)
+    if len(a) < 3 or a.shape != b.shape:
+        return None
+    ma, mb = a.mean(0), b.mean(0)
+    ca, cb = a - ma, b - mb
+    cov = cb.T @ ca / len(a)
+    try:
+        u, d, vt = np.linalg.svd(cov)
+    except np.linalg.LinAlgError:
+        return None
+    sgn = np.ones(3)
+    if np.linalg.det(u) * np.linalg.det(vt) < 0:
+        sgn[-1] = -1.0
+    rot = u @ np.diag(sgn) @ vt
+    var = (ca ** 2).sum() / len(a)
+    if var <= 1e-12:
+        return None
+    scale = float((d * sgn).sum() / var)
+    return scale, rot, mb - scale * (rot @ ma)
+
+
 def mode_bias(evidence: dict, truth: dict, _k, _work) -> dict:
-    """误差沿视线分解。负的沿视线分量 = 观测中心偏在靠近相机的一侧。"""
+    """误差沿视线分解。负的沿视线分量 = 观测中心偏在靠近相机的一侧。
+
+    **先用相似变换把证据对齐到真值**（见 `_similarity_fit`）：管线没做米制归一，
+    不对齐的话量到的「误差」主要是尺度/坐标系差。对齐之后剩下的才是定位误差。
+    """
     poses = {round(float(p["t"]), 3): np.array(p["pos"], float)
              for p in (evidence.get("camera") or {}).get("poses", []) if "t" in p}
-    out = {"raw": [], "along": [], "perp": [], "pushed": []}
+    out = {"raw": [], "along": [], "perp": [], "pushed": [], "fit_scale": []}
+    # 先收齐配对的点，拟合一次相似变换（整条片段共用一个）
+    _src, _dst = [], []
+    for obj in evidence["objects"]:
+        series = truth.get(obj["id"])
+        if not series:
+            continue
+        for box in obj["obb"]:
+            t = round(float(box["t"]), 3)
+            if t in series:
+                _src.append(np.asarray(box["center"], float))
+                _dst.append(np.asarray(series[t], float))
+    _fit = _similarity_fit(_src, _dst) if len(_src) >= 3 else None
+    if _fit is None:
+        return {}
+    _sc, _rot, _tr = _fit
+    out["fit_scale"].append(float(_sc))
+
+    def _align(v):
+        return _sc * (_rot @ np.asarray(v, float)) + _tr
+
     for obj in evidence["objects"]:
         series = truth.get(obj["id"])
         if not series:
@@ -113,8 +171,9 @@ def mode_bias(evidence: dict, truth: dict, _k, _work) -> dict:
             t = round(float(box["t"]), 3)
             if t not in poses or t not in series:
                 continue
-            observed, gt = np.array(box["center"], float), series[t]
-            view = observed - poses[t]
+            observed = _align(box["center"])
+            gt = np.asarray(series[t], float)
+            view = observed - _align(poses[t])
             norm = float(np.linalg.norm(view))
             if norm < 1e-6:
                 continue
@@ -124,7 +183,7 @@ def mode_bias(evidence: dict, truth: dict, _k, _work) -> dict:
             out["raw"].append(float(np.linalg.norm(error)))
             out["along"].append(along)
             out["perp"].append(float(np.linalg.norm(error - along * view)))
-            half = 0.5 * float(np.abs(np.array(box["size"], float)) @ np.abs(view))
+            half = 0.5 * float(np.abs(np.array(box["size"], float) * _sc) @ np.abs(view))
             out["pushed"].append(float(np.linalg.norm(observed + half * view - gt)))
     return out
 
