@@ -860,13 +860,25 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 而我今天所有假转动的数（27.98°、32.03°…）都是在闸**关着**的情况下量的。
         #
         # None 是对照档，和另外两档在同一条代码路径上。
-        for _g in (None, 0.05, 0.10):
-            _gt_ = track_rigid(clouds) if _g is None else track_rigid(clouds, rotation_min_gain=_g)
+        # **断开累积这一档**（2026-10-25 加）。实测假转动随帧数增长：
+        # 12 帧（11 步）总量 21.67°，32 帧（31 步）32.72°，拟合出 ∝ N^0.40——
+        # 接近随机游走，也就是误差由**累积**主导，不由任何单步主导。
+        # 根因在 `track_rigid` 的 `R_acc = step["rotation"] @ R_acc`：配准目标
+        # 虽然不是上一帧（是累积模型），但**位姿是逐步相乘的**，每步的转动误差在
+        # N 步上复合。注释里说的「不逐帧链式配准」指的是配准目标，不是位姿合成。
+        #
+        # `track_rigid(refine=n)` 走 `refine_poses`——全部帧建模型、每帧独立对它配，
+        # 累积就断开了。这条路径**探针一次都没调用过**，而 registration.py 注释里
+        # 「实测更差（172d5ae）」是在别处、而且是在 9 像素的物体上量的。
+        # 现在 object_centric 有 680 像素，这个旧结论值得重验。
+        for _tag, _kw in (("gate_off", {}), ("gate005", {"rotation_min_gain": 0.05}),
+                          ("gate010", {"rotation_min_gain": 0.10}),
+                          ("refine1", {"refine": 1}), ("refine3", {"refine": 3})):
+            _gt_ = track_rigid(clouds, **_kw)
             _go = _gt_.get("orientations") or []
             if len(_go) != len(clouds):
                 continue
             _gd = np.degrees([R.from_matrix(np.asarray(m, float)).magnitude() for m in _go])
-            _tag = "gate_off" if _g is None else f"gate{int(_g * 100):03d}"
             out.setdefault(f"{_tag}/{kind}/range_deg", []).append(float(np.ptp(_gd)))
             # **真值一起记，否则转动那一侧读不了。** 静止那侧「越小越好」没歧义，
             # 但真会转的物体上，解出的幅度变小可能是「去掉了假转动」，
