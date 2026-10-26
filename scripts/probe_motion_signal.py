@@ -20,6 +20,7 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import math
 import random
 import statistics
@@ -240,7 +241,7 @@ def mode_signal(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             m = np.asarray(mask).astype(bool)
             if m.shape != geom.depth[k].shape:
                 m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
-            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=CLOUD_STRIDE),
                            _fix(geom.cam_to_world[k]))
             if len(pts) < 20:
                 continue
@@ -303,7 +304,7 @@ def mode_register(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             m = np.asarray(mask).astype(bool)
             if m.shape != geom.depth[k].shape:
                 m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
-            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=CLOUD_STRIDE),
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts); stamps.append(t)
@@ -463,7 +464,7 @@ def mode_articulation(evidence: dict, truth: dict, kinds: dict, run: Path) -> di
             m = np.asarray(mask).astype(bool)
             if m.shape != geom.depth[k].shape:
                 m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
-            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=CLOUD_STRIDE),
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts)
@@ -601,7 +602,7 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             m = np.asarray(mask).astype(bool)
             if m.shape != geom.depth[k].shape:
                 m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
-            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=CLOUD_STRIDE),
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts); frames.append(int(fi))
@@ -1047,6 +1048,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
 # 片段目录只有 main 知道，而 icp 模式要从里面读 gt_states.jsonl 里的逐帧朝向。
 # 改 gt_series 的返回会动到另外四个模式，所以这里用一个模块级变量，main 每轮设一次。
 CURRENT_CLIP_DIR: Path | None = None
+
+# **点云降采样步长。** 原来写死 4，而它和「每帧至少 30 点」那道闸相乘之后
+# 正好把小物体全卡掉：物体短边中位 16 像素、掩码约 290 个像素，stride=4 之后
+# 只剩约 18 点 < 30，于是整帧被丢、物体凑不够 6 帧、直接 continue。
+# 实测后果：真值里 73 个关节物体，探针只看到 15 个（**丢 79.5%**）；
+# 290 个物体只处理了 133 个。而「关节信号太弱」这个结论正是在那 15 个上得出的。
+CLOUD_STRIDE = int(os.environ.get("GWM_CLOUD_STRIDE", "4"))
 
 
 def _template_rotation_deg(clouds: list, frames: list, poses: dict) -> np.ndarray:
@@ -2963,7 +2971,7 @@ def mode_common(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
             m = np.asarray(mask).astype(bool)
             if m.shape != geom.depth[k].shape:
                 m = resize_mask(m, (geom.depth[k].shape[1], geom.depth[k].shape[0]))
-            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=4),
+            pts = to_world(unproject(geom.depth[k], geom.intrinsics[k], m, stride=CLOUD_STRIDE),
                            _fix(geom.cam_to_world[k]))
             if len(pts) >= 30:
                 clouds.append(pts); stamps.append(t)
