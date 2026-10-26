@@ -881,10 +881,20 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 已知代价：第一帧也只是个局部表面，视角差远了之后重叠少，
         # 局部能滑到好几个位置都说得通（见 visible_subset 的注释）。
         # 所以真值一起记，免得把「压没真转动」读成「去掉假转动」。
-        _arms = [("gate_off", {}), ("gate005", {"rotation_min_gain": 0.05}),
+        # refine1/refine3 已经测完并否定（24 个静止物体配对：更好 11 更差 13，
+        # 差中位 **+0.00°**，p=0.84）。失败的原因写在 refine_poses 自己的实现里：
+        # 它用**第一遍解出的位姿**去建那个「完整模型」，位姿已经漂了，模型就是一团糊，
+        # 再拿每帧配它只能复现同样的漂移——**它继承了自己要修的那个误差**。
+        # 所以不再跑这两臂，省下的算力给下面两臂。
+        #
+        # 第一帧的点云是**唯一一个不依赖位姿估计**的固定参照，这是它和
+        # refine_poses 的本质区别，也是和 prim/asset/gtref 的区别（那三个的模板
+        # 形状本身就是错的）。gate010 是目前最好的方法，所以要比的是它，不是 gate_off。
+        _tmpl0 = np.asarray(clouds[0], float)
+        _arms = [("gate_off", {}),
                  ("gate010", {"rotation_min_gain": 0.10}),
-                 ("refine1", {"refine": 1}), ("refine3", {"refine": 3}),
-                 ("frame0tmpl", {"template": np.asarray(clouds[0], float)})]
+                 ("frame0tmpl", {"template": _tmpl0}),
+                 ("frame0tmpl_gate010", {"template": _tmpl0, "rotation_min_gain": 0.10})]
         for _tag, _kw in _arms:
             _gt_ = track_rigid(clouds, **_kw)
             _go = _gt_.get("orientations") or []
