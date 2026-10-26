@@ -264,7 +264,8 @@ def main() -> int:
                                   silhouette_agg=str(settings.get("silhouette_agg", "median")),
                                   silhouette_yaw=int(settings.get("silhouette_yaw", 8)),
                                   force_query=str(settings.get("force_query", "")),
-                                  residual_fuse=bool(settings.get("residual_fuse", False)))
+                                  residual_fuse=bool(settings.get("residual_fuse", False)),
+                                  residual_tail_q=float(settings.get("residual_tail_q", 0.0)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"

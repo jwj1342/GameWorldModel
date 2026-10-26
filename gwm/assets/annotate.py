@@ -140,6 +140,7 @@ def shape_rerank(hits: list, observed: list[float] | None, shapes: dict,
 
 
 def residual_pick(clouds: list, candidates: list, root, top: int = 0, fuse: bool = False,
+                  tail_q: float = 0.0,
                   n_views: int = 7) -> tuple:
     """**用配准残差从候选里挑**：把每个候选网格缩到观测点云的尺度，ICP 配一次，
     取残差最小的。返回 (资产, 残差) 或 (None, None)。
@@ -223,7 +224,28 @@ def residual_pick(clouds: list, candidates: list, root, top: int = 0, fuse: bool
         rs = []
         for q in queries:
             step = icp(q, model)
-            if step["ok"] and step["rmse"] is not None:
+            if tail_q > 0 and step["ok"]:
+                # **用残差分布的尾部，而不是均值。**
+                #
+                # 为什么换形式。实测面对**视觉近邻**时残差判据等于随机
+                # （0.018 对池内随机 0.0184），而且**真值几何**（0.018）和
+                # **多帧融合**（0.018）都救不了——输入已经完美且完整，
+                # 所以问题在判据的**形式**。
+                #
+                # 形式问题具体在哪：`icp()` 的 rmse 是**全表面的均值**，
+                # 而且它还**主动扔掉尾部**（reject_factor=2.5，距离超过中位
+                # 2.5 倍的点当离群点剔除）。视觉近邻共享绝大部分表面、
+                # 只在局部不同——**那些局部差异点正好先被当离群点扔掉，
+                # 剩下的再被平均抹平**。判据对局部差异是双重失明的。
+                #
+                # 取高分位（不剔除）就是把那个被扔掉的信号捡回来。
+                _R = _np.asarray(step["rotation"], float)
+                _t = _np.asarray(step["translation"], float)
+                _moved = q @ _R.T + _t
+                from scipy.spatial import cKDTree as _KD
+                _d, _ = _KD(model).query(_moved, k=1)
+                rs.append(float(_np.quantile(_d, tail_q)))
+            elif step["ok"] and step["rmse"] is not None:
                 rs.append(float(step["rmse"]))
         if not rs:
             continue
@@ -501,6 +523,7 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
                   crop_namer=None, three_way_rrf: bool = False,
                   gray_query: bool = False, silhouette_views: int = 3,
                   force_query: str = "", residual_fuse: bool = False,
+                  residual_tail_q: float = 0.0,
                   silhouette_agg: str = "median",
                   silhouette_yaw: int = 8) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
@@ -624,7 +647,8 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
         _cloud = (clouds or {}).get(obj["id"]) if obj else None
         if silhouette_top <= 0 and residual_top > 0 and _cloud and root is not None and hits:
             _pick, _rmse = residual_pick(_cloud, [a for a, _s in hits], root,
-                                         top=residual_top, fuse=residual_fuse)
+                                         top=residual_top, fuse=residual_fuse,
+                                         tail_q=residual_tail_q)
             if _pick is not None:
                 _by_id = {a.id: s for a, s in hits}
                 record["residual_rmse"] = round(float(_rmse), 5)
