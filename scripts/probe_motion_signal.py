@@ -96,6 +96,15 @@ def perceive(clip_dir: Path, work: Path, perception: str = "gt") -> dict:
         # 残差那一臂根本不触发），几何换成真实的 VGGT。
         files.append(REPO / "configs/perception/gt_segmentation.yaml")
     cfg = load_config([f for f in files if Path(f).is_file()])
+    # 帧数覆盖。实测假转动跟的是「相机每帧绕物体转多少」（Spearman +0.387, p=0.010,
+    # n=42，预测变量跨 1.79 个数量级），而张角步长 = 相机角速度 ÷ 采样帧数。
+    # 帧数是这条链上唯一免费的旋钮，所以要能从外面扫它。
+    _gf = os.environ.get("GWM_GEOMETRY_FRAMES")
+    if _gf:
+        cfg["frames"]["geometry_frames"] = int(_gf)
+    _fps = os.environ.get("GWM_SAMPLE_FPS")
+    if _fps:
+        cfg["frames"]["sample_fps"] = float(_fps)
     cfg["perception"]["gt_program"] = str(clip_dir / "program.json")
     if perception == "gtcamseg":
         cfg["perception"]["gt_camera_program"] = str(clip_dir / "program.json")
