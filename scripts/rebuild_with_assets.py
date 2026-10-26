@@ -37,8 +37,8 @@ from gwm.feedback.completeness import assess, format_table      # noqa: E402
 from gwm.feedback.interaction_probe import measure as probe_interaction, merge as merge_probe  # noqa: E402
 from gwm.feedback.likeness import likeness                      # noqa: E402
 from gwm.binding.platformer import scale_program                # noqa: E402
-from gwm.synthesis.contact import settle_on_ground              # noqa: E402
-from gwm.synthesis.dedup import merge_duplicates                # noqa: E402
+from gwm.synthesis.contact import settle_on_ground, drop_sunk   # noqa: E402
+from gwm.synthesis.dedup import merge_duplicates, merge_fragment_chains   # noqa: E402
 from gwm.synthesis.scale import estimate_metric_scale, regularize_object_sizes  # noqa: E402
 from gwm.synthesis.stabilise import apply_settled                # noqa: E402
 from gwm.config import load_config, site_name                   # noqa: E402
@@ -119,10 +119,14 @@ def main() -> int:
 
     root = library_root(cfg)
     decisions = []
+    # 在 if 外面初始化。下面汇总那一行是 `bool(index) if root else False`——它只守了
+    # root，没守 asset_nodes，于是一条**一个物体都没检出来**的片段（asset_nodes 为 0）
+    # 会在所有工作都做完之后、写汇总时崩在 UnboundLocalError 上，产物全丢。
+    # 实测十二条片段里有两条是这样（test_00000、test_00011）。
+    index = embedder = None
     if root and asset_nodes:
         t1 = time.time()
         catalog = load_catalog(root)
-        index = embedder = None
         index_file = Path(root) / "dinov2_index.npz"
         if not a.no_image_retrieval and index_file.is_file():
             index = AssetIndex.load(index_file)
@@ -130,9 +134,15 @@ def main() -> int:
         frames = json.loads((out / "perception" / "frames" / "frames.json").read_text())["frames"]
         masks = load_masks(out / "perception")
         settings = cfg.get("assets") or {}
+        # 形状重排：把观测到的边长比例用进「选哪个资产」这个离散选择。
+        # shape_weight 默认 0，缓存不存在时也自动退回原行为。
+        from gwm.assets.annotate import load_shape_cache
+        _shapes = load_shape_cache(cfg)
         decisions = choose_assets(program, evidence, frames, masks, catalog, index, embedder,
                                   image_weight=float(settings.get("image_weight", 0.6)),
-                                  min_score=float(settings.get("min_score", 0.45)))
+                                  min_score=float(settings.get("min_score", 0.45)),
+                                  shapes=_shapes,
+                                  shape_weight=float(settings.get("shape_weight", 0.0)))
         timings["retrieval_s"] = round(time.time() - t1, 1)
         for d in decisions:
             mark = "图像+文字" if d["image_used"] else "只有文字"
@@ -177,6 +187,30 @@ def main() -> int:
               f"{[(r['id'], r['observed_m'], '->', r['prior_m']) for r in resized]}", flush=True)
     timings["resized"] = len(resized)
 
+    # 先把**排成一条线的同类小碎块**合成一个长条，再去重。顺序不能反：碎片合成
+    # 长条之后，重复检测用的那个「相对对角线」的尺度就变了。
+    #
+    # 为什么需要这一步（#56）：真值里一根轨道是 6.4 比 1 的长条，而掩码只覆盖它的
+    # 一小段，于是一根轨道被切成好几块、每块都成了独立「物体」。实测十一条片段上，
+    # 落在真值 static 上的 25 个检出只对应 **11 个**真值结构件（平均 2.27 次，
+    # 一个被切成 6 块），碎片尺寸中位只有真值的 0.208。
+    #
+    # 这一条解释了为什么二十条「把假的滤掉」的信号全部失败：**那些东西不是假的**，
+    # 是真实结构件的碎片，有深度、有掩码、有一致的跨帧跟踪。
+    syn = cfg.get("synthesis") or {}
+    if syn.get("merge_fragment_chains", True):
+        chains = merge_fragment_chains(
+            program,
+            max_gap_diagonals=float(syn.get("fragment_max_gap_diagonals", 2.5)),
+            min_chain=int(syn.get("fragment_min_chain", 2)),
+            min_elongation=float(syn.get("fragment_min_elongation", 3.0)),
+            same_class_only=bool(syn.get("fragment_same_class_only", False)))
+        if chains:
+            print(f"碎片连链: 合掉 {sum(len(c['absorbed']) for c in chains)} 个，"
+                  f"成链 {len(chains)} 条 "
+                  f"{[(c['kept'], c['class'], c['elongation']) for c in chains[:4]]}", flush=True)
+        timings["fragment_chains"] = len(chains)
+
     # 同一个物体被检出两遍的合掉。放在接触装配之前：重复的节点会互相穿插，
     # 让后面的稳定步做无用功，而且它们本来就不该存在。
     dedup_threshold = float((cfg.get("synthesis") or {}).get("dedup_relative_distance", 0.0))
@@ -187,6 +221,14 @@ def main() -> int:
     timings["deduped"] = len(duplicates)
 
     moves = settle_on_ground(program)
+    # 装配之后仍然陷在地里的才丢。**顺序是要害**：第一版放在程序刚生成的时候，
+    # 离线估算说砍掉 6 个、一个命中不丢，实际跑出来砍掉 57 个、召回 0.500 -> 0.268
+    # ——丢的正是接触装配要修的那一批（见 contact.drop_sunk 的注释）。
+    sunk = drop_sunk(program, float((cfg.get("synthesis") or {}).get("drop_sunk_below_height_mult", 2.0)))
+    if sunk:
+        print(f"陷地丢弃: {len(sunk)} 个 {[(d['id'], d['bottom_over_height']) for d in sunk[:5]]}",
+              flush=True)
+    timings["dropped_sunk"] = len(sunk)
     if moves:
         applied = [m for m in moves if m["applied"]]
         print(f"接触装配: 抬起 {len(applied)} 个物体，最大 {max((m['lift_m'] for m in applied), default=0):.3f} m"

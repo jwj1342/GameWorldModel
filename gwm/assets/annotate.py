@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import numpy as np
 
 from .retrieve import retrieve
@@ -72,10 +74,76 @@ def crop_object(frame_rgb: np.ndarray, mask: np.ndarray, bbox, pad: float = 0.12
     return composited[y0:y1, x0:x1]
 
 
+def load_shape_cache(cfg: dict | None = None) -> dict:
+    """资产 id → 边长比例（三边排序后除以最长边）。没有缓存就返回空，行为不变。
+
+    由 `scripts/build_asset_shape_cache.py` 预计算。路径从配置
+    `assets.shape_cache` 读，其次环境变量 GWM_ASSET_SHAPES。
+    """
+    import os
+    path = ((cfg or {}).get("assets") or {}).get("shape_cache") or os.environ.get("GWM_ASSET_SHAPES")
+    if not path:
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, list) and len(v) == 3}
+
+
+def observed_edge_ratios(obj: dict | None) -> list[float] | None:
+    """观测到的边长比例，口径和资产缓存**完全一致**：三边排序后除以最长边。
+
+    两边口径不一致的话这个重排就是在比噪声。资产那边是轴对齐包围盒的三边，
+    这边取逐帧包围盒尺寸的中位数——都是「这个物体三个方向上各有多长」。
+    """
+    obbs = (obj or {}).get("obb") or []
+    sizes = [b.get("size") for b in obbs if isinstance(b.get("size"), list) and len(b["size"]) == 3]
+    if not sizes:
+        return None
+    med = np.median(np.asarray(sizes, float), axis=0)
+    if not np.isfinite(med).all() or med.max() <= 1e-9:
+        return None
+    return [float(v) for v in np.sort(med)[::-1] / med.max()]
+
+
+def shape_rerank(hits: list, observed: list[float] | None, shapes: dict,
+                 weight: float = 0.5) -> list:
+    """按「资产的边长比例和观测差多少」重排候选。
+
+    **为什么这是创新点一在管线里的落点。** `shape_kind_accuracy` 结构性恒零
+    （`effective_shape()` 对解析到资产的节点返回 "mesh"，而真值全是基本体），
+    所以它量不出任何改进。真正有数的是 `shape_ok`——它比的正是**三条边的比例**。
+    而资产检索原来只看类名和图像，`Asset` 里一个几何字段都没有：**观测到的包围盒
+    比例这个纯几何量，完全没参与「选哪个资产」这个离散选择**。
+
+    这就是「用连续稠密表征去监督离散的符号程序」最直接的一个实例。
+
+    只重排、不改收不收。`retrieve()` 的注释写明文字分决定收不收、图像分只在候选里
+    重排，理由是量纲不同、混进阈值会误杀。形状分同理：它是个 0~1 的比例距离，
+    和文字分不可比，所以只参与排序。
+
+    观测拿不到比例（没有 obb）时原样返回，行为不变。
+    """
+    if not observed or not shapes or len(hits) < 2:
+        return hits
+    obs = np.asarray(observed, float)
+
+    def distance(asset_id: str) -> float:
+        r = shapes.get(asset_id)
+        return 1.0 if r is None else float(np.abs(np.asarray(r, float) - obs).mean())
+
+    scored = [(a, s, distance(a.id)) for a, s in hits]
+    best_text = max((s for _a, s, _d in scored), default=1.0) or 1.0
+    scored.sort(key=lambda t: (-((1 - weight) * (t[1] / best_text) + weight * (1 - t[2])), t[0].id))
+    return [(a, s) for a, s, _d in scored]
+
+
 def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict,
                   catalog: list, index=None, embedder=None,
                   image_weight: float = 0.6, min_score: float = 0.45,
-                  top_k: int = 5) -> list[dict]:
+                  top_k: int = 5, shapes: dict | None = None,
+                  shape_weight: float = 0.0) -> list[dict]:
     """就地给每个 asset 节点填上 `geom.ref`，返回每个决策的记录。"""
     from PIL import Image
 
@@ -133,6 +201,18 @@ def choose_assets(program: dict, evidence: dict, frames: list[dict], masks: dict
 
         hits = retrieve(query, catalog, k=top_k, image_scores=image_scores,
                         image_weight=image_weight if image_scores else 0.0)
+        # 形状重排：把观测到的边长比例用进「选哪个资产」这个离散选择。
+        # shape_weight 为 0（默认）时完全不动，行为和以前一致。
+        if shape_weight > 0 and shapes:
+            obs_ratio = observed_edge_ratios(obj)
+            if obs_ratio:
+                # A shape score cannot make a text-ineligible asset acceptable.
+                # Rank within the eligible set so a low-text first hit cannot
+                # hide a valid hit and turn the decision into a fallback.
+                hits = [(a, score) for a, score in hits if score >= min_score]
+                hits = shape_rerank(hits, obs_ratio, shapes, weight=shape_weight)
+                record["shape_reranked"] = True
+                record["observed_ratio"] = [round(v, 3) for v in obs_ratio]
         record["candidates"] = [{"asset_id": a.id, "score": s} for a, s in hits]
         # 图像那一路的最高分记进**决策记录**，不进程序。程序是一份受校验的契约：
         # schema 里 assetGeom 的 additionalProperties 是 false，往 geom 里塞一个

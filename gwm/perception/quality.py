@@ -346,6 +346,30 @@ def assess_evidence_quality(evidence: Any, config: dict | None = None) -> dict:
                 "object has mask observations but no measured display color; reasons: " + ", ".join(reasons),
                 "inspect appearance issues, source images and mask geometry; do not impute material color",
             ))
+    # 世界对齐退化的时候要出声。
+    #
+    # 实测过一条片段（ab015 的 test_00000）：`align_world` 选中的「地面」让相机离地
+    # 只有 **0.0768**（相对单位），于是标定倍数被推到 **15.62**；物体全落到地面以下，
+    # 下陷闸丢掉 18 个里的 15 个，这条片段最终产出 **0 个物体**。
+    #
+    # 丢掉是对的——地面都估错了，位置不可能对，与其产出十五个摆错的物体不如不产出。
+    # **问题是整个过程一声不响**：产物里只剩一个空场景，没有任何地方说「这条片段的
+    # 对齐退化了」。评测里它表现为「召回 0」，和「检测什么都没找到」长得一模一样，
+    # 而两者该做的事完全不同。
+    #
+    # 这里不改任何行为，只是把它变成一条明确的诊断。
+    alignment = (normalized.get("meta") or {}).get("alignment") or {}
+    cam_h = _number(alignment.get("camera0_height_before_scale"))
+    factor = _number(alignment.get("scale_factor"))
+    if factor is not None and factor > 8.0:
+        diagnostics.append(_diagnostic(
+            "/meta/alignment/scale_factor", "world_alignment_degenerate",
+            f"metric calibration factor {factor:.2f} implies the estimated camera height "
+            f"({cam_h if cam_h is not None else float('nan'):.4f}) is implausibly small; "
+            "the chosen ground plane is probably wrong",
+            "treat this clip's positions as unusable rather than reading a low recall as a detection failure",
+        ))
+
     metrics = {
         "objects": object_metrics,
         "camera": _camera_metrics(normalized),

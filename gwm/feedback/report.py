@@ -32,11 +32,25 @@ def _pool_objects(runs: list[dict], window: str, key: str) -> list[float]:
 def aggregate(runs: list[dict], window: str = "full") -> dict:
     """runs 里每一项是 {clip, config, metrics}，metrics 是 gt_metrics.evaluate 的输出。"""
     traj = _pool_objects(runs, window, "trajectory")
-    accs, recalls, precs, confusion = [], [], [], Counter()
+    accs, recalls, precs, class_hits, confusion = [], [], [], [], Counter()
+    scene_recalls, scene_precs = [], []
+    kind_hits: list[float] = []
+    shape_hits, scale_hits, scale_ratios = [], [], []
+    asset_shape_errs: list[float] = []
+    scale_run_medians, geometry_unavailable = [], []
     mean_matched = start_only = 0           # 配对判据的诊断，见 gt_metrics.match_criterion
     for r in runs:
         w = (r.get("metrics") or {}).get(window) or {}
         mt, ob = w.get("motion_type") or {}, w.get("objects") or {}
+        # 场景几何那一档：object + static 一起。真值里 static 比 object 还多
+        # （整批 69 对 59），只报 objects 等于有一半的几何体没在量。
+        # 形状种类：按**物体**汇总，和准确率一致。它和 shape_ok 回答的是两个问题。
+        sk = w.get("shape_kind") or {}
+        if isinstance(sk.get("correct"), int) and sk.get("n"):
+            kind_hits.extend([1.0] * sk["correct"] + [0.0] * (sk["n"] - sk["correct"]))
+        sc = w.get("scene") or {}
+        if sc.get("recall") is not None: scene_recalls.append(float(sc["recall"]))
+        if sc.get("precision") is not None: scene_precs.append(float(sc["precision"]))
         crit = ob.get("match_criterion") or {}
         if isinstance(crit.get("by_mean_distance"), int):
             mean_matched += crit["by_mean_distance"]
@@ -51,6 +65,40 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
             accs.extend([0.0] * (matched - round(float(mt["accuracy"]) * matched)))
         if ob.get("recall") is not None: recalls.append(float(ob["recall"]))
         if ob.get("precision") is not None: precs.append(float(ob["precision"]))
+        # 配对只看位置不看类名，所以召回和精确率量的是**定位**不是**识别**。
+        # 类名决定检索哪个资产，资产决定场景长什么样——这一列不报，
+        # 「场景复原得像不像」就没在量（见 #56）。按**物体**汇总，和准确率一致。
+        # 形状和尺度：按**物体**汇总，和准确率一致。这两列才是「复原得像不像」
+        # 该报的数——类名在当前合成数据集上和形状脱钩，恒等于噪声（见 #56）。
+        per_geometry = ob.get("geometry_per_object")
+        if isinstance(per_geometry, dict):
+            for measured in per_geometry.values():
+                if measured.get("shape_error") is not None:
+                    shape_hits.append(float(measured["shape_error"] <= 0.2))
+                if measured.get("scale_ratio") is not None:
+                    ratio = float(measured["scale_ratio"])
+                    scale_ratios.append(ratio)
+                    scale_hits.append(float(0.8 <= ratio <= 1.25))
+                # 选中的那个**网格本身**的形状误差。现有每一列都看不见资产——
+                # 实测换掉检索之后选中的资产确实变了，而所有指标逐字节不动。
+                if measured.get("asset_shape_error") is not None:
+                    asset_shape_errs.append(float(measured["asset_shape_error"]))
+        else:
+            # Old reports do not retain per-object ratios. A known measured
+            # count can recover binary hits, but never an object-level median.
+            n = ob.get("geometry_n")
+            if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+                for key, hits in (("shape_ok_frac", shape_hits), ("scale_ok_frac", scale_hits)):
+                    if ob.get(key) is not None:
+                        k = round(float(ob[key]) * n)
+                        hits.extend([1.0] * k + [0.0] * (n - k))
+            elif any(ob.get(k) is not None for k in ("shape_ok_frac", "scale_ok_frac", "scale_ratio")):
+                geometry_unavailable.append(r.get("clip", "unknown"))
+        if ob.get("scale_ratio") is not None:
+            scale_run_medians.append(float(ob["scale_ratio"]))
+        if isinstance(ob.get("class_correct"), int) and ob.get("matched"):
+            class_hits.extend([1.0] * ob["class_correct"])
+            class_hits.extend([0.0] * (ob["matched"] - ob["class_correct"]))
         for truth, preds in (mt.get("confusion") or {}).items():
             for pred, n in preds.items(): confusion[(truth, pred)] += n
 
@@ -73,6 +121,17 @@ def aggregate(runs: list[dict], window: str = "full") -> dict:
         "motion_type_accuracy": stat(accs),         # 按物体汇总，n 就是配对上的物体数
         "object_recall": stat(recalls),
         "object_precision": stat(precs),
+        "shape_kind_accuracy": stat(kind_hits),
+        "scene_recall": stat(scene_recalls),
+        "scene_precision": stat(scene_precs),
+        "class_accuracy": stat(class_hits),
+        "shape_ok": stat(shape_hits),
+        # 唯一看得见「挑了哪个资产」的一列
+        "asset_shape_error": stat(asset_shape_errs),
+        "scale_ok": stat(scale_hits),
+        "scale_ratio": stat(scale_ratios),
+        "scale_ratio_run_medians": stat(scale_run_medians),
+        "geometry_unavailable_runs": geometry_unavailable,
         "confusion": {f"{a}->{b}": n for (a, b), n in sorted(confusion.items(), key=lambda kv: -kv[1])},
         # 按整段平均距离配对，会把运动判错的物体一并算成没检出。这两个数说明那个偏差
         # 有多大：start_position_only 是「位置对上了、但运动没对上所以被判成未检出」的
@@ -105,8 +164,8 @@ def as_markdown(table: dict) -> str:
     但「纹丝不动」的证据其实是量具糊掉了，不是现象。召回和精确率是片段级的连续量，
     仍报中位数。
     """
-    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 |",
-            "|---|---|---|---|---|---|---|---|"]
+    rows = ["| 配置 | 片段数 | 轨迹误差中位数 (m) | 运动类型准确率 | 恒答 static | 配对物体数 | 物体召回 | 物体精确率 | 场景召回 | 场景精确率 | 形状对 | 形状种类 | 尺度中位 |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for name, a in table.items():
         f = lambda s, k="median": "—" if not s else (f"{s[k]:.3f}" + (f" ± {s['std']:.3f}" if k == "mean" else ""))
         acc = a["motion_type_accuracy"]
@@ -114,9 +173,18 @@ def as_markdown(table: dict) -> str:
         acc_n = "—" if not acc else acc["n"]
         base = a.get("always_static_accuracy")
         base_txt = "—" if base is None else format(base, ".3f")
+        # 类名那一列**不进表**：当前合成数据集上它和形状脱钩，恒等于噪声，
+        # 放进主表只会误导。它仍然算在 JSON 里，换数据集时再拿出来。
+        shp, scl = a.get("shape_ok"), a.get("scale_ratio")
+        kind = a.get("shape_kind_accuracy")
+        kind_txt = "—" if not kind else format(kind["mean"], ".3f")
+        shp_txt = "—" if not shp else format(shp["mean"], ".3f")
+        scl_txt = "—" if not scl else format(scl["median"], ".2f")
         rows.append(f"| {name} | {a['n_runs']} | {f(a['trajectory_m'])} | "
                     f"{acc_txt} | {base_txt} | {acc_n} | "
-                    f"{f(a['object_recall'])} | {f(a['object_precision'])} |")
+                    f"{f(a['object_recall'])} | {f(a['object_precision'])} | "
+                    f"{f(a.get('scene_recall'))} | {f(a.get('scene_precision'))} | "
+                    f"{shp_txt} | {kind_txt} | {scl_txt} |")
     return "\n".join(rows)
 
 
