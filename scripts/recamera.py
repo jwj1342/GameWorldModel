@@ -238,7 +238,34 @@ def main(argv: list[str]) -> int:
             (d / "program.json").write_text(json.dumps(p, ensure_ascii=False) + "\n",
                                             encoding="utf-8")
             written += 1
+    # 顺手写一份 manifest，render_dataset.py 要靠它列片段。少了它这个目录渲不了，
+    # 而「渲不了」会等到提交作业之后才暴露。
+    # duration 和 fps 必须来自源数据集。悄悄退回默认值 8.0/30 的话，
+    # 一旦源头不是这两个数，渲出来的片段长度就和真值对不上，而且不会报错。
+    src_manifest, found = None, None
+    for cand in (src / "manifest.json",
+                 src.parent / src.name.replace("_rendered", "") / "manifest.json"):
+        if cand.is_file():
+            src_manifest, found = json.loads(cand.read_text(encoding="utf-8")), cand
+            break
+    if src_manifest is None or "duration_s" not in src_manifest or "fps" not in src_manifest:
+        print(f"找不到源数据集的 manifest（试过 {src}/manifest.json 和 "
+              f"{src.parent / src.name.replace('_rendered', '')}/manifest.json），"
+              f"duration 和 fps 没法确定，不猜。", file=sys.stderr)
+        return 1
+    names = sorted(d.name for d in out.iterdir() if (d / "program.json").is_file())
+    (out / "manifest.json").write_text(json.dumps({
+        "split": "recamera", "seed": a.seed,
+        "duration_s": src_manifest["duration_s"],
+        "fps": src_manifest["fps"],
+        "source_manifest": str(found),
+        "recamera": {"mode": a.mode, "views": a.views, "closeness": a.closeness,
+                     "frac": a.frac, "keyframes": a.keyframes, "source": str(src)},
+        "clips": [{"clip": n} for n in names],
+    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
     print(f"写了 {written} 份程序，来自 {len(clips)} 条片段，模式 {a.mode}，每条 {a.views} 个视角")
+    print(f"manifest：{len(names)} 条，duration {src_manifest['duration_s']}s fps {src_manifest['fps']}（读自 {found}）")
     print(f"输出：{out}")
     return 0
 
