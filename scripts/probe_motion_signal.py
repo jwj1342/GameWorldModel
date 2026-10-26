@@ -871,9 +871,21 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 累积就断开了。这条路径**探针一次都没调用过**，而 registration.py 注释里
         # 「实测更差（172d5ae）」是在别处、而且是在 9 像素的物体上量的。
         # 现在 object_centric 有 680 像素，这个旧结论值得重验。
-        for _tag, _kw in (("gate_off", {}), ("gate005", {"rotation_min_gain": 0.05}),
-                          ("gate010", {"rotation_min_gain": 0.10}),
-                          ("refine1", {"refine": 1}), ("refine3", {"refine": 3})):
+        # `frame0tmpl`：拿物体**自己第一帧的点云**当模板。传了 template 之后
+        # `track_rigid` 不再往模型里并点，每帧都配到这个固定参照——暖启动偏了多少，
+        # 这一步的修正就补回多少，**误差不会攒**。现有的 prim/asset/gtref 三臂走的
+        # 正是这条路径，但它们用的是**错的**模板（拟合盒子、检索错的资产网格），
+        # 所以「固定模板」这个机制本身从来没被单独检验过——用物体自己的表面当模板
+        # 就把「模板对不对」这个变量去掉了，只留下「固不固定」。
+        #
+        # 已知代价：第一帧也只是个局部表面，视角差远了之后重叠少，
+        # 局部能滑到好几个位置都说得通（见 visible_subset 的注释）。
+        # 所以真值一起记，免得把「压没真转动」读成「去掉假转动」。
+        _arms = [("gate_off", {}), ("gate005", {"rotation_min_gain": 0.05}),
+                 ("gate010", {"rotation_min_gain": 0.10}),
+                 ("refine1", {"refine": 1}), ("refine3", {"refine": 3}),
+                 ("frame0tmpl", {"template": np.asarray(clouds[0], float)})]
+        for _tag, _kw in _arms:
             _gt_ = track_rigid(clouds, **_kw)
             _go = _gt_.get("orientations") or []
             if len(_go) != len(clouds):
