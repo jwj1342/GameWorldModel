@@ -14,6 +14,7 @@ from ..feedback.render import render
 from ..compiler.ids import registry_order, decode_depth_png, decode_id_png_by_entry
 from .provenance import file_sha256
 from .visibility import measure_visibility
+from .gt_timing import requested_frame_times, validate_render_times
 
 
 @lru_cache(maxsize=4)
@@ -37,11 +38,12 @@ class GTGeometryBackend:
     name = "gt"
     def __init__(self, program_path: str | Path, width: int = 518):
         self.program_path = str(program_path); self.width = width
-    def estimate(self, frame_files, frame_indices, cfg) -> Geometry:
-        fps = cfg["frames"]["sample_fps"]; times = tuple(round(i / fps, 3) for i in frame_indices)
+    def estimate(self, frame_files, frame_indices, cfg, *, frame_times=None) -> Geometry:
+        times = requested_frame_times(frame_files, frame_indices, frame_times)
         W, H = _size_for(frame_files[0], self.width)
         source_hash = file_sha256(self.program_path)
         program, idx, rdir = _render_gt(self.program_path, times, W, H, source_hash)
+        validate_render_times(idx, times, cfg)
         far = float(idx.get("camera_far") or 100)
         intr, c2w, depth = [], [], []
         for fr in idx["frames"]:
@@ -58,11 +60,12 @@ class GTSegmentationBackend:
     name = "gt"
     def __init__(self, program_path: str | Path, width: int = 518):
         self.program_path = str(program_path); self.width = width
-    def segment(self, frame_files, frame_indices, phrases, cfg) -> Tracks:
-        fps = cfg["frames"]["sample_fps"]; times = tuple(round(i / fps, 3) for i in frame_indices)
+    def segment(self, frame_files, frame_indices, phrases, cfg, *, frame_times=None) -> Tracks:
+        times = requested_frame_times(frame_files, frame_indices, frame_times)
         W, H = _size_for(frame_files[0], self.width)
         source_hash = file_sha256(self.program_path)
         program, idx, rdir = _render_gt(self.program_path, times, W, H, source_hash)
+        validate_render_times(idx, times, cfg)
         reg = registry_order(program); classes = {o["id"]: o.get("class", o["id"]) for o in program["objects"] + program.get("static", [])}
         include_static = bool(cfg["perception"].get("gt_include_static", True))
         multi = {r["id"] for r in reg if r["kind"] == "object" and r.get("instance", 0) > 0}

@@ -90,10 +90,10 @@ def test_gt_provider_decodes_visible_and_isolated_instance_masks(tmp_path,monkey
     full=np.zeros_like(visible);full[:20,:20]=id_to_color(1)
     Image.fromarray(visible).save(tmp_path/"visible.png")
     if not missing: Image.fromarray(full).save(tmp_path/"full.png")
-    idx={"frames":[{"t":0,"actual_t":0,"requested_t":0,"camera":{},
+    idx={"frames":[{"t":0,"actual_t":0,"requested_t":0,"state":{"t":0},"camera":{},
                     "files":{"id":"visible.png"},"unoccluded_id":{"1":"full.png"}}]}
     monkeypatch.setattr(gt,"_render_gt",lambda *a:(p,idx,tmp_path))
-    tracks=gt.GTSegmentationBackend(source,width=40).segment([str(frame)],[0],[],load_config())
+    tracks=gt.GTSegmentationBackend(source,width=40).segment([str(frame)],[0],[],load_config(),frame_times=[0.0])
     measurement=tracks.objects[0].visibility_measurements[0]
     assert measurement["fraction"] == ("unknown" if missing else .25)
     assert measurement["registry_index"]==1

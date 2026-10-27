@@ -11,7 +11,7 @@ def run_harness(script: str, args: list[str], timeout: int = 1800) -> subprocess
 
 def render(game_dir: str | Path, times: list[float], out_dir: str | Path, width: int, height: int, passes=("rgb", "depth", "id"), *, unoccluded_id: bool = False) -> dict:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    args = ["--game", str(game_dir), "--times", ",".join(f"{t:.3f}" for t in times), "--out", str(out), "--width", str(width), "--height", str(height), "--passes", ",".join(passes)]
+    args = ["--game", str(game_dir), "--times", ",".join(format(float(t), ".17g") for t in times), "--out", str(out), "--width", str(width), "--height", str(height), "--passes", ",".join(passes)]
     if unoccluded_id:
         args += ["--unoccluded-id", "true"]
     cp = run_harness("render.mjs", args)
