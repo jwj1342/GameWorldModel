@@ -1,5 +1,5 @@
 // render.mjs — 回放模式下在给定时刻渲染 rgb / depth / id 三个 pass
-// 用法: node render.mjs --game DIR --times 0,1.5,3 --out DIR [--width 640 --height 360] [--passes rgb,depth,id]
+// 用法: node render.mjs --game DIR --times 0,1.5,3 --out DIR [--scene-only] [--width 640 --height 360] [--passes rgb,depth,id]
 import fs from 'node:fs';
 import path from 'node:path';
 import { openGame, parseArgs, savePng } from './common.mjs';
@@ -11,11 +11,15 @@ const times = (args.times ?? '0').split(',').map(Number);
 const passes = (args.passes ?? 'rgb,depth,id').split(',');
 const width = Number(args.width ?? 640), height = Number(args.height ?? 360);
 const unoccludedId = args['unoccluded-id'] === 'true';
+const sceneOnly = args['scene-only'] === 'true' || args['scene-only'] === '1';
+if (args['scene-only'] !== undefined && !['true', 'false', '1', '0'].includes(args['scene-only'])) {
+  throw new Error('--scene-only expects true/false or 1/0');
+}
 fs.mkdirSync(outDir, { recursive: true });
 const t0 = Date.now();
-const g = await openGame(gameDir, { width, height, logFile: path.join(outDir, 'browser.log') });
+const g = await openGame(gameDir, { width, height, logFile: path.join(outDir, 'browser.log'), sceneOnly });
 await g.page.evaluate(() => window.__game.mode('replay'));
-const index = { width, height, passes, frames: [], camera_far: null };
+const index = { width, height, passes, frames: [], camera_far: null, scene_only: sceneOnly };
 index.time_sampling = await g.page.evaluate(() => window.__game.registry.some(entry => entry.simulated)
   ? { mode: 'nearest_physics_frame', dt: window.__game.dt } : { mode: 'exact' });
 for (const t of times) {

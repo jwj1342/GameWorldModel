@@ -248,6 +248,63 @@ def _semantic_findings(evidence: dict) -> list[dict]:
 
     for i, obj in enumerate(objects):
         base = f"/objects/{i}"
+        proximity = obj.get("ground_proximity")
+        if proximity is not None:
+            # Check the recorded number against its source OBB and declared
+            # plane, not merely whether an arbitrary number has a matching label.
+            from .ground_proximity import measure_ground_proximity
+            replay = {}
+            if math.isfinite(proximity["tolerance_world"]):
+                check = measure_ground_proximity(
+                    obj.get("obb", []), evidence["static"].get("planes", []),
+                    {"perception": {"ground_proximity": {
+                        "max_gap_world": proximity["tolerance_world"], "min_ground_confidence": 0.}}},
+                    frames=proximity["samples"], scale=evidence["meta"]["scale"],
+                    alignment=evidence["meta"].get("alignment"))
+                replay = {(s["frame_index"], s["t"]): s for s in check["samples"]}
+            sample_times, sample_frames = [], set()
+            known_samples = 0
+            for j, sample in enumerate(proximity["samples"]):
+                path = f"{base}/ground_proximity/samples/{j}"
+                fi, t, gap = sample["frame_index"], sample["t"], sample["gap"]
+                valid_t = not isinstance(t, bool) and isinstance(t, (int, float)) and math.isfinite(t)
+                if not valid_t or (sample_times and t <= sample_times[-1]):
+                    findings.append(_diag(path + "/t", "proximity_time_order", "proximity sample times must be finite and strictly increasing",
+                                          "retain only real ordered source timestamps", "evidence_semantic", "error"))
+                sample_times.append(t)
+                if fi != UNKNOWN:
+                    frame = frame_by_id.get(fi)
+                    if frame is None or fi in sample_frames or not valid_t or abs(frame["t"] - t) > 1e-6:
+                        findings.append(_diag(path, "proximity_frame_mismatch", "proximity sample must reference a unique matching source frame/time",
+                                              "correct its frame reference without inventing an observation", "evidence_semantic", "error"))
+                    sample_frames.add(fi)
+                is_known = sample["state"] != UNKNOWN
+                known_samples += is_known
+                valid_gap = not isinstance(gap, bool) and isinstance(gap, (int, float)) and math.isfinite(gap)
+                tol = proximity["tolerance_world"]
+                expected = ("penetrating" if valid_gap and gap < -tol else
+                            "separated" if valid_gap and gap > tol else "compatible")
+                if ((is_known and (not valid_gap or sample["state"] != expected))
+                        or (not is_known and gap != UNKNOWN)):
+                    findings.append(_diag(path, "proximity_state_mismatch", "sample state and finite plane gap disagree",
+                                          "unknown stays unknown; classify only measured geometry", "evidence_semantic", "error"))
+                matches = [b for b in obj.get("obb", []) if
+                        isinstance(b, dict) and isinstance(b.get("t"), (int, float)) and
+                        abs(b["t"] - t) <= 1e-6 and (fi == UNKNOWN or b.get("frame") == fi)]
+                if is_known and len(matches) != 1:
+                    findings.append(_diag(path, "proximity_obb_missing", "known proximity lacks a matching OBB observation",
+                                          "retain unknown when geometry is missing", "evidence_semantic", "error"))
+                checked = replay.get((fi, t), {})
+                if is_known and (not isinstance(checked.get("gap"), (int, float)) or not valid_gap or
+                                 not math.isclose(gap, checked["gap"], rel_tol=1e-9, abs_tol=1e-9)):
+                    findings.append(_diag(path, "proximity_geometry_mismatch", "recorded gap cannot be reproduced from a unique OBB and ground plane",
+                                          "retain the actual signed gap or unknown; do not invent geometric support", "evidence_semantic", "error"))
+            expected_status = ("unknown" if not known_samples else
+                               "partial" if known_samples < len(proximity["samples"]) else "assessed")
+            if (proximity["status"] != expected_status or not math.isfinite(proximity["tolerance_world"])
+                    or proximity["scale"] != evidence["meta"]["scale"]):
+                findings.append(_diag(base + "/ground_proximity", "invalid_proximity_summary", "proximity summary does not match samples, scale or finite tolerance",
+                                      "preserve source scale and unknown measurements", "evidence_semantic", "error"))
         appearance = obj.get("appearance")
         if appearance is not None:
             samples = appearance["samples"]

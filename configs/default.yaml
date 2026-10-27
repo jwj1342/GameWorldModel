@@ -7,6 +7,10 @@ frames:
   geometry_frames: 48      # 几何后端使用的帧数上限
   geometry_width: 518      # VGGT 输入宽
 perception:
+  geometry_replay: false         # 可选无损诊断 sidecar；不改变几何或门禁，见 docs/geometry-replay.md
+  ground_sampling:
+    mode: legacy                 # legacy | reviewed_roles；默认原逻辑，角色需视频/逐帧mask来源绑定
+    roles: []                    # 显式帧范围，不按类名/颜色猜；见 docs/ground-sampling.md
   geometry_backend: vggt          # vggt | static | gt（ViPE 与 SAM 3.1 见 docs/status.md 的待办）
   geometry_fallbacks: [static]
   segmentation_backend: grounded_sam2   # grounded_sam2 | gt
@@ -170,7 +174,10 @@ perception:
     # 实测依据见 #7：真值静止的物体里，足迹比 1.2–1.5 那一档 yaw 跨度中位 73.5 度，
     # 2.5 以上只有 5.1 度；但真会转的物体也挤在 1.5–2.5，所以这条线压在 1.6。
     yaw_square_below: 1.6
-  contact_dist_m: 0.08
+  contact_dist_m: 0.08             # legacy config alias; never multiplied by object height
+  ground_proximity:
+    max_gap_world: 0.05           # aligned-world units; relative scale is NOT measured metres
+    min_ground_confidence: 0.80   # unreliable/ambiguous ground yields unknown, not contact
   ground_ransac_thresh_m: 0.03
   far_depth_factor: 3.0            # 丢弃深度 > 3×中位深度的点（天空、远景）
   assumed_camera_height_m: 1.2     # 相对尺度后端的定标假设
@@ -198,7 +205,10 @@ perception:
                              # 默认关着，因为效果还没量过——过检那 62% 的无中生有，七个
                              # 判别子全排除之后，换检测是仅剩的方向之一，见 #56。
   detect_per_phrase_iou: 0.6 # 跨短语合并的重叠阈值：同一个物体可能被 crate 和 box 都找到
-  static_classes: [wall, floor, ground, table, track, rail, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
+  # 加了 block / slab / beam：真值里 block_* 60 个**全部**是 static+primitive，
+  # 而词表里原来只有 rail 没有 block，于是 block 一律走资产那条、去检索一个
+  # 不存在的答案（真值里结构件是 primitive，没有「该挑哪个」这个问题）。
+  static_classes: [wall, floor, ground, table, track, rail, block, slab, beam, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
 evidence_quality:                 # 实测覆盖与歧义门禁；信息不足默认 warning
   min_object_observation_coverage: 0.20
   min_bbox_coverage: 0.70

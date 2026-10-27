@@ -1,12 +1,13 @@
 """Evidence -> program without any VLM (baseline, ablation, and fallback when generation fails)."""
 from __future__ import annotations
 import math
+from ..perception.ground_proximity import is_geometric_proximity
 import numpy as np
 from ..perception.contract import format_evidence_errors
 from ..perception.quality import assess_evidence_quality
 from ..perception.color import measured_color
 
-from ..taxonomy import is_ground_class, is_static_class, slug
+from ..taxonomy import is_ground_class, is_rigid_structure, is_static_class, slug
 
 def guess_material(cls: str) -> str:
     c = cls.lower()
@@ -153,9 +154,26 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
         guess = o["motion_guess"]
         # Legacy Evidence has no `moves` field. A known motion type is positive
         # evidence too; even a conflicting binary flag must not erase it.
-        has_motion = guess.get("moves") is True or guess.get("type") in {
+        # **但 `moves` 不能用在这里。** 当初把与条件换成 `moves` 的理由是它
+        # 「真值感知上查全 0.925」——**只量了查全，没量精确率**，而这里需要的
+        # 恰恰是精确率（「有没有**证据表明**它会动」）。实测 25 条片段的 evidence：
+        #
+        #     rail_*   moves=True  60/68 = **88.2%**   真值里全是 static
+        #     block_*  moves=True  19/26 = 73%         真值里全是 static
+        #
+        # 多半是 ICP 在相机运动下无中生有解出转动。后果是结构件规则被这条假阳
+        # 整个关掉：rail 进 objects、标成 kind=asset、送进资产检索——而真值里
+        # 结构件是 primitive，**根本没有「该挑哪个」这个答案**。
+        #
+        # 所以对**名字就像结构件**的东西，只有**明确的运动类型**才算证据，
+        # 二元标志不算。名字不像结构件的走原来那条，`moves` 仍然生效。
+        _typed_motion = guess.get("type") in {
             "prismatic", "trajectory", "revolute", "spin", "periodic_translate", "periodic_rotate"}
-        looks_structural = is_static_class(cls, cfg) and not has_motion
+        # 刚性结构件（墙/地板/轨道/方块）忽略二元的 moves，只认明确的运动类型；
+        # 传送带、桌子这种「通常不动但可以动」的仍然按原来那条走。
+        _moving = _typed_motion if is_rigid_structure(cls) else (
+            guess.get("moves") is True or _typed_motion)
+        looks_structural = is_static_class(cls, cfg) and not _moving
         if too_large or is_ground or looks_structural:
             # fixed structure: median OBB as a static box
             #
@@ -233,6 +251,7 @@ def evidence_to_program(ev: dict, clip: str | None = None, cfg: dict | None = No
             else:
                 node["notes"] = (f"观测到它在动，但位移太小、模型也判不出来"
                                  f"（{o['motion_guess'].get('notes', '') or '候选分不开'}）")[:200]
-        if any(c["with_id"] == "ground" for c in o.get("contacts", [])) and g: node["support"] = "ground"
+        if any(c["with_id"] == "ground" and not is_geometric_proximity(c)
+               for c in o.get("contacts", [])) and g: node["support"] = "ground"
         program["objects"].append(node)
     return program
