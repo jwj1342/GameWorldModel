@@ -42,6 +42,7 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     fc, pc = cfg["frames"], cfg["perception"]; t0 = time.time(); timing = {}
     frames = extract_frames(video, out_dir / "frames", fc["sample_fps"], fc["max_seconds"], max_side=960)
     work = pick_uniform(frames, fc["geometry_frames"]); work_idx = [f["index"] for f in work]
+    work_times = [f["t"] for f in work]
     motion = motion_profile(work)
     keyframes = select_keyframes(work, fc["keyframes"], motion)
     kf_dir = out_dir / "keyframes"; kf_files = []
@@ -63,7 +64,8 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     for name in [pc["geometry_backend"], *pc["geometry_fallbacks"]]:
         t1 = time.time()
         try:
-            geom = make_geometry_backend(name, cfg).estimate(gfiles, work_idx, cfg); timing[f"geometry_{name}"] = round(time.time() - t1, 1); break
+            timing_args = {"frame_times": work_times} if name == "gt" else {}
+            geom = make_geometry_backend(name, cfg).estimate(gfiles, work_idx, cfg, **timing_args); timing[f"geometry_{name}"] = round(time.time() - t1, 1); break
         except Exception as e:
             log.record("perception", f"geometry_{name}_failed", repr(e), action_taken="next backend", exc=e); fallbacks.append(f"geometry:{name}")
     if geom is None: raise RuntimeError("all geometry backends failed")
@@ -76,7 +78,7 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     gt_camera = pc.get("gt_camera_program")
     if gt_camera:
         from .gt_backend import GTGeometryBackend
-        truth = GTGeometryBackend(gt_camera, fc["geometry_width"]).estimate(gfiles, work_idx, cfg)
+        truth = GTGeometryBackend(gt_camera, fc["geometry_width"]).estimate(gfiles, work_idx, cfg, frame_times=work_times)
         if len(truth.cam_to_world) == len(geom.cam_to_world):
             geom.cam_to_world = truth.cam_to_world
             geom.intrinsics = truth.intrinsics
@@ -91,7 +93,8 @@ def run_perception(video: str, clip: str, out_dir: Path, cfg: dict, phrases: lis
     for name in [pc["segmentation_backend"], *pc["segmentation_fallbacks"]]:
         t1 = time.time()
         try:
-            tracks = make_segmentation_backend(name, cfg).segment([f["file"] for f in work], work_idx, phrases, cfg); timing[f"segmentation_{name}"] = round(time.time() - t1, 1); break
+            timing_args = {"frame_times": work_times} if name == "gt" else {}
+            tracks = make_segmentation_backend(name, cfg).segment([f["file"] for f in work], work_idx, phrases, cfg, **timing_args); timing[f"segmentation_{name}"] = round(time.time() - t1, 1); break
         except Exception as e:
             log.record("perception", f"segmentation_{name}_failed", repr(e), action_taken="next backend", exc=e); fallbacks.append(f"segmentation:{name}")
     if tracks is None: raise RuntimeError("all segmentation backends failed")

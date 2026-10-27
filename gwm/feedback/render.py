@@ -13,7 +13,10 @@ def render(game_dir: str | Path, times: list[float], out_dir: str | Path, width:
     if not isinstance(scene_only, bool):
         raise TypeError("scene_only must be a bool")
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-    args = ["--game", str(game_dir), "--times", ",".join(f"{t:.3f}" for t in times), "--out", str(out), "--width", str(width), "--height", str(height), "--passes", ",".join(passes)]
+    # 时间用 .17g 不用 .3f：#87 修的就是这个——0.366667 被截成 0.367 之后，
+    # 渲染出来的时刻和请求的时刻对不上，时间校验会判成换了一帧。
+    args = ["--game", str(game_dir), "--times", ",".join(format(float(t), ".17g") for t in times),
+            "--out", str(out), "--width", str(width), "--height", str(height), "--passes", ",".join(passes)]
     if scene_only:
         args += ["--scene-only"]
     cp = run_harness("render.mjs", args)
