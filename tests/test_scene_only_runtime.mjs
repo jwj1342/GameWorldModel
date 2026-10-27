@@ -106,6 +106,19 @@ test('scene-only dynamic physics motion still seeks, resets and replays determin
     h.game.reset();h.game.seek(0.25);assert.deepEqual(poses(h.game),pose);assert.equal(h.game.physics.player,null);
   } finally {h.close();}
 });
+test('dynamic seek records the nearest physics frame and preserves positive half-step ties',async()=>{
+  const p=program();p.objects[1].motion={type:'dynamic'};
+  const h=await boot(p,'headless=1&scene_only=1',{forbidTemplate:true});
+  try {
+    for (const t of [0.04,0.025,1/24,1/25,1001/30000,0.007+1/30]) {
+      h.game.reset();
+      const actual=h.game.seek(t),expected=Math.round(t/(1/60))*(1/60);
+      assert.equal(actual,expected);
+      assert.equal(h.game.state().t,expected);
+      assert(Math.abs(actual-t)<=1/120+1e-12);
+    }
+  } finally {h.close();}
+});
 for (const withBinding of [false, true]) {
   test(`scene-only preserves synthetic authored scene with binding=${withBinding}`,async()=>{
     const p=program();

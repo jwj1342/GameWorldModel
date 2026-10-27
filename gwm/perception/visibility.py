@@ -2,6 +2,7 @@
 import math
 from numbers import Real
 import numpy as np
+from .gt_timing import validate_sampled_time
 
 
 def _finite_real(value):
@@ -38,10 +39,13 @@ def checked_visibility(record, object_id, frame_index, t, image_size, program_ha
         return "unknown", "image_size_mismatch"
     if record.get("program_sha256") != program_hash:
         return "unknown", "program_source_mismatch"
-    for field in ("requested_t", "actual_t"):
-        value = record.get(field)
-        if not _finite_real(value) or not _finite_real(t) or abs(value - t) > tolerance:
-            return "unknown", "time_mismatch"
+    requested = record.get("requested_t")
+    if not _finite_real(requested) or not _finite_real(t) or abs(requested - t) > tolerance:
+        return "unknown", "time_mismatch"
+    try:
+        validate_sampled_time(t, record.get("actual_t"), record.get("time_sampling"), tolerance)
+    except ValueError:
+        return "unknown", "time_mismatch"
     value = record.get("fraction")
     if not _finite_real(value) or not 0 <= value <= 1:
         return "unknown", record.get("reason") or "invalid_fraction"

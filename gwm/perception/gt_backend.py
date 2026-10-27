@@ -94,6 +94,7 @@ class GTSegmentationBackend:
                     "fraction": fraction, "reason": reason, "method": "isolated_instance_id",
                     "same_state_verified": fr.get("visibility_reference_state_unchanged") is True,
                     "requested_t": fr.get("requested_t", fr.get("t")), "actual_t": fr.get("actual_t", fr.get("t")),
+                    "time_sampling": dict(idx.get("time_sampling") or {"mode": "exact"}),
                     "image_size": [W, H], "program_sha256": source_hash,
                     "reference": reference or "unknown", "reference_sha256": reference_hash,
                     "reference_path": str(rdir / reference) if reference_hash != "unknown" else "unknown",

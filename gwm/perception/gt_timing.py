@@ -27,8 +27,41 @@ def requested_frame_times(frame_files, frame_indices, frame_times):
     return times
 
 
+def validate_sampled_time(requested_t, actual_t, time_sampling=None, tolerance=1e-4):
+    """Validate exact sampling, or the declared nearest physics frame, without relabeling."""
+    if not _time(tolerance):
+        raise ValueError("GT time tolerance must be finite and non-negative")
+    if not _time(requested_t) or not _time(actual_t):
+        raise ValueError("GT sample times must be finite and non-negative")
+    # Old caches without sampling metadata retain strict exact-time semantics.
+    if time_sampling is None:
+        time_sampling = {"mode": "exact"}
+    if not isinstance(time_sampling, dict):
+        raise ValueError("GT time_sampling must be an object")
+    mode = time_sampling.get("mode")
+    expected = requested_t
+    if mode == "nearest_physics_frame":
+        dt = time_sampling.get("dt")
+        if not _time(dt) or dt == 0:
+            raise ValueError("GT physics dt must be finite and positive")
+        frame = requested_t / dt
+        if not math.isfinite(frame) or frame > 2**53 - 1:
+            raise ValueError("GT physics frame is outside the supported range")
+        # JavaScript Math.round on nonnegative values: ties go toward +infinity.
+        # Do not use Python round (ties-to-even) or floor(frame + .5), which can
+        # round a representable value just below .5 up before floor sees it.
+        lower = math.floor(frame)
+        expected = (lower + int(frame - lower >= .5)) * dt
+        if abs(actual_t - requested_t) > dt / 2 + tolerance:
+            raise ValueError("GT actual time is outside the nearest physics step")
+    elif mode != "exact":
+        raise ValueError("GT time_sampling mode is unsupported")
+    if abs(actual_t - expected) > tolerance:
+        raise ValueError("GT actual time does not match the declared sampled frame")
+
+
 def validate_render_times(index, times, cfg):
-    """Refuse truncated, rounded or quantized-to-another-time GT renders."""
+    """Keep request identity strict; validate actual/state times under declared sampling."""
     tolerance = cfg.get("perception", {}).get("visibility_time_tolerance_s", 1e-4)
     if not _time(tolerance):
         raise ValueError("GT time tolerance must be finite and non-negative")
@@ -38,10 +71,17 @@ def validate_render_times(index, times, cfg):
     for frame, expected in zip(frames, times):
         if not isinstance(frame, dict):
             raise ValueError("GT render frame must be an object")
-        for field in ("requested_t", "actual_t", "t"):
-            value = frame.get(field)
-            if not _time(value) or abs(value - expected) > tolerance:
-                raise ValueError(f"GT render {field} does not match source frame time {expected}")
+        requested = frame.get("requested_t")
+        if not _time(requested) or abs(requested - expected) > tolerance:
+            raise ValueError(f"GT render requested_t does not match source frame time {expected}")
+        actual = frame.get("actual_t")
+        try:
+            validate_sampled_time(expected, actual, index.get("time_sampling"), tolerance)
+        except ValueError as exc:
+            raise ValueError(f"GT render actual_t does not match source frame time {expected}: {exc}") from exc
+        value = frame.get("t")
+        if not _time(value) or abs(value - actual) > tolerance:
+            raise ValueError(f"GT render t does not match source frame time {expected}'s actual sample")
         state_time = (frame.get("state") or {}).get("t")
-        if not _time(state_time) or abs(state_time - expected) > tolerance:
+        if not _time(state_time) or abs(state_time - actual) > tolerance:
             raise ValueError(f"GT rendered state does not match source frame time {expected}")
