@@ -204,7 +204,10 @@ perception:
                              # 默认关着，因为效果还没量过——过检那 62% 的无中生有，七个
                              # 判别子全排除之后，换检测是仅剩的方向之一，见 #56。
   detect_per_phrase_iou: 0.6 # 跨短语合并的重叠阈值：同一个物体可能被 crate 和 box 都找到
-  static_classes: [wall, floor, ground, table, track, rail, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
+  # 加了 block / slab / beam：真值里 block_* 60 个**全部**是 static+primitive，
+  # 而词表里原来只有 rail 没有 block，于是 block 一律走资产那条、去检索一个
+  # 不存在的答案（真值里结构件是 primitive，没有「该挑哪个」这个问题）。
+  static_classes: [wall, floor, ground, table, track, rail, block, slab, beam, belt, conveyor, road, shelf, counter, desk, lawn, grass, carpet, mat, base]
 evidence_quality:                 # 实测覆盖与歧义门禁；信息不足默认 warning
   min_object_observation_coverage: 0.20
   min_bbox_coverage: 0.70

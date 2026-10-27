@@ -81,6 +81,26 @@ def test_类名像结构件而且没有证据会动的_按结构件处理():
         assert "rail_1" not in ids(program["objects"])
 
 
+def test_建筑的一部分忽略二元moves():
+    """**这条测的是 `moves=True` 这一档**，上面那条只测了 False 和缺省。
+
+    `moves` 在静止结构件上假阳性很高：实测 25 条片段的 evidence 里
+    `rail_* moves=True` 占 60/68（88.2%）、`block_*` 占 19/26（73%），
+    而真值里这两类全是 static。多半是 ICP 在相机运动下无中生有解出转动。
+
+    后果不是少判一个物体，是结构件被送进资产检索——真值里结构件是 primitive，
+    **根本没有「该挑哪个」这个答案**，于是那批决策命中恒为 0。
+
+    所以「建筑的一部分」这一档只认明确的运动类型，二元标志不算。
+    `belt`/`table` 不在这一档，由下面那条守着不被误伤。
+    """
+    for cls, oid in (("rail", "rail_1"), ("block", "block_1")):
+        guess = {"type": "unknown", "conf": "unknown", "moves": True}
+        program = evidence_to_program(evidence([obj_with(oid, cls, guess)]), "c", {})
+        assert oid in ids(program["static"]), f"{cls} 的二元 moves 被当成了会动的证据"
+        assert oid not in ids(program["objects"])
+
+
 def test_类名像结构件但有证据会动的_仍然是物体():
     """传送带会动，轨道上的东西也可能会动。有证据就别按结构件处理——
     `moves` 是真值感知上查全 0.925 的那个信号，不是七分类那个坏掉的。"""
