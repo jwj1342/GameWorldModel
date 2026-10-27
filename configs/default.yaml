@@ -118,6 +118,7 @@ perception:
     time_decay_frames: 12.0
     weights: {class: 0.10, bbox_iou: 0.30, mask_iou: 0.20, position_3d: 0.20, appearance: 0.15, time: 0.05}
   ground_contact_centers: true     # 动态物体的 xz 用掩码最低点与地面的交点（对地面上的小物体比深度稳）
+  visibility_time_tolerance_s: 0.0001  # 拒绝GT参考与观测采样时刻不一致，不补造比例
   motion:
     # 默认关着。**根因是 #7 那个 ICP 伪造转动，不是阈值没调好**：静止物体被 ICP
     # 解出 26.6° 的转动（合成对照），而这里铰链的门槛是 8°，实测触发时的转角中位数

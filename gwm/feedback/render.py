@@ -9,7 +9,7 @@ def run_harness(script: str, args: list[str], timeout: int = 1800) -> subprocess
     cmd = [str(REPO / "scripts" / "node_harness.sh"), script, *args]
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
-def render(game_dir: str | Path, times: list[float], out_dir: str | Path, width: int, height: int, passes=("rgb", "depth", "id"), *, scene_only: bool = False) -> dict:
+def render(game_dir: str | Path, times: list[float], out_dir: str | Path, width: int, height: int, passes=("rgb", "depth", "id"), *, unoccluded_id: bool = False, scene_only: bool = False) -> dict:
     if not isinstance(scene_only, bool):
         raise TypeError("scene_only must be a bool")
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
@@ -17,6 +17,8 @@ def render(game_dir: str | Path, times: list[float], out_dir: str | Path, width:
     # 渲染出来的时刻和请求的时刻对不上，时间校验会判成换了一帧。
     args = ["--game", str(game_dir), "--times", ",".join(format(float(t), ".17g") for t in times),
             "--out", str(out), "--width", str(width), "--height", str(height), "--passes", ",".join(passes)]
+    if unoccluded_id:
+        args += ["--unoccluded-id", "true"]
     if scene_only:
         args += ["--scene-only"]
     cp = run_harness("render.mjs", args)

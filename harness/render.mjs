@@ -3,12 +3,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { openGame, parseArgs, savePng } from './common.mjs';
+import { renderUnoccludedId } from './visibility.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const gameDir = args.game, outDir = args.out;
 const times = (args.times ?? '0').split(',').map(Number);
 const passes = (args.passes ?? 'rgb,depth,id').split(',');
 const width = Number(args.width ?? 640), height = Number(args.height ?? 360);
+const unoccludedId = args['unoccluded-id'] === 'true';
 const sceneOnly = args['scene-only'] === 'true' || args['scene-only'] === '1';
 if (args['scene-only'] !== undefined && !['true', 'false', '1', '0'].includes(args['scene-only'])) {
   throw new Error('--scene-only expects true/false or 1/0');
@@ -29,6 +31,20 @@ for (const t of times) {
     const file = `${pass}_${t.toFixed(3)}.png`; savePng(b64, path.join(outDir, file)); frame.files[pass] = file;
   }
   frame.state = await g.page.evaluate(() => window.__game.state());
+  if (unoccludedId) {
+    frame.unoccluded_id = {};
+    const entries = await g.page.evaluate(() => window.__game.registry.map(e => e.idIndex));
+    for (const idx of entries) {
+      const b64 = await g.page.evaluate(renderUnoccludedId, idx);
+      const file = `unoccluded_${idx}_${t.toFixed(3)}.png`;
+      savePng(b64, path.join(outDir, file)); frame.unoccluded_id[idx] = file;
+    }
+    const after = await g.page.evaluate(() => ({state: window.__game.state(), camera: window.__game.cameraInfo()}));
+    if (JSON.stringify(after.state) !== JSON.stringify(frame.state) || JSON.stringify(after.camera) !== JSON.stringify(cam)) {
+      throw new Error('visibility reference changed simulation state or camera');
+    }
+    frame.visibility_reference_state_unchanged = true;
+  }
   index.frames.push(frame);
 }
 index.camera_far = await g.page.evaluate(() => window.__game.program?.camera?.intrinsics?.far ?? 100);

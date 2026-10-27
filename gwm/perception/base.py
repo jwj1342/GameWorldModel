@@ -18,6 +18,7 @@ class Geometry:
     scale: str = "relative"             # relative | metric
     backend: str = ""
     notes: str = ""
+    source_program_sha256: str = ""
     def size(self):
         return self.depth[0].shape[1], self.depth[0].shape[0]
 
@@ -43,6 +44,7 @@ class TrackedObject:
     boxes: dict[int, tuple] = field(default_factory=dict)        # frame index -> (x1,y1,x2,y2)
     identity_hypotheses: list[dict] = field(default_factory=list)
     source_detection_ids: list[str] = field(default_factory=list)
+    visibility_measurements: dict[int, dict] = field(default_factory=dict)
 
 @dataclass
 class Tracks:

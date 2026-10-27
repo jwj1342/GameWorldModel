@@ -12,16 +12,22 @@ from .base import CV2THREE, Geometry, Tracks, TrackedObject
 from ..compiler.compile import compile_program
 from ..feedback.render import render
 from ..compiler.ids import registry_order, decode_depth_png, decode_id_png_by_entry
+from .provenance import file_sha256
+from .visibility import measure_visibility
 from .gt_timing import requested_frame_times, validate_render_times
 
 
 @lru_cache(maxsize=4)
-def _render_gt(program_path: str, times: tuple, width: int, height: int):
+def _render_gt(program_path: str, times: tuple, width: int, height: int, program_hash: str):
+    if file_sha256(program_path) != program_hash:
+        raise ValueError("GT source changed before rendering")
     program = json.loads(Path(program_path).read_text())
     tmp = Path(tempfile.mkdtemp(prefix="gwm_gt_"))
     comp = compile_program(program, tmp / "game")
     if not comp["ok"]: raise RuntimeError("gt program does not compile")
-    idx = render(tmp / "game", list(times), tmp / "render", width, height, ("rgb", "depth", "id"))
+    idx = render(tmp / "game", list(times), tmp / "render", width, height, ("rgb", "depth", "id"), unoccluded_id=True)
+    if file_sha256(program_path) != program_hash:
+        raise ValueError("GT source changed during rendering")
     return program, idx, tmp / "render"
 
 def _size_for(frame_file: str, width: int) -> tuple[int, int]:
@@ -35,7 +41,8 @@ class GTGeometryBackend:
     def estimate(self, frame_files, frame_indices, cfg, *, frame_times=None) -> Geometry:
         times = requested_frame_times(frame_files, frame_indices, frame_times)
         W, H = _size_for(frame_files[0], self.width)
-        program, idx, rdir = _render_gt(self.program_path, times, W, H)
+        source_hash = file_sha256(self.program_path)
+        program, idx, rdir = _render_gt(self.program_path, times, W, H, source_hash)
         validate_render_times(idx, times, cfg)
         far = float(idx.get("camera_far") or 100)
         intr, c2w, depth = [], [], []
@@ -47,7 +54,7 @@ class GTGeometryBackend:
             c2w.append(F @ M)  # expressed in the VGGT-like (y-down) world so evidence._fix restores y-up
             d = decode_depth_png(rdir / fr["files"]["depth"], far); d[d >= far * 0.999] = 0.0
             intr.append(K); depth.append(d.astype(np.float32))
-        return Geometry(frame_indices=list(frame_indices), intrinsics=intr, cam_to_world=c2w, depth=depth, depth_conf=[np.ones_like(d) for d in depth], scale="metric", backend=self.name, notes=f"ground truth from {self.program_path}")
+        return Geometry(frame_indices=list(frame_indices), intrinsics=intr, cam_to_world=c2w, depth=depth, depth_conf=[np.ones_like(d) for d in depth], scale="metric", backend=self.name, notes=f"ground truth from {self.program_path}", source_program_sha256=source_hash)
 
 class GTSegmentationBackend:
     name = "gt"
@@ -56,7 +63,8 @@ class GTSegmentationBackend:
     def segment(self, frame_files, frame_indices, phrases, cfg, *, frame_times=None) -> Tracks:
         times = requested_frame_times(frame_files, frame_indices, frame_times)
         W, H = _size_for(frame_files[0], self.width)
-        program, idx, rdir = _render_gt(self.program_path, times, W, H)
+        source_hash = file_sha256(self.program_path)
+        program, idx, rdir = _render_gt(self.program_path, times, W, H, source_hash)
         validate_render_times(idx, times, cfg)
         reg = registry_order(program); classes = {o["id"]: o.get("class", o["id"]) for o in program["objects"] + program.get("static", [])}
         include_static = bool(cfg["perception"].get("gt_include_static", True))
@@ -71,4 +79,25 @@ class GTSegmentationBackend:
                 oid = f"{r['id']}_{r.get('instance', 0) + 1}" if r["id"] in multi else r["id"]   # one track per instance, like a detector would
                 o = objs.setdefault(oid, TrackedObject(id=oid, phrase=classes.get(r["id"], r["id"]), score=1.0))
                 o.masks[fi] = m; ys, xs = np.where(m); o.boxes[fi] = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+                reference = fr.get("unoccluded_id", {}).get(str(r["idx"]))
+                fraction, reason = "unknown", "missing_reference"
+                full, reference_hash = None, "unknown"
+                if reference:
+                    try:
+                        full = decode_id_png_by_entry(rdir / reference, [r])[r["idx"]]
+                        fraction, reason = measure_visibility(m, full)
+                        reference_hash = file_sha256(rdir / reference)
+                    except (OSError, ValueError):
+                        reason = "unreadable_reference"
+                o.visibility_measurements[fi] = {
+                    "object_id": oid, "frame_index": int(fi), "registry_index": r["idx"],
+                    "fraction": fraction, "reason": reason, "method": "isolated_instance_id",
+                    "same_state_verified": fr.get("visibility_reference_state_unchanged") is True,
+                    "requested_t": fr.get("requested_t", fr.get("t")), "actual_t": fr.get("actual_t", fr.get("t")),
+                    "time_sampling": dict(idx.get("time_sampling") or {"mode": "exact"}),
+                    "image_size": [W, H], "program_sha256": source_hash,
+                    "reference": reference or "unknown", "reference_sha256": reference_hash,
+                    "reference_path": str(rdir / reference) if reference_hash != "unknown" else "unknown",
+                    "camera": fr.get("camera", {}), "visible_pixels": int(m.sum()),
+                    "unoccluded_pixels": int(full.sum()) if full is not None else "unknown"}
         return Tracks(objects=list(objs.values()), frame_size=(W, H), backend=self.name)
