@@ -26,7 +26,9 @@ export function chromiumArgs() {
 }
 
 export async function openGame(gameDir, { width = 640, height = 360, logFile = null,
-                                          timeoutMs = 120000, interactive = false } = {}) {
+                                          timeoutMs = 120000, interactive = false, sceneOnly = false } = {}) {
+  if (typeof sceneOnly !== 'boolean') throw new TypeError('sceneOnly must be a boolean');
+  if (sceneOnly && interactive) throw new Error('scene-only rendering cannot enable interactive gameplay');
   const { server, url } = await serveDir(gameDir);
   const browser = await chromium.launch({ headless: true, args: chromiumArgs(), timeout: 90000 });
   const page = await browser.newPage({ viewport: { width, height } });
@@ -38,7 +40,8 @@ export async function openGame(gameDir, { width = 640, height = 360, logFile = n
   // interactive 时不带 headless=1：内核只有在非 headless 下才把指针事件接到画布上
   // （kernel/main.js 的 manipulator.attach），要验真实鼠标那条路就得走这边。
   const flags = interactive ? '' : 'headless=1&';
-  await page.goto(`${url}/index.html?${flags}w=${width}&h=${height}`, { waitUntil: 'load', timeout: 60000 });
+  const sceneFlag = sceneOnly ? 'scene_only=1&' : '';
+  await page.goto(`${url}/index.html?${flags}${sceneFlag}w=${width}&h=${height}`, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction(() => window.__game && (window.__game.readyState === 'ready' || window.__game.readyState === 'error'), null, { timeout: timeoutMs });
   const state = await page.evaluate(() => ({ readyState: window.__game.readyState, error: window.__game.error }));
   if (state.readyState !== 'ready') { await browser.close(); server.close(); throw new Error('game boot failed: ' + state.error + '\n' + logs.join('\n')); }
