@@ -32,7 +32,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from gwm.perception.registration import track_rigid  # noqa: E402
+from gwm.perception.registration import icp, track_rigid  # noqa: E402
 
 
 def box_surface(extent=(0.6, 0.4, 0.3), per_face=900, seed=0) -> tuple[np.ndarray, np.ndarray]:
@@ -187,6 +187,61 @@ def solved_rotation_against_template(motion: str, visibility: str, n_frames: int
     return float(np.ptp(angles)) if len(angles) > 1 else float("nan")
 
 
+
+
+def solved_rotation_common_visible(motion: str, n_frames: int = 24,
+                                   grid: bool = True) -> float:
+    """**前向模型的预言机版本**：只拿「相邻两帧都看得见」的那块公共表面去配准。
+
+    为什么要这一条。上面那张三乘三的表把根因钉死了——
+
+        完整点云 0.3° ／ 只留可见面 6.9° ／ 固定相机加像素格 0.0°
+        ／ **相机绕着走 + 像素格 26.6°**（组合远大于两者之和）
+
+    采样格子钉在**图像**上不钉在物体上，相机一动，两帧之间连一个共同物理点都没有。
+    所以无论拿什么去配（相邻帧、完整模型、资产网格、拟合长方体——四条都实测过，
+    见 #85），**配的都是两块随视角扫动的局部表面**。
+
+    那么缺的东西是什么？是能回答「从这个相机看过去该是什么样」的前向模型。有了它，
+    就能在配准之前把两帧**裁到同一块物理表面**上，让 ICP 比较像与像。
+
+    这个函数用合成真值当那个前向模型（法向朝不朝着相机是精确可算的），回答一个问题：
+    **如果前向模型是完美的，伪造转动会不会消失。** 会，那建它就值；不会，这条也关。
+
+    注意它是**上界**：真实的前向模型（3DGS 之类）给不出精确的可见性。
+    """
+    base, base_normals = box_surface()
+    eyes, poses = [], []
+    for k in range(n_frames):
+        poses.append(pose_at(motion, k, n_frames))
+        eyes.append(camera_at("orbit", k, n_frames))
+
+    def visible_mask(k):
+        rot, trans = poses[k]
+        pts = base @ rot.T + trans
+        normals = base_normals @ rot.T
+        view = eyes[k] - pts
+        view /= np.linalg.norm(view, axis=1, keepdims=True)
+        return np.einsum("ij,ij->i", normals, view) > 0.05
+
+    masks = [visible_mask(k) for k in range(n_frames)]
+    R_acc = np.eye(3)
+    for k in range(1, n_frames):
+        both = masks[k - 1] & masks[k]          # ← 前向模型给的那块公共表面
+        if both.sum() < 50:
+            continue
+        rot_a, trans_a = poses[k - 1]
+        rot_b, trans_b = poses[k]
+        src = base[both] @ rot_b.T + trans_b
+        dst = base[both] @ rot_a.T + trans_a
+        if grid:                                 # 像素格那一项保留，它才是主因
+            src = image_grid_resample(src, eyes[k])
+            dst = image_grid_resample(dst, eyes[k - 1])
+        step = icp(src, dst)
+        if step.get("ok"):
+            R_acc = np.asarray(step["rotation"], float) @ R_acc
+    return float(np.degrees(R.from_matrix(R_acc).magnitude()))
+
 def solved_rotation_deg(clouds: list[np.ndarray]) -> np.ndarray:
     tracked = track_rigid(clouds)
     orientations = tracked.get("orientations") or []
@@ -286,6 +341,19 @@ def main() -> int:
         print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{cold:>16.1f}°{warm:>15.1f}°")
     print("  （被配准的两边只要有一边是钉死的完整形状，采样就不再跟着相机跑。")
     print("   我们已经有这个形状——#60 的资产检索给每个物体都配了网格。）")
+    print()
+    print("—— 前向模型的预言机：只拿「相邻两帧都看得见」的那块公共表面去配 ——")
+    print("  四条修法都实测失败之后（可见子集、全局精化、调闸、模板配准，见 #85），")
+    print("  剩下的问题是：**缺的到底是不是「能预测这一帧该看见什么」的东西**。")
+    print("  这里用合成真值当完美的前向模型，把两帧裁到同一块物理表面再配准。")
+    print("  会消失 → 建前向模型（3DGS 那类）就值；不会 → 这条也关。")
+    print(f"{'运动':<16}{'真值转角':>9}{'相机绕+像素格':>16}{'裁到公共可见区':>17}")
+    for motion, mlabel in motions:
+        before = float(np.ptp(solved_rotation_deg(make_clouds(motion, "orbit_grid", n))))
+        after = solved_rotation_common_visible(motion, n)
+        print(f"{mlabel:<16}{truth_range[motion]:>9.1f}°{before:>15.1f}°{after:>16.1f}°")
+    print("  注意这是**上界**：真实的前向模型给不出精确的可见性。而且静止那行降下去")
+    print("  还不够——真转动那行必须保住，否则就是又一个「把转动压没了」的修法。")
     print()
     print("「正反不一致」这个自检信号**失败了**：出错的那几行也是 0.00°。ICP 自洽地错——")
     print("相邻两帧采到的确实是差一个小旋转的两块表面，它如实报告了，问题在问题本身。")
