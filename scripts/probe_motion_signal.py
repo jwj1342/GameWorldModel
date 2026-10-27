@@ -890,11 +890,13 @@ def mode_icp(evidence: dict, truth: dict, kinds: dict, run: Path) -> dict:
         # 第一帧的点云是**唯一一个不依赖位姿估计**的固定参照，这是它和
         # refine_poses 的本质区别，也是和 prim/asset/gtref 的区别（那三个的模板
         # 形状本身就是错的）。gate010 是目前最好的方法，所以要比的是它，不是 gate_off。
-        _tmpl0 = np.asarray(clouds[0], float)
+        # `frame0tmpl` / `frame0tmpl_gate010` **已测完并撤掉**（2026-10-25）：
+        # 对 gate010 配对，24 个静止物体里更好 4 更差 20，差中位 +5.02°，**p=0.0015**，
+        # 显著更差；加上闸之后也只是打平（p=0.84）。原因和 `visible_subset` 的注释
+        # 预言的一样——第一帧本身也是个**视角相关的局部表面**，视角一拉开重叠就少。
+        # 留着它们每次 icp 运行要多跑两臂而拿不到新信息，所以撤。
         _arms = [("gate_off", {}),
-                 ("gate010", {"rotation_min_gain": 0.10}),
-                 ("frame0tmpl", {"template": _tmpl0}),
-                 ("frame0tmpl_gate010", {"template": _tmpl0, "rotation_min_gain": 0.10})]
+                 ("gate010", {"rotation_min_gain": 0.10})]
         for _tag, _kw in _arms:
             _gt_ = track_rigid(clouds, **_kw)
             _go = _gt_.get("orientations") or []
