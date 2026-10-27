@@ -2,9 +2,42 @@
 from __future__ import annotations
 import re
 
-DEFAULT_STATIC_CLASSES = ["wall", "floor", "ground", "table", "track", "rail", "belt", "conveyor", "road", "lawn", "grass"]
+# **必须和 `configs/default.yaml` 的 `perception.static_classes` 保持一致。**
+# 生产路径读 yaml，而任何不带配置的调用（测试、直接调 `is_static_class(cls, {})`）
+# 读这里的兜底——两边不一致的时候，同一个类名会得到两个答案，而且不会报错。
+# 之前就是这样：yaml 里有 shelf/counter/desk/carpet/mat/base，这里没有。
+DEFAULT_STATIC_CLASSES = ["wall", "floor", "ground", "table", "track", "rail",
+                          "block", "slab", "beam", "belt", "conveyor", "road",
+                          "shelf", "counter", "desk", "lawn", "grass",
+                          "carpet", "mat", "base"]
 
 GROUND_CLASSES = {"floor", "ground", "terrain"}
+
+# **本来就不该动的结构件**。和 static_classes 的区别在于：传送带、桌子「通常不动
+# 但可以动」，而墙、地板、轨道、方块是**建筑的一部分**，动了基本就是感知错了。
+#
+# 为什么要分这一层：判结构件原来是 `is_static_class(cls) and not has_motion`，
+# 而 has_motion 里那个 `moves` 标志在**静止轨道上假阳率 88.2%**（60/68，真值里
+# rail 全是 static）——多半是 ICP 在相机运动下无中生有解出转动。于是结构件规则
+# 被假阳整个关掉，rail 进 objects、标成 asset、送进资产检索，而真值里结构件是
+# primitive，**根本没有「该挑哪个」这个答案**。实测 273 个资产决策里 151 个
+# （55.3%）是这么来的，命中恒为 0。
+#
+# 位移也救不了：实测 rail 的「位移/对角线」中位 1.81，而真物体是 1.93，
+# **分不开**（包围盒中心本来就在漂）。所以只能靠类名。
+#
+# 对这一档，二元的 `moves` 不算证据，只有**明确的运动类型**才算。
+# `belt`/`conveyor`/`table` 不在这一档，行为不变。
+RIGID_STRUCTURE_CLASSES = {"wall", "floor", "ground", "terrain", "rail", "track",
+                           "road", "block", "slab", "beam", "lawn", "grass",
+                           "carpet", "mat"}
+
+
+def is_rigid_structure(name: str) -> bool:
+    """类名是不是「建筑的一部分」。按词匹配，和 is_static_class 一致。"""
+    tokens = {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t}
+    return any(w in tokens for w in RIGID_STRUCTURE_CLASSES)
+
 
 
 def is_ground_class(name: str) -> bool:
