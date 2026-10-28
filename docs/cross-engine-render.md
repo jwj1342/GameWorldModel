@@ -68,11 +68,15 @@ Camera reference: [Blender Camera API](https://docs.blender.org/api/3.6/bpy.type
 
 ## Deliberate pilot boundaries
 
-Only authored primitive geometry with opaque, untextured, single-sided materials,
-no events, and non-simulated motion is accepted. Assets are rejected explicitly,
-including runtime primitive fallbacks; skinned/instanced/morph meshes and unsupported
-materials also fail. Ordinary Program `instances` are expanded and supported.
-Nothing is substituted with a box by this bridge.
+The default accepts authored primitive geometry with opaque, untextured,
+single-sided materials, no events, and non-simulated motion. Asset export requires
+explicit `--allow-assets true`, nonempty Program asset refs, the expected number
+of successfully loaded assets, and zero asset failures. It does not permit a
+primitive fallback. Untextured opaque asset meshes may also use double-sided
+materials; this fact is recorded, but shader equivalence is not claimed.
+Skinned/instanced/morph meshes and other unsupported materials still fail.
+Ordinary Program `instances` are expanded and supported. Nothing is substituted
+with a box by this bridge.
 
 Blender uses separate neutral lighting and its own shading; RGB values are not
 expected to match Three.js. No depth/ID render, collision or mouse-interaction
@@ -106,3 +110,26 @@ The initial Blender lighting was too dark on visual inspection; its neutral worl
 and sun are now explicit. Image appearance is deliberately not scored as an RGB
 match. The public fixture is synthetic; these boxes represent the fixture's
 authored primitives and are not substituted assets from a real video.
+
+## Verified real-asset extension (private PartNet pilot)
+
+The explicit-ref opt-in was checked on the authorized PartNet 100247 body/lid,
+with the same Program and GLB bytes as SOAR acceptance job 10503. A private local
+integration branch combined the PR94 and PR95 changes; neither main nor the
+remote PRs were merged for this experiment.
+
+Three sample times 0, 0.5 and 1 (source angles -33, 55.5 and 144 degrees) rendered
+successfully in Three.js and Blender CPU. Maximum imported matrix error:
+`9.169077541670845e-8`; vertex error: `0`; camera-projection error:
+`2.1587227960750965e-7` NDC. No browser error/pageerror/requestfailed occurred.
+Related tests: 15 Node exporter tests and 7 Python packet tests passed.
+
+Program SHA256: `4e46c244ccf7b45198e95ecc0740dbc388e2effe1cd640b30ca9ff1f6796e636`.
+Frozen packet SHA256: `bec366b01da899bbae0e7d60a111a268be347ca5342442e4f00bd3eea57e87ca`.
+The source asset and derived GLBs/packet are private outputs, not included in Git.
+
+This is three corresponding samples, not a complete dataset or video-frame
+evaluation. Blender imports the state evaluated by the production kernel, rather
+than independently solving the joint. These tolerances measure import precision,
+not reconstruction quality. Source textures, shading equivalence, depth/ID metrics,
+physical collisions and mouse interaction remain outside the test.

@@ -1,5 +1,6 @@
 // Runs in either a browser page or the Node synthetic tests. No external imports.
-export function freezeFrame({ width, height }) {
+export function freezeFrame({ width, height, allowAssets = false }) {
+  if (typeof allowAssets !== 'boolean') throw new Error('allowAssets must be boolean');
   const g = window.__game;
   if (!g.sceneOnly || g.template) throw new Error('frozen export requires scene-only mode');
   if (g.registry.some(e => e.simulated)) throw new Error('dynamic physics is outside the shared-state subset');
@@ -13,9 +14,13 @@ export function freezeFrame({ width, height }) {
   const inverseCamera = cameraMatrix.clone().invert();
   const meshes = [];
   g.scene.updateMatrixWorld(true);
+  const assetCount = new Set(g.registry.filter(e => e.spec.geom?.kind === 'asset').map(e => e.id)).size;
   for (const entry of g.registry) {
-    if (entry.spec.geom?.kind !== 'primitive' || entry.events.length) {
-      throw new Error(`shared-state pilot supports primitives without events only: ${entry.name}`);
+    const kind = entry.spec.geom?.kind;
+    const loadedAsset = allowAssets && kind === 'asset' && entry.spec.geom.ref
+      && g.assets?.loaded === assetCount && g.assets?.failures?.length === 0;
+    if ((kind !== 'primitive' && !loadedAsset) || entry.events.length) {
+      throw new Error(`unsupported or unverified scene entry: ${entry.name}`);
     }
     let ordinal = 0;
     entry.group.traverse(mesh => {
@@ -24,7 +29,7 @@ export function freezeFrame({ width, height }) {
       const geo = mesh.geometry, mat = mesh.material;
       if (mesh.isSkinnedMesh || mesh.isInstancedMesh || Object.keys(geo.morphAttributes).length
           || Array.isArray(mat) || mat.map || mat.normalMap || mat.alphaMap
-          || mat.opacity !== 1 || mat.transparent || mat.side !== 0 || mat.vertexColors
+          || mat.opacity !== 1 || mat.transparent || (mat.side !== 0 && !(loadedAsset && mat.side === 2)) || mat.vertexColors
           || mat.emissive?.toArray().some(v => v !== 0)
           || geo.drawRange.start !== 0 || geo.drawRange.count !== Infinity) {
         throw new Error(`unsupported mesh/material: ${key}`);
@@ -46,7 +51,8 @@ export function freezeFrame({ width, height }) {
       });
       meshes.push({ key, object_id: entry.name, vertices, triangles, visible,
         matrix_world: mesh.matrixWorld.toArray(), probes,
-        material: { color: mat.color.toArray(), roughness: mat.roughness, metalness: mat.metalness } });
+        material: { color: mat.color.toArray(), roughness: mat.roughness, metalness: mat.metalness,
+          double_sided: mat.side === 2 } });
     });
   }
   return { t: g.t, state: g.state(), camera: { ...camera, matrix_world: cameraMatrix.toArray() }, meshes };

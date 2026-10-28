@@ -8,6 +8,10 @@ import { freezeFrame } from './frozen_scene.mjs';
 const args = parseArgs(process.argv.slice(2));
 const times = (args.times ?? '0,1,2').split(',').map(Number);
 const width = Number(args.width ?? 320), height = Number(args.height ?? 240);
+if (args['allow-assets'] !== undefined && !['true','false','1','0'].includes(args['allow-assets'])) {
+  throw new Error('--allow-assets expects true/false or 1/0');
+}
+const allowAssets = ['true','1'].includes(args['allow-assets']);
 if (!args.game || !args.out || !times.length || times.some(t => !Number.isFinite(t) || t < 0)
     || !Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
   throw new Error('requires --game, --out, finite non-negative times and positive integer dimensions');
@@ -33,7 +37,7 @@ try {
   for (const [i, t] of times.entries()) {
     const actual = await g.page.evaluate(t => window.__game.seek(t), t);
     if (Math.abs(actual - t) > 1e-9) throw new Error('time mismatch');
-    const frame = await g.page.evaluate(freezeFrame, { width, height });
+    const frame = await g.page.evaluate(freezeFrame, { width, height, allowAssets });
     frame.requested_t = t;
     frame.rgb = `three_${i.toString().padStart(4, '0')}.png`;
     savePng(await g.page.evaluate(() => window.__game.render('rgb')), path.join(args.out, frame.rgb));
@@ -41,6 +45,7 @@ try {
   }
   if (g.logs.some(line => /^\[(error|pageerror|requestfailed)\]/.test(line))) throw new Error('browser errors; inspect browser.log');
   const packet = { format: 'gwm-frozen-scene', schema_version: 1, width, height,
+    asset_policy: allowAssets ? 'explicit_ref_loaded_assets' : 'primitives_only',
     semantics: 'shared evaluated state; no independent physics or motion inference',
     program_sha256: sha256(source), game_file_sha256: gameFiles, frames, browser_events: g.logs };
   fs.writeFileSync(path.join(args.out, 'frozen_scene.json'), JSON.stringify(packet));

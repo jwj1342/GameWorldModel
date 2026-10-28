@@ -52,3 +52,25 @@ for (const mode of ['gameplay', 'dynamic', 'asset', 'event', 'texture', 'aspect'
     assert.throws(freeze);
   });
 }
+test('explicit opt-in exports confirmed assets with source double-sided geometry', () => {
+  const g=fixture(),e=g.registry[0];
+  e.spec.geom.kind='asset';e.spec.geom.ref='fixture-source';
+  e.group.children[0].material.side=2;
+  g.assets={loaded:1,failures:[]};
+  const frame=freezeFrame({width:320,height:240,allowAssets:true});
+  assert.equal(frame.meshes[0].material.double_sided,true);
+  assert.equal(frame.meshes[0].vertices.length,e.group.children[0].geometry.attributes.position.count);
+});
+for(const mode of ['missing_ref','load_failure','not_loaded','wrong_count','textured']) {
+  test(`asset opt-in still rejects ${mode}`, () => {
+    const g=fixture(),e=g.registry[0];
+    e.spec.geom.kind='asset';e.spec.geom.ref='fixture-source';
+    g.assets={loaded:1,failures:[]};
+    if(mode==='missing_ref')delete e.spec.geom.ref;
+    if(mode==='load_failure')g.assets.failures=[{id:e.id}];
+    if(mode==='not_loaded')g.assets.loaded=0;
+    if(mode==='wrong_count')g.assets.loaded=2;
+    if(mode==='textured')e.group.children[0].material.map={};
+    assert.throws(()=>freezeFrame({width:320,height:240,allowAssets:true}));
+  });
+}
