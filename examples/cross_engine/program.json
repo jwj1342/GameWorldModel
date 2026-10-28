@@ -1,0 +1,14 @@
+{
+  "meta": {"clip": "cross_engine_synthetic", "fps": 30, "duration": 2, "units": "m", "up": "y", "notes": "synthetic shared-state rendering pilot; not a reconstructed video"},
+  "style": {"background": "#8fb3d9"},
+  "camera": {"intrinsics": {"fov_deg": 50, "aspect": 1.3333333333333333, "far": 40}, "interp": "linear", "keyframes": [
+    {"t": 0, "pos": [5, 4, 8], "look_at": [0, 1, 0]},
+    {"t": 2, "pos": [4, 3, 7], "look_at": [0, 1, 0]}
+  ]},
+  "static": [{"id": "floor", "geom": {"kind": "primitive", "shape": "box", "extent": [8, 0.2, 6]}, "pose": {"pos": [0, -0.1, 0]}, "material": "stone"}],
+  "objects": [
+    {"id": "door", "class": "panel", "geom": {"kind": "primitive", "shape": "box", "extent": [1, 2, 0.12]}, "pose": {"pos": [1.5, 1, 0]}, "material": "wood", "motion": {"type": "revolute", "axis": [0, 1, 0], "pivot": [1, 1, 0], "rate_dps": 45}},
+    {"id": "platform", "class": "platform", "geom": {"kind": "primitive", "shape": "box", "extent": [1.2, 0.2, 1]}, "pose": {"pos": [-1.5, 0.5, 0]}, "material": "blue", "motion": {"type": "prismatic", "axis": [0, 1, 0], "rate": 0.4}},
+    {"id": "markers", "class": "marker", "geom": {"kind": "primitive", "shape": "box", "extent": [0.3, 0.4, 0.3]}, "instances": [{"pos": [-2, 0.2, 1.5]}, {"pos": [2, 0.2, 1.5]}], "material": "red"}
+  ]
+}
