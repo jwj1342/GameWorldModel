@@ -133,3 +133,8 @@ evaluation. Blender imports the state evaluated by the production kernel, rather
 than independently solving the joint. These tolerances measure import precision,
 not reconstruction quality. Source textures, shading equivalence, depth/ID metrics,
 physical collisions and mouse interaction remain outside the test.
+
+The real-asset run used PR95's native-Fetch GLB loading fix together with this
+export extension. Applying this PR alone does not reproduce that combined runtime.
+
+![Three.js left / Blender right; source angles -33, 55.5, 144 degrees](figures/partnet-cross-engine.png)
