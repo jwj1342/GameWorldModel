@@ -41,6 +41,10 @@ def main() -> int:
     files = [REPO / "configs" / "default.yaml", REPO / "configs" / "vulcan.yaml", *a.config]
     cfg = load_config(files=[f for f in files if Path(f).exists()])
     cfg["vlm"]["max_tokens"] = a.max_tokens
+    # One completion attempt per sample. Failed/invalid outputs remain failures.
+    cfg["vlm"]["max_retries"] = 1
+    cfg["vlm"]["allow_parameter_fallback"] = False
+    cfg["vlm"]["record_requests"] = True
     cfg["vlm"]["max_image_side"] = 1280            # 默认 768 会把 1280 宽的帧缩一半
     if a.model:
         cfg["vlm"]["model"] = a.model
@@ -68,6 +72,9 @@ def main() -> int:
     with out.open("a", encoding="utf-8") as f:
         for i, s in enumerate(todo, 1):
             t0 = time.time()
+            recorder = getattr(client, "request_recorder", None)
+            if recorder is not None:
+                recorder.last_attempt_id = None
             context = context_of(read_json(s["program"]))
             try:
                 r = client.chat(system, user_text(context, s["text"]), images=[s["img0"], s["img1"]],
@@ -76,7 +83,8 @@ def main() -> int:
                        "finish": r["finish"]}
             except Exception as e:          # 网络、超时、连修都修不好的 JSON：记下来当无效
                 failures += 1
-                rec = {"id": s["id"], "set": s["set"], "text": "", "json": None, "error": repr(e)[:300]}
+                rec = {"id": s["id"], "set": s["set"], "text": "", "json": None, "error": repr(e)[:300], "usage": None}
+            rec["request_attempt_id"] = recorder.last_attempt_id if recorder is not None else None
             rec.update(gen_s=round(time.time() - t0, 1), source="prompt:" + cfg["vlm"]["model"])
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
