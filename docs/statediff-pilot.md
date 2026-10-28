@@ -63,6 +63,18 @@ IoU tT 是这个预实验的主指标。首帧对了末帧也对，才说明运�
 `prompt_baseline.py` 提示现成模型，`evaluate.py` 评测。`common.py` 是模板器、提示词和掩码配对，
 `vlm_io.py` 保证训练和推理喂的是同一份输入。作业脚本在 `$GWM_SCRATCH/jobs/sd_*.sh`。
 
+## 提示基线请求记录
+
+`prompt_baseline.py` 每个样本仅尝试一次生成，关闭应用层重试和参数回退；SDK 本身的重试也为零。
+预测文件的 `request_attempt_id` 关联 `<out>.calls.jsonl.requests.jsonl` 中的一对
+`started` / `returned` 或 `failed` 事件。进程中断时可能只有 `started`，须视为结算未知。
+请求编号跨进程唯一，断点续跑不会复用编号。该记录不包含提示词、图片、密钥或错误正文。
+
+服务端提供的完整 usage（包括其返回的 cost）在 JSON 解析前保存，因此响应 JSON 不合法也不会丢失用量。
+缺失费用或用量保留 null，不能当作零；只有服务端明确返回零才记零。费用字段只记录服务端报告值，
+不保证是最终账单或美元硬预算。`client.calls` 仍是旧的成功响应计数，不能代替请求账本中的 started 数量。
+本变更不修改已存在的预测结果，也未开展新的线上实验。
+
 ## 结果
 
 （跑完填。）
