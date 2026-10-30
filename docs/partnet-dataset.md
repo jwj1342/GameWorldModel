@@ -17,7 +17,8 @@ an arbitrary edited import is faithful to it. It records source input hashes.
 
 `generate_partnet_scene(source, clip=..., style_seed=...)` deep-copies the known
 Program, changes the clip ID, removes source notes, samples the existing style
-subtree and opaque PBR colors/roughness. IDs, geometry, poses, camera and motion
+subtree and opaque base colors. The GLB tint path does not apply roughness
+overrides, so this entry does not sample them. IDs, geometry, poses, camera and motion
 are retained. Identical seeds reproduce identical output. Source identity and
 seeds remain in manifest.json, not new Program supervision notes.
 
@@ -31,9 +32,21 @@ The manifest records base-to-style-variant pairs. No behavior/camera/layout
 sampling, semantic open/closed labels, source textures, language or new joint
 fields are generated. Mechanical limits retain their source meaning.
 
-Program validation is not rendered acceptance. This step produces data files
-only; each new sample still needs production compilation, actual mesh-load
-checks, endpoint visibility and rendering before being used in an experiment.
+Program validation is not rendered acceptance. This entry produces data files
+only. For each sample, pass its parsed Program, `asset_manifest.json` and
+`validate(program)` to the production `gwm.compiler.bundle.bundle` function,
+writing a new `game/` subdirectory. Then check the pair:
+
+```sh
+node harness/partnet_dataset_check.mjs --dataset PRIVATE_DATASET --reference PRIVATE_IMPORTED/source_mapping.json --out NEW_PRIVATE_CHECK
+```
+
+The harness verifies the source-mapping hash, two actual GLB loads, three
+source-derived poses and topology counts, saves RGB/ID and rejects browser
+errors. It does not exercise a mouse slider. Pairwise pixel/Program identity
+auditing can compare the saved ID images and inspect nonzero object pixels;
+RGB equality is not expected for a style variant. Each new sample still needs
+these runtime checks before being used in an experiment.
 It is one source asset, not a train/test asset split or a complete benchmark.
 
 All source and derived dataset/GLB outputs must stay private and Git-ignored

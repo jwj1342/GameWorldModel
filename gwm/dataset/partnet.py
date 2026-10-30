@@ -34,8 +34,8 @@ def generate_partnet_scene(source: dict, *, clip: str, style_seed: int) -> dict:
     program['style'] = sample_style(random.Random(style_seed))
     for node in program['objects']:
         rng = random.Random(f'{style_seed}:{node["id"]}')
-        node['material'] = {'base_color': '#%02x%02x%02x' % tuple(rng.randrange(24, 232) for _ in range(3)),
-                            'roughness': round(rng.uniform(0.2, 0.9), 3)}
+        # The existing GLB tint path supports base_color, not roughness overrides.
+        node['material'] = {'base_color': '#%02x%02x%02x' % tuple(rng.randrange(24, 232) for _ in range(3))}
     if not validate(program)['ok']:
         raise ValueError('generated Program failed validation')
     return program

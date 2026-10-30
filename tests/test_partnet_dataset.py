@@ -37,6 +37,7 @@ def test_pair_preserves_all_behavior_and_source():
     assert 'notes' not in a['meta']
     assert validate(a)['ok'] and validate(b)['ok']
     assert all('opacity' not in n['material'] for n in a['objects'])
+    assert all(set(n['material']) == {'base_color'} for n in a['objects'])
     assert generate_partnet_scene(p, clip='a', style_seed=1) == a
 
 
