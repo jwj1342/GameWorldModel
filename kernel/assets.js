@@ -52,7 +52,14 @@ export async function loadAssets(baseUrl = '.') {
   const scenes = {}, failures = [];
   await Promise.all(entries.map(async ([id, info]) => {
     try {
-      const gltf = await loader.loadAsync(`${baseUrl}/${info.file}`);
+      const url = new URL(`${baseUrl}/${info.file}`, document.baseURI);
+      // Consume the original Fetch response to completion before parsing. The
+      // FileLoader progress-stream wrapper can report Chromium ERR_ABORTED even
+      // after all model bytes arrived; keep transport and parse failures explicit.
+      const response = await fetch(url.href);
+      if (!response.ok) throw new Error(`asset HTTP ${response.status}`);
+      const bytes = await response.arrayBuffer();
+      const gltf = await loader.parseAsync(bytes, new URL('.', url).href);
       gltf.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scenes[id] = gltf.scene;
     } catch (error) {
