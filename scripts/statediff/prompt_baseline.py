@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import sys
 import time
@@ -23,6 +25,73 @@ from gwm.config import load_config                                             #
 from gwm.synthesis.vlm import make_client                                      # noqa: E402
 from scripts.statediff.common import (context_of, load_samples, objects_schema,  # noqa: E402
                                       read_json, system_prompt, user_text)
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _without_credentials(value):
+    """Credentials and their file locations do not belong in run metadata."""
+    if isinstance(value, dict):
+        return {k: _without_credentials(v) for k, v in value.items()
+                if k.lower() not in {"api_key", "api_key_file", "token", "token_file", "access_token",
+                                     "refresh_token", "password", "secret", "authorization"}}
+    if isinstance(value, list):
+        return [_without_credentials(v) for v in value]
+    return value
+
+
+def _sample_identity(sample: dict) -> str:
+    return _digest({"id": sample["id"], "set": sample["set"],
+                    "user": user_text(context_of(read_json(sample["program"])), sample["text"]),
+                    "images": [hashlib.sha256(Path(sample[k]).read_bytes()).hexdigest()
+                               for k in ("img0", "img1")]})
+
+
+def _run_identity(samples, cfg, temperature, schema, system) -> str:
+    vlm = _without_credentials(copy.deepcopy(cfg["vlm"]))
+    if not vlm.get("model"):
+        raise ValueError("resume requires an explicit model ID")
+    if not vlm.get("endpoint") and vlm.get("endpoint_file"):
+        vlm["endpoint"] = Path(vlm["endpoint_file"]).read_text(encoding="utf-8").strip()
+    vlm.pop("endpoint_file", None)
+    implementation = [Path(__file__), REPO / "scripts/statediff/common.py",
+                      REPO / "gwm/synthesis/vlm.py"]
+    return _digest({"version": 1, "vlm": vlm, "temperature": temperature,
+                    "schema": schema, "system": system,
+                    "samples": [_sample_identity(s) for s in samples],
+                    "implementation": [hashlib.sha256(p.read_bytes()).hexdigest() for p in implementation]})
+
+
+def _resume_done(out: Path, samples, identity: str) -> set:
+    """Fail closed on legacy or mismatched output, before constructing a client."""
+    ids = [s["id"] for s in samples]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate requested sample IDs")
+    expected = {s["id"]: s["set"] for s in samples}
+    meta = Path(str(out) + ".identity.json")
+    if meta.exists():
+        if read_json(meta) != {"version": 1, "identity": identity}:
+            raise ValueError("resume identity mismatch; use a new output path")
+    elif out.exists() and out.stat().st_size:
+        raise ValueError("legacy output has no identity; preserve it and use a new output path")
+    else:
+        with meta.open("x", encoding="utf-8") as f:
+            json.dump({"version": 1, "identity": identity}, f)
+    done = set()
+    if out.exists():
+        for line in out.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            sid = rec.get("id")
+            if (sid not in expected or sid in done or rec.get("set") != expected[sid]
+                    or rec.get("run_identity") != identity):
+                raise ValueError("invalid/mixed resume records; preserve output and use a new path")
+            done.add(sid)
+    return done
 
 
 def main() -> int:
@@ -54,20 +123,22 @@ def main() -> int:
         samples += rows[: a.per_set_limit] if a.per_set_limit else rows
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    done = set()
-    if out.exists():
-        done = {json.loads(line)["id"] for line in out.read_text(encoding="utf-8").splitlines() if line.strip()}
+    schema = objects_schema()
+    system = system_prompt()
+    identity = _run_identity(samples, cfg, a.temperature, schema, system)
+    sample_identities = {s["id"]: _sample_identity(s) for s in samples}
+    done = _resume_done(out, samples, identity)
     todo = [s for s in samples if s["id"] not in done]
     print(f"{len(todo)} to query with {cfg['vlm']['model']} ({len(done)} already in {out})", flush=True)
     if not todo:
         return 0
     client = make_client(cfg, log_path=str(out) + ".calls.jsonl")
-    schema = objects_schema()
-    system = system_prompt()
     failures = 0
     with out.open("a", encoding="utf-8") as f:
         for i, s in enumerate(todo, 1):
             t0 = time.time()
+            if _sample_identity(s) != sample_identities[s["id"]]:
+                raise ValueError("sample changed during run; no request sent for this sample")
             context = context_of(read_json(s["program"]))
             try:
                 r = client.chat(system, user_text(context, s["text"]), images=[s["img0"], s["img1"]],
@@ -77,7 +148,8 @@ def main() -> int:
             except Exception as e:          # 网络、超时、连修都修不好的 JSON：记下来当无效
                 failures += 1
                 rec = {"id": s["id"], "set": s["set"], "text": "", "json": None, "error": repr(e)[:300]}
-            rec.update(gen_s=round(time.time() - t0, 1), source="prompt:" + cfg["vlm"]["model"])
+            rec.update(gen_s=round(time.time() - t0, 1), source="prompt:" + cfg["vlm"]["model"],
+                       run_identity=identity)
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
             if i % 5 == 0 or i == len(todo):
