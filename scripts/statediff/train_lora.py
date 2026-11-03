@@ -44,6 +44,11 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="只用前 N 条训练（冒烟）")
     ap.add_argument("--eval-limit", type=int, default=40)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--init-adapter", default="", help="先把这个适配器并进底座再挂新的 LoRA（接着已训好的 SFT 往下训）")
+    ap.add_argument("--extra-samples", default="", help="另一份样本（比如无标注池），目标文本取自 --extra-targets 而不是真值程序")
+    ap.add_argument("--extra-targets", default="", help="预测格式的 jsonl（id、text），当伪标签")
+    ap.add_argument("--extra-min-score", type=float, default=0.0, help="伪标签按 search_score 过滤，没有这个字段的不过滤")
+    ap.add_argument("--train-limit-after", type=int, default=0, help="真值训练样本只留前 N 条（接着训时当回放，防遗忘）")
     a = ap.parse_args()
 
     import os
@@ -74,14 +79,27 @@ def main() -> int:
     evals = load_samples(a.samples, [a.eval_set])[: a.eval_limit]
     if a.limit:
         train = train[: a.limit]
+    if a.train_limit_after:
+        train = random.Random(a.seed).sample(train, min(a.train_limit_after, len(train)))
+    pseudo = {}
+    if a.extra_samples:
+        for line in Path(a.extra_targets).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                if r.get("json") is not None and (r.get("search_score") is None or r["search_score"] >= a.extra_min_score):
+                    pseudo[r["id"]] = r["text"]
+        train += [s for s in load_samples(a.extra_samples) if s["id"] in pseudo]
     if not train:
         print("没有训练样本", file=sys.stderr)
         return 1
-    answers = {s["id"]: target_for(s) for s in train + evals}
+    answers = {s["id"]: pseudo.get(s["id"]) or target_for(s) for s in train + evals}
 
     device = f"cuda:{torch.cuda.current_device()}"
     processor = AutoProcessor.from_pretrained(a.model)
     model = Qwen3VLForConditionalGeneration.from_pretrained(a.model, dtype=torch.bfloat16, attn_implementation="sdpa")
+    if a.init_adapter:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, a.init_adapter).merge_and_unload()
     model.to(device)
     model.config.use_cache = False
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -95,7 +113,8 @@ def main() -> int:
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_all = sum(p.numel() for p in model.parameters())
     emit(event="setup", train=len(train), eval=len(evals), trainable_params=n_train, all_params=n_all,
-         model=a.model, rank=a.rank, lr=a.lr, accum=a.accum, epochs=a.epochs, world=world)
+         model=a.model, rank=a.rank, lr=a.lr, accum=a.accum, epochs=a.epochs, world=world,
+         pseudo=len(pseudo), init_adapter=a.init_adapter)
 
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=a.lr, weight_decay=0.0)
