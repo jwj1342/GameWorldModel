@@ -1,13 +1,18 @@
 #!/usr/bin/env python
 """用内核给预测打分：合回已知部分 → 校验 → 编译 → 渲染两端 id 通道 → 逐物体和真值掩码配对。
 
-每条样本的指标（都以真值物体为分母，所以无效的程序自然拿零分）：
+只给真值在那一帧看得见的物体打分。生成器的相机在动，一成多的物体只在一端入画，8% 两端都不在画面里；
+这些物体从图上无从判断，算进分母会让真值原样送进来都拿不到满分。配对按两帧 IoU 之和做。
+
+每条样本的指标：
   valid       过 schema 与语义校验且编译渲染成功
-  iou_t0/tT   首帧 / 末帧上，每个真值物体和配到的预测物体的掩码 IoU，没配到记 0
-  recall50    首帧 IoU ≥ 0.5 的真值物体占比；prec50 是预测物体里 IoU ≥ 0.5 的占比
-  motion_acc  配到的物体运动类型八分类对不对；moving_acc 只问动没动
+  iou_t0/tT   该帧看得见的真值物体，和配到的预测物体的掩码 IoU 的均值，没配到记 0
+  recall50    首帧看得见的真值物体里 IoU ≥ 0.5 的占比；prec50 是首帧看得见的预测物体里 IoU ≥ 0.5 的占比
+  motion_acc  至少一帧看得见的真值物体，运动类型八分类对不对；moving_acc 只问动没动
   axis_err    配到且双方都有轴的物体，轴夹角（度，不分正负）
   count_err   |预测物体数 − 真值物体数|
+某一帧一个真值物体都看不见时，这一帧的指标对这条样本不定义（记 None），汇总时跳过。是否定义只由真值决定，
+所以写不出合法程序的预测在同样的位置记 0，各行对照始终在同一批样本上平均。
 两个预言机当标尺：gt 把真值原样送进去（必须全 1，不然量具坏了）；static 把真值的运动全改成静止
 （首帧完美检测、末帧不动，量的是「运动这一半」有多少分可拿）。
 
@@ -41,10 +46,20 @@ from scripts.statediff.common import (axis_angle_deg, axis_of, context_of, extra
 METRICS = ("iou_t0", "iou_tT", "recall50", "prec50", "motion_acc", "moving_acc")
 
 
-def _zero_row(row: dict, reason: str, n_pred: int) -> dict:
+def _defined(gt0: dict, gt1: dict) -> dict[str, bool]:
+    v0 = any(m.any() for m in gt0.values())
+    v1 = any(m.any() for m in gt1.values())
+    return {"iou_t0": v0, "iou_tT": v1, "recall50": v0, "prec50": v0, "motion_acc": v0 or v1, "moving_acc": v0 or v1}
+
+
+def _zero_row(row: dict, reason: str, n_pred: int, defined: dict[str, bool]) -> dict:
     row.update(valid=0, reason=reason, n_pred=n_pred, count_err=abs(n_pred - row["n_gt"]),
-               axis_err=None, n_axis=0, per_object=[], **{m: 0.0 for m in METRICS})
+               axis_err=None, n_axis=0, per_object=[], **{m: (0.0 if defined[m] else None) for m in METRICS})
     return row
+
+
+def _mean(values: list) -> float | None:
+    return sum(values) / len(values) if values else None
 
 
 def eval_one(job: tuple) -> dict:
@@ -54,8 +69,11 @@ def eval_one(job: tuple) -> dict:
     duration = float(sample["duration"])
     row = {"id": sample["id"], "set": sample["set"], "source": source, "n_gt": len(gt_objs),
            "tags": sample.get("tags", [])}
+    gt0 = object_masks(gt_prog, sample["id0"])
+    gt1 = object_masks(gt_prog, sample["id1"])
+    defined = _defined(gt0, gt1)
     if objects is None:
-        return _zero_row(row, "no_json", 0)
+        return _zero_row(row, "no_json", 0, defined)
     # A directory name is not a cache identity. Until content-bound caching is
     # implemented, recompute and preserve each attempt in a separate directory.
     work = Path(work_root) / source / sample["id"].replace("/", "__") / ("attempt-" + uuid.uuid4().hex)
@@ -64,40 +82,41 @@ def eval_one(job: tuple) -> dict:
     program = merge_prediction(context_of(gt_prog), objects)
     report = validate(program)
     if not report["ok"]:
-        row = _zero_row(row, "invalid:" + ",".join(e.get("code", "?") for e in report["errors"][:3]), len(objects))
+        row = _zero_row(row, "invalid:" + ",".join(e.get("code", "?") for e in report["errors"][:3]), len(objects), defined)
     else:
         res = render_endpoints(program, work, [0.0, duration], load_config())
         if not res["ok"]:
-            row = _zero_row(row, res["stage"], len(objects))
+            row = _zero_row(row, res["stage"], len(objects), defined)
         else:
-            gt0 = object_masks(gt_prog, sample["id0"])
-            gt1 = object_masks(gt_prog, sample["id1"])
             p0 = object_masks(program, res["files"][0.0]["id"])
             p1 = object_masks(program, res["files"][round(duration, 3)]["id"])
             pred_objs = {o["id"]: o for o in objects if isinstance(o.get("id"), str)}
-            match = match_masks(gt0, p0)
+            match = match_masks({g: [gt0[g], gt1[g]] for g in gt0}, {q: [p0[q], p1[q]] for q in p0})
             per, axis_errs = [], []
-            used = set()
-            for g, (p, iou0) in match.items():
+            for g, (p, _) in match.items():
                 gm = (gt_objs[g].get("motion") or {}).get("type", "static")
-                pm = None
-                iou1 = 0.0
+                pm, iou0, iou1 = None, 0.0, 0.0
                 if p is not None:
-                    used.add(p)
-                    iou1 = iou(gt1[g], p1[p])
+                    iou0, iou1 = iou(gt0[g], p0[p]), iou(gt1[g], p1[p])
                     pm = ((pred_objs.get(p) or {}).get("motion") or {}).get("type", "static")
                     ga, pa = axis_of(gt_objs[g].get("motion")), axis_of((pred_objs.get(p) or {}).get("motion"))
                     if ga is not None and pa is not None:
                         axis_errs.append(axis_angle_deg(ga, pa))
                 per.append({"gt": g, "pred": p, "iou_t0": round(iou0, 4), "iou_tT": round(iou1, 4),
+                            "vis_t0": bool(gt0[g].any()), "vis_tT": bool(gt1[g].any()),
                             "gt_motion": gm, "pred_motion": pm})
-            n = max(len(gt_objs), 1)
+            seen0 = [r for r in per if r["vis_t0"]]
+            seen1 = [r for r in per if r["vis_tT"]]
+            seen = [r for r in per if r["vis_t0"] or r["vis_tT"]]
+            pred_seen0 = [q for q in p0 if p0[q].any()]
             row.update(valid=1, reason="", n_pred=len(objects), count_err=abs(len(objects) - len(gt_objs)),
-                       iou_t0=sum(r["iou_t0"] for r in per) / n, iou_tT=sum(r["iou_tT"] for r in per) / n,
-                       recall50=sum(r["iou_t0"] >= 0.5 for r in per) / n,
-                       prec50=(sum(r["iou_t0"] >= 0.5 for r in per) / len(objects)) if objects else 0.0,
-                       motion_acc=sum(r["pred_motion"] == r["gt_motion"] for r in per) / n,
-                       moving_acc=sum(r["pred"] is not None and (r["pred_motion"] != "static") == (r["gt_motion"] != "static") for r in per) / n,
+                       iou_t0=_mean([r["iou_t0"] for r in seen0]), iou_tT=_mean([r["iou_tT"] for r in seen1]),
+                       recall50=_mean([r["iou_t0"] >= 0.5 for r in seen0]),
+                       prec50=((sum(r["iou_t0"] >= 0.5 for r in seen0) / len(pred_seen0) if pred_seen0 else 0.0)
+                               if defined["prec50"] else None),
+                       motion_acc=_mean([r["pred_motion"] == r["gt_motion"] for r in seen]),
+                       moving_acc=_mean([r["pred"] is not None and (r["pred_motion"] != "static") == (r["gt_motion"] != "static")
+                                         for r in seen]),
                        axis_err=(float(np.mean(axis_errs)) if axis_errs else None), n_axis=len(axis_errs),
                        time_sampling=res.get("time_sampling"), per_object=per)
     work.mkdir(parents=True, exist_ok=True)
@@ -131,7 +150,8 @@ def summarise(rows: list[dict]) -> dict:
         n = len(rs)
         ax = [r["axis_err"] for r in rs if r.get("axis_err") is not None]
         entry = {"n": n, "valid": sum(r["valid"] for r in rs) / n,
-                 **{m: sum(r[m] for r in rs) / n for m in METRICS},
+                 **{m: _mean([r[m] for r in rs if r[m] is not None]) for m in METRICS},
+                 "n_defined": {m: sum(r[m] is not None for r in rs) for m in METRICS},
                  "count_err": sum(r["count_err"] for r in rs) / n,
                  "axis_err": (float(np.mean(ax)) if ax else None), "n_axis": int(sum(r["n_axis"] for r in rs)),
                  "reasons": {}}
@@ -157,8 +177,9 @@ def to_markdown(summary: dict) -> str:
     for key, e in summary.items():
         source, set_name = key.split(" | ")
         ax = "—" if e["axis_err"] is None else f"{e['axis_err']:.1f} ({e['n_axis']})"
-        lines.append(f"| {source} | {set_name} | {e['n']} | {e['valid']:.2f} | {e['iou_t0']:.3f} | {e['iou_tT']:.3f} | "
-                     f"{e['recall50']:.2f} | {e['prec50']:.2f} | {e['motion_acc']:.2f} | {e['moving_acc']:.2f} | {ax} | {e['count_err']:.2f} |")
+        f = lambda m, d: "—" if e[m] is None else f"{e[m]:.{d}f}"
+        lines.append(f"| {source} | {set_name} | {e['n']} | {e['valid']:.2f} | {f('iou_t0', 3)} | {f('iou_tT', 3)} | "
+                     f"{f('recall50', 2)} | {f('prec50', 2)} | {f('motion_acc', 2)} | {f('moving_acc', 2)} | {ax} | {e['count_err']:.2f} |")
     return head + "\n".join(lines) + "\n"
 
 

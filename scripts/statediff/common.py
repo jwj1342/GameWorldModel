@@ -102,7 +102,7 @@ def describe_scene(program: dict) -> str:
         return "The scene contains no movable objects."
     groups: dict[str, list[str]] = {}
     for o in objs:
-        name = (colour_word(o.get("material")) + " " + str(o.get("class") or "object")).strip()
+        name = (colour_word(o.get("material")) + " " + str(o.get("class") or "object").replace("_", " ")).strip()
         groups.setdefault(name, []).append(((o.get("motion") or {}).get("type") or "static"))
     inventory = [_article(n) if len(k) == 1 else f"{_num(len(k))} {_plural(n)}" for n, k in groups.items()]
     head = f"The scene contains {_num(len(objs))} object{'s' if len(objs) != 1 else ''}: {_join(inventory)}."
@@ -210,8 +210,11 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
     return inter / union if union else 0.0
 
 
-def match_masks(gt: dict[str, np.ndarray], pred: dict[str, np.ndarray]) -> dict[str, tuple[str | None, float]]:
-    """匈牙利配对，最大化 IoU 之和。完全不重叠的真值物体配 None。"""
+def match_masks(gt: dict[str, list[np.ndarray]], pred: dict[str, list[np.ndarray]]) -> dict[str, tuple[str | None, float]]:
+    """匈牙利配对，按首末两帧 IoU 之和最大化。每个 id 对应一串逐帧掩码。
+
+    两帧相加而不是只看首帧：有一成多的物体只在一端入画，只看首帧的话，末帧才进画面的物体永远配不上。
+    完全不重叠的真值物体配 None。"""
     from scipy.optimize import linear_sum_assignment
     g_ids, p_ids = list(gt), list(pred)
     out: dict[str, tuple[str | None, float]] = {g: (None, 0.0) for g in g_ids}
@@ -219,8 +222,8 @@ def match_masks(gt: dict[str, np.ndarray], pred: dict[str, np.ndarray]) -> dict[
         return out
     m = np.zeros((len(g_ids), len(p_ids)))
     for i, g in enumerate(g_ids):
-        for j, p in enumerate(p_ids):
-            m[i, j] = iou(gt[g], pred[p])
+        for j, q in enumerate(p_ids):
+            m[i, j] = sum(iou(a, b) for a, b in zip(gt[g], pred[q]))
     rows, cols = linear_sum_assignment(-m)
     for i, j in zip(rows, cols):
         if m[i, j] > 0:
@@ -248,7 +251,12 @@ def axis_angle_deg(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def load_samples(path: str | Path, sets: list[str] | None = None) -> list[dict]:
+    """文件路径按 samples.jsonl 所在目录解析，所以整个数据目录打包搬走也能直接用；绝对路径原样保留。"""
+    root = Path(path).resolve().parent
     rows = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    for r in rows:
+        for k in ("program", "img0", "img1", "id0", "id1"):
+            r[k] = str(root / r[k])
     return [r for r in rows if not sets or r["set"] in sets]
 
 

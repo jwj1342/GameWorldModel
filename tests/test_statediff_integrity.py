@@ -35,6 +35,7 @@ def test_old_cache_cannot_bypass_real_validator(tmp_path,monkeypatch):
     old.write_text('{"valid":1,"iou_tT":1}',encoding='utf-8');before=old.read_bytes()
     def forbidden(*args,**kwargs):raise AssertionError('invalid Program must not render')
     monkeypatch.setattr(evaluate,'render_endpoints',forbidden)
+    monkeypatch.setattr(evaluate,'object_masks',lambda p,_:{o['id']:np.ones((2,2),bool) for o in p['objects']})
     result=evaluate.eval_one(('source',s,[{'id':'bad'}],str(tmp_path/'work')))
     assert result['valid']==0 and result['reason'].startswith('invalid:')
     assert old.read_bytes()==before
