@@ -48,7 +48,7 @@ def main(argv: list[str]) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pair", action="append", required=True,
                     help="<标签>:<产出根>:<真值根>，可以给多次")
-    ap.add_argument("--shapes", default="/scratch/jwj/gwm/asset_shapes.json")
+    ap.add_argument("--shapes", default="/scratch/jwj/research/GameWorldModel/work/asset_shapes.json")
     a = ap.parse_args(argv)
 
     try:

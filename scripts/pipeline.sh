@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 端到端：视频 -> 游戏。用法: sbatch scripts/pipeline.sh <clip_name> [phrases] [extra run_clip args...]
 #   clip_name 对应 data/clips/trimmed/<clip_name>.mp4 ；phrases 逗号分隔（可为 ""）
 #   默认 CPU 节点（感知模型在 CPU 上约 3 分钟）；要用 GPU 加 sbatch --gres=gpu:l40s:1

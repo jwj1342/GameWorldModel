@@ -26,7 +26,7 @@ from gwm.config import load_config, site_name     # noqa: E402
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--thumbs", default="/scratch/jwj/gwm/asset_thumbs")
+    ap.add_argument("--thumbs", default="/scratch/jwj/research/GameWorldModel/work/asset_thumbs")
     ap.add_argument("--out", required=True)
     ap.add_argument("--config", action="append", default=[])
     ap.add_argument("--rgb", action="store_true", help="建彩色的（对照用）")

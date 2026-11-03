@@ -28,7 +28,7 @@ sys.path.insert(0, str(REPO))
 from gwm.assets.annotate import bbox_of, best_observation, crop_object   # noqa: E402
 from gwm.perception.run import load_masks                                # noqa: E402
 
-THUMBS = Path("/scratch/jwj/gwm/asset_thumbs")
+THUMBS = Path("/scratch/jwj/research/GameWorldModel/work/asset_thumbs")
 
 
 def main(argv: list[str]) -> int:

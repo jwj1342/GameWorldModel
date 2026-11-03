@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:25:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 验证 DSL 的 dynamic 运动类型：自由刚体与碰撞能不能编译、跑起来、物理行为正确
 set -u
 REPO=/scratch/jwj/research/GameWorldModel
