@@ -71,6 +71,7 @@ def main() -> int:
     ap.add_argument("--holdout-out", type=int, default=60)
     ap.add_argument("--seed", type=int, default=20261103)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--set-suffix", default="", help="子集名加后缀，比如造无标注的适配池时用 _pool，免得和正式留出集撞名")
     a = ap.parse_args()
 
     out = Path(a.out)
@@ -80,6 +81,7 @@ def main() -> int:
                                                      ("holdout_in", TRAIN_FAMILIES, 2, a.holdout_in, a.pairs),
                                                      ("holdout_out", TEST_FAMILIES, 3, a.holdout_out, 0)):
         rng = random.Random(a.seed + offset)
+        set_name += a.set_suffix
         base = []
         for i in range(count):
             base.append((set_name, f"{set_name}_{i:05d}", families[i % len(families)],

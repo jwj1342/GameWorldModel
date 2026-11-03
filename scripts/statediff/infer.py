@@ -57,9 +57,10 @@ def main() -> int:
 
     processor = AutoProcessor.from_pretrained(a.model)
     model = Qwen3VLForConditionalGeneration.from_pretrained(a.model, dtype=torch.bfloat16, attn_implementation="sdpa")
-    if a.adapter:
+    if a.adapter:                     # 逗号分开的多个适配器按顺序并进去（DPO 的适配器挂在并好 SFT 的底座上）
         from peft import PeftModel
-        model = PeftModel.from_pretrained(model, a.adapter).merge_and_unload()
+        for ad in a.adapter.split(","):
+            model = PeftModel.from_pretrained(model, ad).merge_and_unload()
     model.to("cuda").eval()
     sampling = {"do_sample": True, "temperature": a.temperature, "top_p": 0.95} if a.temperature > 0 else {"do_sample": False}
     torch.manual_seed(a.seed)
