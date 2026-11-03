@@ -32,6 +32,8 @@ def main() -> int:
     ap.add_argument("--max-new-tokens", type=int, default=4096)
     ap.add_argument("--per-set-limit", type=int, default=0)
     ap.add_argument("--shard", default="0/1", help="k/n：只做第 k 份（每张卡起一个进程，各写各的文件）")
+    ap.add_argument("--temperature", type=float, default=0.0, help="0 是贪心；>0 时按种子采样，给偏好对的多样性检查用")
+    ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
     import torch
@@ -59,13 +61,15 @@ def main() -> int:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, a.adapter).merge_and_unload()
     model.to("cuda").eval()
+    sampling = {"do_sample": True, "temperature": a.temperature, "top_p": 0.95} if a.temperature > 0 else {"do_sample": False}
+    torch.manual_seed(a.seed)
 
     with out.open("a", encoding="utf-8") as f:
         for i, s in enumerate(todo, 1):
             t0 = time.time()
             enc, plen = encode_prompt(processor, s)
             with torch.no_grad():
-                gen = model.generate(**to_device(enc, "cuda"), max_new_tokens=a.max_new_tokens, do_sample=False)
+                gen = model.generate(**to_device(enc, "cuda"), max_new_tokens=a.max_new_tokens, **sampling)
             new = gen[0, plen:]
             text = processor.batch_decode([new], skip_special_tokens=True)[0]
             try:
@@ -74,7 +78,7 @@ def main() -> int:
                 parsed = None
             rec = {"id": s["id"], "set": s["set"], "text": text, "json": parsed, "prompt_tokens": plen,
                    "new_tokens": int(new.shape[0]), "gen_s": round(time.time() - t0, 1),
-                   "source": "local:" + (a.adapter or a.model)}
+                   "source": "local:" + (a.adapter or a.model), "temperature": a.temperature, "seed": a.seed}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
             if i % 5 == 0 or i == len(todo):
