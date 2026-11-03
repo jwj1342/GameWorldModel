@@ -15,6 +15,12 @@
 
 "4D（动态）"与"程序化表示"两环同时缺失，是本课题的位置。
 
+> **2026-10-23 更新**：这一节的调研停在 09-18。GPT-6 Astra（09-03）之后出现了一批
+> 「编码智能体写显式场景程序」的工作，其中 NeoWorld-Pro 已进 NeurIPS 2026，做到了
+> 「单图 → 程序 → 关节 + 物理属性 → 仿真器验证」。**"程序化表示"这一环不再是空白**，
+> 缺口窄到只剩视频输入与时序动力学。写作时不能再说「没人做程序化场景表征」。
+> 详见 [`related-work-coding-agent-scene-programs.md`](related-work-coding-agent-scene-programs.md)。
+
 ## 1. 以程序为场景表征（inverse graphics）
 
 | 工作 | 要点 | 关系 |
