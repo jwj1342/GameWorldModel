@@ -165,7 +165,9 @@ def objects_schema() -> dict:
 
 def extract_objects(parsed):
     if isinstance(parsed, dict) and isinstance(parsed.get("objects"), list):
-        return [o for o in parsed["objects"] if isinstance(o, dict)]
+        objects = parsed["objects"]
+        # Reject the original malformed array instead of silently repairing it.
+        return objects if all(isinstance(o, dict) for o in objects) else None
     if isinstance(parsed, list) and parsed and all(isinstance(o, dict) for o in parsed):
         return parsed
     return None

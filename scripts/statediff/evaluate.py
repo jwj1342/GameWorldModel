@@ -22,6 +22,7 @@ import copy
 import json
 import sys
 import time
+import uuid
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -55,10 +56,11 @@ def eval_one(job: tuple) -> dict:
            "tags": sample.get("tags", [])}
     if objects is None:
         return _zero_row(row, "no_json", 0)
-    work = Path(work_root) / source / sample["id"].replace("/", "__")
+    # A directory name is not a cache identity. Until content-bound caching is
+    # implemented, recompute and preserve each attempt in a separate directory.
+    work = Path(work_root) / source / sample["id"].replace("/", "__") / ("attempt-" + uuid.uuid4().hex)
     cache = work / "metrics.json"
-    if cache.exists():
-        return read_json(cache)
+    row["evaluation_dir"] = str(work)
     program = merge_prediction(context_of(gt_prog), objects)
     report = validate(program)
     if not report["ok"]:
