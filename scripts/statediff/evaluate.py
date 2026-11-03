@@ -13,8 +13,8 @@
   count_err   |预测物体数 − 真值物体数|
 某一帧一个真值物体都看不见时，这一帧的指标对这条样本不定义（记 None），汇总时跳过。是否定义只由真值决定，
 所以写不出合法程序的预测在同样的位置记 0，各行对照始终在同一批样本上平均。
-两个预言机当标尺：gt 把真值原样送进去（必须全 1，不然量具坏了）；static 把真值的运动全改成静止
-（首帧完美检测、末帧不动，量的是「运动这一半」有多少分可拿）。
+两个预言机当标尺：gt 把真值原样送进去（必须全 1，不然量具坏了）；static 把真值物体冻在内核算出的首帧位姿上
+（首帧必须全 1、末帧不动，量的是「运动这一半」有多少分可拿）。
 
 用法:
   python scripts/statediff/evaluate.py --samples SET/samples.jsonl --sets holdout_in,holdout_out \
@@ -39,6 +39,8 @@ if str(REPO) not in sys.path:
 
 from gwm.compiler.validate import validate                                            # noqa: E402
 from gwm.config import load_config                                                   # noqa: E402
+from gwm.compiler.compile import compile_program                                    # noqa: E402
+from gwm.feedback.render import render as render_passes                              # noqa: E402
 from scripts.statediff.common import (axis_angle_deg, axis_of, context_of, extract_objects,  # noqa: E402
                                       iou, load_samples, match_masks, merge_prediction,
                                       object_masks, read_json, render_endpoints, target_objects)
@@ -77,6 +79,8 @@ def eval_one(job: tuple) -> dict:
     # A directory name is not a cache identity. Until content-bound caching is
     # implemented, recompute and preserve each attempt in a separate directory.
     work = Path(work_root) / source / sample["id"].replace("/", "__") / ("attempt-" + uuid.uuid4().hex)
+    if callable(objects):            # 静止预言机要先让内核算出真值的首帧位姿
+        objects = objects(gt_prog, work)
     cache = work / "metrics.json"
     row["evaluation_dir"] = str(work)
     program = merge_prediction(context_of(gt_prog), objects)
@@ -133,9 +137,23 @@ def load_predictions(path: str) -> dict[str, list | None]:
     return out
 
 
-def static_oracle(program: dict) -> list[dict]:
+def static_oracle(program: dict, work: Path) -> list[dict]:
+    """真值物体冻在内核算出的首帧位姿上，去掉运动。
+
+    不能直接用程序里的 pose 字段：沿路径走的物体由关键帧定位置，周期运动的 pose.pos 是振荡中心，
+    都不是首帧位置。用 pose 字段的话，这个预言机首帧 IoU 只有 0.74，标尺本身就歪了。"""
+    res = compile_program(program, work / "gt_t0" / "game", load_config())
+    index = render_passes(res["game_dir"], [0.0], work / "gt_t0" / "render", 64, 36, passes=("id",))
+    poses: dict[str, list[dict]] = {}
+    for e in index["frames"][0]["state"]["objects"]:
+        if e["kind"] == "object":
+            poses.setdefault(e["id"], []).append({"pos": e["pos"], "quat": e["quat"]})
     objs = copy.deepcopy(target_objects(program))
     for o in objs:
+        if o.get("instances"):
+            o["instances"] = poses[o["id"]]
+        else:
+            o["pose"] = poses[o["id"]][0]
         o["motion"] = {"type": "static"}
         o.pop("events", None)
     return objs
@@ -203,8 +221,7 @@ def main() -> int:
     for name in [x for x in a.oracles.split(",") if x]:
         for s in samples:
             prog = read_json(s["program"])
-            objs = target_objects(prog) if name == "gt" else static_oracle(prog)
-            jobs.append((f"oracle_{name}", s, objs, a.work))
+            jobs.append((f"oracle_{name}", s, target_objects(prog) if name == "gt" else static_oracle, a.work))
     for spec in a.pred:
         name, path = spec.split("=", 1)
         preds = load_predictions(path)
@@ -227,8 +244,9 @@ def main() -> int:
     (out / "summary.md").write_text(md, encoding="utf-8")
     print(md)
     bad = [k for k, e in summary.items() if k.startswith("oracle_gt") and (e["iou_t0"] < 0.999 or e["iou_tT"] < 0.999)]
+    bad += [k for k, e in summary.items() if k.startswith("oracle_static") and e["iou_t0"] < 0.999]
     if bad:
-        print("量具自检没过：真值预言机不是满分 →", bad, file=sys.stderr)
+        print("量具自检没过：真值预言机不是满分，或静止预言机首帧不是满分 →", bad, file=sys.stderr)
         return 2
     return 0
 
