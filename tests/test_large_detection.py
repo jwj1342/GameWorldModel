@@ -109,6 +109,42 @@ def test_类名像结构件但有证据会动的_仍然是物体():
     assert "belt_1" in ids(program["objects"]), "有证据会动却被当成了固定结构"
 
 
+@pytest.mark.parametrize("cls", ["floor lamp", "road sign", "wall clock",
+                                  "wooden floor", "train track"])
+def test_compound_class_retains_binary_motion_evidence(cls):
+    """A structural word inside a longer class must not activate the stronger rule."""
+    from gwm.taxonomy import is_rigid_structure
+
+    guess = {"type": "unknown", "conf": "unknown", "moves": True}
+    program = evidence_to_program(evidence([obj_with("item_1", cls, guess)]), "c", {})
+    assert "item_1" in ids(program["objects"])
+    assert "item_1" not in ids(program["static"])
+    assert not is_rigid_structure(cls)
+
+
+@pytest.mark.parametrize("cls", ["rail", "block"])
+def test_exact_structure_still_preserves_typed_motion(cls):
+    guess = {"type": "spin", "conf": .9, "moves": False,
+             "axis": [0, 1, 0], "speed": 45.0}
+    program = evidence_to_program(evidence([obj_with("item_1", cls, guess)]), "c", {})
+    node = next(n for n in program["objects"] if n["id"] == "item_1")
+    assert node["motion"]["type"] == "spin"
+
+
+def test_exact_structure_class_normalization_and_static_vocabulary():
+    from gwm.config import load_config
+    from gwm.taxonomy import DEFAULT_STATIC_CLASSES, is_rigid_structure, is_static_class
+
+    assert is_rigid_structure(" RAIL ")
+    for name in ("block", "slab", "beam"):
+        assert is_rigid_structure(name)
+    assert not is_rigid_structure("railing")
+    assert not is_rigid_structure("table")
+    # The softer static vocabulary may still recognize modifiers.
+    assert is_static_class("wooden floor")
+    assert set(DEFAULT_STATIC_CLASSES) == set(load_config()["perception"]["static_classes"])
+
+
 def test_陷地丢弃跑在接触装配之后():
     """**顺序是这条规则的全部要害。**
 
