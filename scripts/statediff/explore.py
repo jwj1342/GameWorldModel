@@ -31,8 +31,8 @@ from scripts.statediff.art import extract_motions                       # noqa: 
 from scripts.statediff.common import load_samples, read_json            # noqa: E402
 from scripts.statediff.evaluate_art import eval_one                      # noqa: E402
 
-ANGLES = (60.0, 95.0)
-TRAVEL = (0.5, 0.8)
+ANGLES = (75.0,)          # 第一轮只定棱和方向，张角留给第二轮细扫
+TRAVEL = (0.6,)
 
 
 def _quat_mat(q) -> np.ndarray:
