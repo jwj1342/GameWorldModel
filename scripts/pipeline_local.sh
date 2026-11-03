@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
 #SBATCH --time=02:30:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 用本地自托管的开源模型跑完整管线，不依赖任何外部 API。
 # 服务和管线放同一个作业，省掉跨节点端口。
 # 用途：#3 重跑、#15 本地可复现、以及产出 #17 需要的感知产物（evidence + 掩码）。

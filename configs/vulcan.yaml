@@ -3,7 +3,7 @@ paths:
   project: /project/aip-zhouyang/jwj/GameWorldModel
   weights: /project/aip-zhouyang/jwj/GameWorldModel/weights
   node_tar: /project/aip-zhouyang/jwj/GameWorldModel/deps/node-playwright-three.tar
-  scratch: ${SCRATCH}/gwm
+  scratch: ${SCRATCH}/research/GameWorldModel/work
   clips: /scratch/jwj/research/GameWorldModel/data/clips/trimmed
   out: /scratch/jwj/research/GameWorldModel/out
 weights:

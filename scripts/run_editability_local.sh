@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
 #SBATCH --time=01:30:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # issue #13 的可编辑性实验，用本地自托管的开源模型跑，不依赖任何外部 API。
 # 服务和实验放在同一个作业里，省掉跨节点端口的麻烦。
 set -u

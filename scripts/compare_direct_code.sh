@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:25:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # issue #11：把模型直接写的代码渲染出来，和 DSL 路径的产物做同口径比较
 set -u
 GAME=${1:?需要直接出代码的 game 目录}
