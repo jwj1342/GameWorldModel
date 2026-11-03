@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-new-tokens", type=int, default=4096)
     ap.add_argument("--per-set-limit", type=int, default=0)
+    ap.add_argument("--shard", default="0/1", help="k/n：只做第 k 份（每张卡起一个进程，各写各的文件）")
     a = ap.parse_args()
 
     import torch
@@ -40,6 +41,8 @@ def main() -> int:
     for set_name in a.sets.split(","):
         rows = load_samples(a.samples, [set_name])
         samples += rows[: a.per_set_limit] if a.per_set_limit else rows
+    k, n = (int(x) for x in a.shard.split("/"))
+    samples = samples[k::n]
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     done = set()

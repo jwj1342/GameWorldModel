@@ -3,14 +3,17 @@
 
 预实验要回答的只有一个问题：这个映射能不能被一个 8B 的开源多模态模型学到。
 所以训练循环写得最直白：batch 1、梯度累积、bf16、梯度检查点、每轮在留出集上算一次 loss、存一次适配器。
+多卡用 torchrun 起数据并行：每张卡每步一条，等效批大小是 卡数 × accum。
 
 用法:
   python scripts/statediff/train_lora.py --samples SET/samples.jsonl --model $GWM_WEIGHTS/qwen3-vl-8b-instruct \
       --out $GWM_SCRATCH/statediff/lora1 --epochs 4
+  torchrun --nproc_per_node 4 scripts/statediff/train_lora.py ... --accum 2
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import random
@@ -22,8 +25,8 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from scripts.statediff.common import load_samples, read_json, target_text   # noqa: E402
-from scripts.statediff.vlm_io import encode_pair, to_device                # noqa: E402
+from scripts.statediff.common import load_samples                            # noqa: E402
+from scripts.statediff.vlm_io import encode_pair, target_for, to_device     # noqa: E402
 
 
 def main() -> int:
@@ -43,15 +46,25 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
+    import os
+
     import torch
+    import torch.distributed as dist
     from peft import LoraConfig, get_peft_model
     from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
+    world = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    if world > 1:
+        dist.init_process_group("nccl")
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    log = (out / "train_log.jsonl").open("a", encoding="utf-8")
+    log = (out / "train_log.jsonl").open("a", encoding="utf-8") if rank == 0 else None
 
     def emit(**rec):
+        if rank != 0:
+            return
         rec["time"] = time.strftime("%H:%M:%S")
         log.write(json.dumps(rec, ensure_ascii=False) + "\n")
         log.flush()
@@ -64,9 +77,9 @@ def main() -> int:
     if not train:
         print("没有训练样本", file=sys.stderr)
         return 1
-    answers = {s["id"]: target_text(read_json(s["program"])) for s in train + evals}
+    answers = {s["id"]: target_for(s) for s in train + evals}
 
-    device = "cuda"
+    device = f"cuda:{torch.cuda.current_device()}"
     processor = AutoProcessor.from_pretrained(a.model)
     model = Qwen3VLForConditionalGeneration.from_pretrained(a.model, dtype=torch.bfloat16, attn_implementation="sdpa")
     model.to(device)
@@ -76,14 +89,18 @@ def main() -> int:
     lora = LoraConfig(r=a.rank, lora_alpha=2 * a.rank, lora_dropout=0.05, task_type="CAUSAL_LM",
                       target_modules=r".*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$")
     model = get_peft_model(model, lora)
+    core = model
+    if world > 1:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[torch.cuda.current_device()])
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_all = sum(p.numel() for p in model.parameters())
     emit(event="setup", train=len(train), eval=len(evals), trainable_params=n_train, all_params=n_all,
-         model=a.model, rank=a.rank, lr=a.lr, accum=a.accum, epochs=a.epochs)
+         model=a.model, rank=a.rank, lr=a.lr, accum=a.accum, epochs=a.epochs, world=world)
 
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=a.lr, weight_decay=0.0)
-    updates_total = max(1, math.ceil(len(train) * a.epochs / a.accum))
+    per_rank = len(train) // world
+    updates_total = max(1, math.ceil(per_rank * a.epochs / a.accum))
     warm = max(1, min(20, updates_total // 10))
 
     def lr_at(step: int) -> float:
@@ -93,14 +110,14 @@ def main() -> int:
         return a.lr * 0.5 * (1 + math.cos(math.pi * min(1.0, p)))
 
     def eval_loss() -> float | None:
-        if not evals:
+        if not evals or rank != 0:
             return None
         model.eval()
         tot, n = 0.0, 0
         with torch.no_grad():
             for s in evals:
                 enc, labels, _ = encode_pair(processor, s, answers[s["id"]], a.max_len)
-                outp = model(**to_device(enc, device), labels=labels.to(device))
+                outp = core(**to_device(enc, device), labels=labels.to(device))
                 tot += float(outp.loss)
                 n += 1
         model.train()
@@ -111,16 +128,19 @@ def main() -> int:
     for ep in range(a.epochs):
         order = list(train)
         random.Random(a.seed + ep).shuffle(order)
+        order = order[rank: per_rank * world: world]       # 每张卡拿同样多条，步数对齐
         run_loss, run_n, truncated = 0.0, 0, 0
         for i, s in enumerate(order, 1):
             enc, labels, info = encode_pair(processor, s, answers[s["id"]], a.max_len)
             truncated += int(info["truncated"])
-            outp = model(**to_device(enc, device), labels=labels.to(device))
-            (outp.loss / a.accum).backward()
+            sync = i % a.accum == 0 or i == len(order)
+            with (model.no_sync() if world > 1 and not sync else contextlib.nullcontext()):
+                outp = model(**to_device(enc, device), labels=labels.to(device))
+                (outp.loss / a.accum).backward()
             run_loss += float(outp.loss)
             run_n += 1
             seen += 1
-            if i % a.accum == 0 or i == len(order):
+            if sync:
                 for g in opt.param_groups:
                     g["lr"] = lr_at(step)
                 torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -128,16 +148,22 @@ def main() -> int:
                 opt.zero_grad(set_to_none=True)
                 step += 1
             if i % 20 == 0 or i == len(order):
-                emit(event="train", epoch=ep, seen=seen, step=step, loss=round(run_loss / run_n, 4),
+                emit(event="train", epoch=ep, seen=seen * world, step=step, loss=round(run_loss / run_n, 4),
                      lr=round(lr_at(step), 7), tokens=info["total_tokens"], prompt_tokens=info["prompt_tokens"],
                      truncated=truncated, elapsed_s=round(time.time() - t0),
                      gpu_mem_gb=round(torch.cuda.max_memory_allocated() / 2 ** 30, 1))
                 run_loss, run_n = 0.0, 0
         ev = eval_loss()
         emit(event="epoch_end", epoch=ep, eval_loss=None if ev is None else round(ev, 4), elapsed_s=round(time.time() - t0))
-        model.save_pretrained(str(out / f"epoch{ep}"))
-    model.save_pretrained(str(out / "final"))
+        if rank == 0:
+            core.save_pretrained(str(out / f"epoch{ep}"))
+        if world > 1:
+            dist.barrier()
+    if rank == 0:
+        core.save_pretrained(str(out / "final"))
     emit(event="done", elapsed_s=round(time.time() - t0), adapter=str(out / "final"))
+    if world > 1:
+        dist.destroy_process_group()
     return 0
 
 

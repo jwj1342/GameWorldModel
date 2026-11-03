@@ -23,8 +23,9 @@ if str(REPO) not in sys.path:
 
 from gwm.config import load_config                                             # noqa: E402
 from gwm.synthesis.vlm import make_client                                      # noqa: E402
-from scripts.statediff.common import (context_of, load_samples, objects_schema,  # noqa: E402
-                                      read_json, system_prompt, user_text)
+from scripts.statediff import art                                              # noqa: E402
+from scripts.statediff.common import load_samples, objects_schema, read_json   # noqa: E402
+from scripts.statediff.vlm_io import task_of                                   # noqa: E402
 
 
 def _digest(value) -> str:
@@ -45,7 +46,7 @@ def _without_credentials(value):
 
 def _sample_identity(sample: dict) -> str:
     return _digest({"id": sample["id"], "set": sample["set"],
-                    "user": user_text(context_of(read_json(sample["program"])), sample["text"]),
+                    "user": task_of(sample).user_text(task_of(sample).context_of(read_json(sample["program"])), sample["text"]),
                     "images": [hashlib.sha256(Path(sample[k]).read_bytes()).hexdigest()
                                for k in ("img0", "img1")]})
 
@@ -57,7 +58,7 @@ def _run_identity(samples, cfg, temperature, schema, system) -> str:
     if not vlm.get("endpoint") and vlm.get("endpoint_file"):
         vlm["endpoint"] = Path(vlm["endpoint_file"]).read_text(encoding="utf-8").strip()
     vlm.pop("endpoint_file", None)
-    implementation = [Path(__file__), REPO / "scripts/statediff/common.py",
+    implementation = [Path(__file__), REPO / "scripts/statediff/common.py", REPO / "scripts/statediff/art.py",
                       REPO / "gwm/synthesis/vlm.py"]
     return _digest({"version": 1, "vlm": vlm, "temperature": temperature,
                     "schema": schema, "system": system,
@@ -127,8 +128,10 @@ def main() -> int:
         samples += rows[: a.per_set_limit] if a.per_set_limit else rows
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    schema = objects_schema()
-    system = system_prompt()
+    task = task_of(samples[0])
+    assert all(task_of(s) is task for s in samples), "one run, one task"
+    schema = art.motions_schema() if task is art else objects_schema()
+    system = task.system_prompt()
     identity = _run_identity(samples, cfg, a.temperature, schema, system)
     sample_identities = {s["id"]: _sample_identity(s) for s in samples}
     done = _resume_done(out, samples, identity)
@@ -146,9 +149,9 @@ def main() -> int:
             recorder = getattr(client, "request_recorder", None)
             if recorder is not None:
                 recorder.last_attempt_id = None
-            context = context_of(read_json(s["program"]))
+            context = task.context_of(read_json(s["program"]))
             try:
-                r = client.chat(system, user_text(context, s["text"]), images=[s["img0"], s["img1"]],
+                r = client.chat(system, task.user_text(context, s["text"]), images=[s["img0"], s["img1"]],
                                 json_schema=schema, temperature=a.temperature)
                 rec = {"id": s["id"], "set": s["set"], "text": r["text"], "json": r["json"], "usage": r["usage"],
                        "finish": r["finish"]}

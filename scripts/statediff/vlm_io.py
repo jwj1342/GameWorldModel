@@ -10,14 +10,24 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from scripts.statediff.common import context_of, read_json, system_prompt, user_text  # noqa: E402
+from scripts.statediff import art, common  # noqa: E402
+
+
+def task_of(sample: dict):
+    """样本行里 task 为 "art" 的是铰接探针，其余是两帧到 objects 的预实验任务。"""
+    return art if sample.get("task") == "art" else common
+
+
+def target_for(sample: dict) -> str:
+    return task_of(sample).target_text(common.read_json(sample["program"]))
 
 
 def messages_for(sample: dict, answer: str | None = None) -> list[dict]:
-    context = context_of(read_json(sample["program"]))
-    msgs = [{"role": "system", "content": system_prompt()},
+    task = task_of(sample)
+    context = task.context_of(common.read_json(sample["program"]))
+    msgs = [{"role": "system", "content": task.system_prompt()},
             {"role": "user", "content": [{"type": "image"}, {"type": "image"},
-                                         {"type": "text", "text": user_text(context, sample["text"])}]}]
+                                         {"type": "text", "text": task.user_text(context, sample["text"])}]}]
     if answer is not None:
         msgs.append({"role": "assistant", "content": [{"type": "text", "text": answer}]})
     return msgs
