@@ -1,0 +1,9 @@
+{
+  "runner": "in-session subagent (Claude Code Agent tool), not `claude -p`",
+  "model": "claude-fable-5-2 (in-session subagent; the claude CLI was not logged in)",
+  "command": null,
+  "seconds": 2227,
+  "num_turns": 162,
+  "note": "Same TASK.md, inputs and tools as the headless CLI run would get. 162 is the number of tool calls, 423,754 subagent tokens, 12 preview iterations. The movable judgement in the self-check tool changed during this run (single +x drag -> any of 4 directions, lift or slide), so the agent saw two different verdicts for the same scene; it lowered some masses and shortened the side table's floor rails in response to the earlier verdict.",
+  "result": {}
+}

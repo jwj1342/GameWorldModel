@@ -48,6 +48,13 @@ function finite(v) { return Number.isFinite(v.x) && Number.isFinite(v.y) && Numb
 /** 搭一个只有物理、没有画面的世界。assetScenes 传进去是为了做样式替换对照。 */
 export function makeWorld(program, { assetScenes = null, dt = DT } = {}) {
   const { scene, registry } = buildScene(program, null, assetScenes);
+  return makeWorldFrom({ scene, registry }, { cameraSpec: program.camera, dt });
+}
+
+/** 同上，但场景和注册表由调用方给。两轴评测那边的场景是智能体直接写的代码，
+ *  不经过 program.json，探针逻辑还是这一套（见 harness/bench_interact.mjs）。 */
+export function makeWorldFrom({ scene, registry }, { cameraSpec = null, dt = DT } = {}) {
+  const program = { camera: cameraSpec };
   const physics = new Physics(dt);
   registry.forEach(e => physics.addEntry(e));
   // 玩家胶囊放到很远的地方：kernel 的 step 需要它存在，但它不该碰到场景里的任何东西
@@ -84,7 +91,7 @@ export function makeWorld(program, { assetScenes = null, dt = DT } = {}) {
  *  边上露出来的部分照样点得到，只看中心会把这种情况误判成完全够不着。 */
 const REACH_GRID = 5;
 
-function reachability(world, entry) {
+export function reachability(world, entry) {
   const box = new THREE.Box3().setFromObject(entry.group);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, visibleDepth = false;
   for (let i = 0; i < 8; i++) {
@@ -145,8 +152,14 @@ function contactState(world, entry) {
   return { penetration: round(deepest), penetrating_with: by, contacts: touching };
 }
 
-/** 自由拖动那一档：提起来、横着拖、松手。 */
-function probeFree(world, entry, trace) {
+/** 自由拖动那一档：提起来、横着拖、松手。
+ *
+ *  direction 是横拖的方向（水平单位向量），lift 为 false 时不提起、贴着原高度平推。
+ *  默认值就是原来的行为：先提起，再朝 +x 拖。两轴评测那边的场景是摆满家具的房间，
+ *  +x 方向常常就是墙，重家具也不该要求提得起来，所以它会换方向、换方式多试几次
+ *  （见 harness/bench_interact.mjs）。 */
+export function probeFree(world, entry, trace, { direction = null, lift = true } = {}) {
+  const along = direction ? direction.clone().setY(0).normalize() : new THREE.Vector3(1, 0, 0);
   const start = entry.group.position.clone();
   const others = world.registry.filter(e => e !== entry && e.kind === 'object')
     .map(e => ({ id: e.id, p: e.group.position.clone(), e }));
@@ -156,12 +169,12 @@ function probeFree(world, entry, trace) {
   // 先空推一帧：抓住把它变成了动力学刚体，接触这时候才算得出来
   world.step(1, trace);
   const contact = contactState(world, entry);
-  const lift = start.clone().add(new THREE.Vector3(0, reach, 0));
-  world.manipulator.dragToPoint(lift.x, lift.y, lift.z);
+  const liftTarget = start.clone().add(new THREE.Vector3(0, lift ? reach : 0, 0));
+  world.manipulator.dragToPoint(liftTarget.x, liftTarget.y, liftTarget.z);
   world.step(HOLD, trace);
   const lifted = entry.group.position.clone();
 
-  const side = lifted.clone().add(new THREE.Vector3(reach, 0, 0));
+  const side = lifted.clone().addScaledVector(along, reach);
   world.manipulator.dragToPoint(side.x, side.y, side.z);
   world.step(HOLD, trace);
   const dragged = entry.group.position.clone();
@@ -181,7 +194,7 @@ function probeFree(world, entry, trace) {
     penetrating_with: contact.penetrating_with,
     contacts: contact.contacts,
     // 提得起来吗：沿请求方向走了多少，除以请求的距离
-    lift_progress: round((lifted.y - start.y) / reach),
+    lift_progress: lift ? round((lifted.y - start.y) / reach) : null,
     // 跟得住吗：横拖结束时离目标点还有多远，除以请求的距离
     follow_error: round(dragged.distanceTo(side) / reach),
     // 松手之后稳得住吗
@@ -196,7 +209,7 @@ function probeFree(world, entry, trace) {
 }
 
 /** 抽屉和柜门那一档：往限位外面拖，看它是不是真的卡在限位上、而且没偏离约束。 */
-function probeConstrained(world, entry, constraint, trace) {
+export function probeConstrained(world, entry, constraint, trace) {
   const start = entry.group.position.clone();
   const startQuat = entry.group.quaternion.clone();
   const axis = constraint.axis.clone();

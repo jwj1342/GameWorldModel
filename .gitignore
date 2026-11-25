@@ -24,3 +24,6 @@ venv
 
 # API keys (never commit)
 .secrets/
+
+# 两轴评测 demo 的数据集（体积大，可重新下载）
+data/mipnerf360/

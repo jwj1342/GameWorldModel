@@ -1,0 +1,32 @@
+{
+  "scene": "room",
+  "note": "交给智能体的物体名单：场景里必须出现这些 id。只说是什么，不说能不能动——那是智能体要自己判断的。名单之外可以自由加物体。",
+  "objects": [
+    { "id": "floor", "what": "浅色木地板" },
+    { "id": "walls", "what": "房间的墙（可以是一个物体里的多块面）" },
+    { "id": "door", "what": "钢琴旁边那扇白色的门，照片里是开着的" },
+    { "id": "window", "what": "钢琴后面的窗户" },
+    { "id": "alcove_shelves", "what": "墙上凹进去的白色搁架和书架" },
+    { "id": "sofa", "what": "灰色布艺转角沙发" },
+    { "id": "armchair", "what": "深蓝色的单人躺椅" },
+    { "id": "armchair_cushion", "what": "躺椅上那个棕白花纹的靠垫" },
+    { "id": "footstool", "what": "蓝色坐垫、弯木框架的脚凳" },
+    { "id": "coffee_table", "what": "木面黑色金属腿的边几，摆在沙发前" },
+    { "id": "bowl", "what": "边几上的不锈钢碗" },
+    { "id": "carafe", "what": "边几上的玻璃水瓶" },
+    { "id": "wine_glass", "what": "边几上的玻璃杯" },
+    { "id": "slipper_left", "what": "地毯上的一只棕色拖鞋" },
+    { "id": "slipper_right", "what": "地毯上的另一只棕色拖鞋" },
+    { "id": "rug_dark", "what": "深绿色地毯" },
+    { "id": "rug_light", "what": "浅灰蓝色地毯" },
+    { "id": "subwoofer", "what": "电视旁边地上的黑色方箱（低音炮）" },
+    { "id": "tv", "what": "大屏电视" },
+    { "id": "tv_stand", "what": "电视下面的玻璃和金属电视柜，里面有音箱" },
+    { "id": "speaker_left", "what": "电视左侧立在支架上的音箱（连同支架）" },
+    { "id": "speaker_right", "what": "电视右侧立在支架上的音箱（连同支架）" },
+    { "id": "plant", "what": "陶土花盆里的绿植" },
+    { "id": "piano", "what": "黑色三角钢琴" },
+    { "id": "piano_bench", "what": "钢琴前的黑色琴凳" },
+    { "id": "piano_rug", "what": "钢琴下面的花纹地毯" }
+  ]
+}

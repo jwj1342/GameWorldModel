@@ -1,0 +1,44 @@
+# 两轴评测 demo：Mip-NeRF 360 的 room 场景。
+# 用法见 docs/bench-demo.md；命令行入口是 python -m gwm.bench.run。
+scene: room
+
+data:
+  root: data/mipnerf360/room      # 解压后的场景目录，里面有 images_4/ 和 sparse/0/
+  image_dir: images_4             # 评测分辨率。三维高斯在室内场景上通常用 images_2，这里先用小一档求快
+  camera_height_m: 1.4            # 尺度先验：手持拍摄时相机离地高度的中位数（COLMAP 给不出绝对尺度）
+  agent_views: 24                 # 给智能体看的训练视角照片数，均匀抽取
+  agent_view_width: 1024
+  max_points: 20000               # 给智能体的稀疏点上限
+  seed: 0
+
+paths:
+  out: out/bench                  # 产物在 out/bench/<scene>/ 下面
+  weights: models                 # LPIPS 和贴图模型的权重
+
+fidelity:
+  lpips_net: vgg                  # 和三维高斯论文的口径一致
+
+texture:
+  model: null                     # 留空则用 gwm.bench.texture 的默认模型
+  size: 512
+  bind_base_color: true           # 贴图只留纹理的相对变化，平均色换成 materials.json 里从照片估的底色
+  detail_strength: 0.7            # 纹理细节保留多少：1 原样，0 退化成纯色
+
+agent:
+  model: claude-fable-5-2         # claude -p 用的模型
+  max_budget_usd: 25              # 单次运行的花费上限
+  preview_views: 6                # 自检时并排对比的训练视角数
+
+checklist: configs/bench/room.checklist.json
+manifest: configs/bench/room.manifest.json
+
+# 参考点：不是在这台机器上算出来的数，来源写在 note 里，网页上会单独标出来
+references:
+  - name: 3DGS（论文值）
+    fidelity: {psnr: 30.632, ssim: 0.914, lpips: 0.220}
+    interact_pass_rate: 0.0
+    note: >-
+      三维高斯原论文附录里 room 场景 30K 迭代的数，不是在这台机器上算的；论文在室内场景用的是
+      images_2，这里的评测用 images_4，分辨率不同，只能看量级。交互记 0：高斯重建没有物体这一层，
+      清单里的目标一个都不存在，这是按定义得出的，不是执行出来的。
+    source: https://arxiv.org/abs/2308.04079
