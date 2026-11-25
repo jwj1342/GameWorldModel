@@ -30,7 +30,6 @@ from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 MODES = ("flat", "textured")
-CANDIDATE_FILES = ("scene.js", "materials.json")
 
 
 def load_config(path: str | Path) -> dict:
@@ -93,9 +92,10 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
     run_dir = scene_out(cfg) / "runs" / f"{stamp}-{label}"
     cand_dir = run_dir / "candidate"
     cand_dir.mkdir(parents=True)
-    for name in CANDIDATE_FILES:
-        if (cand / name).is_file():
-            shutil.copy2(cand / name, cand_dir / name)
+    # scene.js 可以从同目录别的 .js 里导入（比如把一份的几何和另一份的灯光拼起来），所以 .js 都带上
+    for path in [*sorted(cand.glob("*.js")), cand / "materials.json"]:
+        if path.is_file():
+            shutil.copy2(path, cand_dir / path.name)
     (cand_dir / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
     materials = json.loads((cand_dir / "materials.json").read_text(encoding="utf-8")) if (cand_dir / "materials.json").is_file() else {}
     run_meta = {
