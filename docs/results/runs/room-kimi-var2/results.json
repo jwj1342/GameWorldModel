@@ -1,0 +1,229 @@
+{
+ "run_id": "20261126-032707-kimi-var2",
+ "label": "kimi-var2",
+ "scene": "room",
+ "held_out_views": 39,
+ "image_dir": "images_4",
+ "code_size": {
+  "lines": 427,
+  "bytes": 24494
+ },
+ "materials": 46,
+ "objects": [
+  {
+   "id": "floor",
+   "kind": "static",
+   "colliders": 1
+  },
+  {
+   "id": "walls",
+   "kind": "static",
+   "colliders": 26
+  },
+  {
+   "id": "window_south",
+   "kind": "static",
+   "colliders": 7
+  },
+  {
+   "id": "window",
+   "kind": "static",
+   "colliders": 7
+  },
+  {
+   "id": "door",
+   "kind": "movable",
+   "colliders": 6
+  },
+  {
+   "id": "alcove_shelves",
+   "kind": "static",
+   "colliders": 32
+  },
+  {
+   "id": "bookcase_pine",
+   "kind": "static",
+   "colliders": 16
+  },
+  {
+   "id": "sofa",
+   "kind": "static",
+   "colliders": 13
+  },
+  {
+   "id": "armchair",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "armchair_cushion",
+   "kind": "movable",
+   "colliders": 1
+  },
+  {
+   "id": "footstool",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "coffee_table",
+   "kind": "movable",
+   "colliders": 4
+  },
+  {
+   "id": "bowl",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "carafe",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "wine_glass",
+   "kind": "movable",
+   "colliders": 3
+  },
+  {
+   "id": "slipper_left",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "slipper_right",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "rug_dark",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "rug_light",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "piano_rug",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "subwoofer",
+   "kind": "movable",
+   "colliders": 1
+  },
+  {
+   "id": "tv",
+   "kind": "movable",
+   "colliders": 3
+  },
+  {
+   "id": "tv_stand",
+   "kind": "movable",
+   "colliders": 9
+  },
+  {
+   "id": "speaker_left",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "speaker_right",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "plant",
+   "kind": "movable",
+   "colliders": 13
+  },
+  {
+   "id": "piano",
+   "kind": "static",
+   "colliders": 13
+  },
+  {
+   "id": "piano_bench",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "radiator",
+   "kind": "static",
+   "colliders": 1
+  },
+  {
+   "id": "cardboard_box",
+   "kind": "static",
+   "colliders": 1
+  },
+  {
+   "id": "side_table",
+   "kind": "static",
+   "colliders": 7
+  },
+  {
+   "id": "purifier",
+   "kind": "movable",
+   "colliders": 2
+  }
+ ],
+ "points": [
+  {
+   "name": "kimi-var2-flat",
+   "label": "kimi-var2",
+   "mode": "flat",
+   "fidelity": {
+    "psnr": 12.2625,
+    "ssim": 0.4106,
+    "lpips": 0.7057
+   },
+   "interact": {
+    "passed": 10,
+    "total": 30,
+    "pass_rate": 0.333,
+    "by_expect": {
+     "fixed": {
+      "passed": 3,
+      "total": 4
+     },
+     "hinge": {
+      "passed": 0,
+      "total": 1
+     },
+     "movable": {
+      "passed": 5,
+      "total": 15
+     },
+     "rests": {
+      "passed": 2,
+      "total": 10
+     }
+    }
+   },
+   "sequence": {
+    "lazy": {
+     "passed": 15,
+     "total": 24,
+     "pass_rate": 0.625
+    },
+    "settled": {
+     "passed": 16,
+     "total": 24,
+     "pass_rate": 0.667
+    }
+   }
+  }
+ ],
+ "geometry": {
+  "coverage": 0.9998,
+  "median_abs_m": 0.2795,
+  "within_10cm": 0.3121,
+  "median_rel": 0.1062
+ },
+ "texture_model": null,
+ "finished": "2026-11-26T03:27:19"
+}
