@@ -189,12 +189,12 @@ def _best_yaw(xz: np.ndarray) -> float:
     return best_angle
 
 
-def normalise(cameras: list[Camera], points: np.ndarray, *, camera_height_m: float
+def normalise(cameras: list[Camera], points: np.ndarray, *, camera_height_m: float, floor_band: float
               ) -> tuple[np.ndarray, float, np.ndarray, dict]:
     """算出 x_new = s * R @ x_old + t，使新坐标系 y 朝上、地面在 y=0、尺度大致是米。"""
     # 手持拍摄时相机大致是正着拿的：COLMAP 相机系 y 朝下，所以 -y 轴的平均就是朝上
     up0 = -np.mean([c.r_c2w[:, 1] for c in cameras], axis=0)
-    n, d, inliers = fit_floor(points, up0)
+    n, d, inliers = fit_floor(points, up0, band=floor_band)
     r_up = _rotation_to(n)
     centres = np.array([c.centre for c in cameras])
     cam_heights = centres @ n - d
@@ -251,11 +251,37 @@ def _evenly(items: list, count: int) -> list:
     return [items[round(i * step)] for i in range(count)]
 
 
-def build_pack(scene_dir: Path, out_dir: Path, *, image_dir: str, camera_height_m: float,
+def read_observations(sparse_dir: Path) -> dict[str, np.ndarray]:
+    """每张图在 COLMAP 里实际观测到了哪些三维点：{图名: 点的下标}，下标和 read_colmap 返回的点顺序一致。
+
+    几何误差只拿这些点比：一张照片没拍到的点（被挡住了、在画面外）不该拿来要求渲染出来的深度。"""
+    names: dict[int, str] = {}
+    with open(sparse_dir / "images.bin", "rb") as f:
+        (count,) = _read(f, "<Q")
+        for _ in range(count):
+            image_id = _read(f, "<i7di")[0]
+            name = b""
+            while (ch := f.read(1)) != b"\x00":
+                name += ch
+            (n2d,) = _read(f, "<Q")
+            f.seek(24 * n2d, 1)
+            names[image_id] = name.decode()
+    seen: dict[str, list[int]] = {n: [] for n in names.values()}
+    with open(sparse_dir / "points3D.bin", "rb") as f:
+        (count,) = _read(f, "<Q")
+        for index in range(count):
+            track = _read(f, "<Q3d3BdQ")[-1]
+            image_ids = np.frombuffer(f.read(8 * track), dtype="<i4").reshape(-1, 2)[:, 0]
+            for image_id in set(image_ids.tolist()):
+                seen[names[image_id]].append(index)
+    return {n: np.array(v, dtype=np.int64) for n, v in seen.items()}
+
+
+def build_pack(scene_dir: Path, out_dir: Path, *, image_dir: str, camera_height_m: float, floor_band: float,
                agent_views: int, agent_view_width: int, max_points: int, seed: int = 0) -> dict:
     """生成场景包。`agent/` 给写场景的智能体，`eval/` 只给评测用。"""
     cameras, points, colours = read_colmap(scene_dir / "sparse" / "0")
-    r, scale, t, info = normalise(cameras, points, camera_height_m=camera_height_m)
+    r, scale, t, info = normalise(cameras, points, camera_height_m=camera_height_m, floor_band=floor_band)
     names = [c.name for c in cameras]
     train, held = split(names)
     source = scene_dir / image_dir
@@ -303,6 +329,12 @@ def build_pack(scene_dir: Path, out_dir: Path, *, image_dir: str, camera_height_
         img.save(eval_dir / "gt" / file)
         held_entries.append({**e, "file": f"gt/{file}", "width": img.width, "height": img.height})
     (eval_dir / "cameras.json").write_text(json.dumps({"views": held_entries}, indent=1), encoding="utf-8")
+    # 每张留出照片实际观测到的 COLMAP 点，换到同一个坐标系。只给评测用，智能体看不到
+    observations = read_observations(scene_dir / "sparse" / "0")
+    (eval_dir / "observed.json").write_text(json.dumps({
+        "note": "每张留出照片在 COLMAP 里实际观测到的三维点，坐标和 cameras.json 同一个坐标系。几何误差用（geometry.py）。",
+        "views": {names[i]: np.round(world[observations[names[i]]], 4).tolist() for i in held},
+    }), encoding="utf-8")
 
     lo, hi = np.quantile(world, 0.02, axis=0), np.quantile(world, 0.98, axis=0)
     frame = {

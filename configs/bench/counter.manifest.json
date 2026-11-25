@@ -1,0 +1,26 @@
+{
+  "scene": "counter",
+  "note": "交给智能体的物体名单：场景里必须出现这些 id。只说是什么，不说能不能动——那是智能体要自己判断的。名单之外可以自由加物体。",
+  "objects": [
+    { "id": "floor", "what": "地面的浅色瓷砖" },
+    { "id": "counter", "what": "中间的厨房中岛：深色花岗岩台面加下面的木柜" },
+    { "id": "back_cabinets", "what": "后面靠墙的木柜、冰箱、灶台和窗台那一圈" },
+    { "id": "steel_bowl", "what": "左边的大不锈钢盆" },
+    { "id": "onion_pan", "what": "带两个把手的不锈钢浅盆，里面装着洋葱和大蒜" },
+    { "id": "onions", "what": "网兜里的几个大洋葱" },
+    { "id": "clementines", "what": "网兜里的一袋小橘子" },
+    { "id": "candle", "what": "白色的柱形蜡烛" },
+    { "id": "rolling_pin", "what": "木头擀面杖" },
+    { "id": "oven_mitts", "what": "一副蓝色硅胶隔热手套" },
+    { "id": "jar", "what": "白盖子的玻璃酱罐" },
+    { "id": "red_tin", "what": "红色的圆柱形罐子" },
+    { "id": "baking_tray", "what": "金属烤盘" },
+    { "id": "egg_box", "what": "一盒鸡蛋" },
+    { "id": "processor_bowl", "what": "料理机的透明碗，中间带刀头" },
+    { "id": "processor_lid", "what": "料理机的透明盖子" },
+    { "id": "water_jug", "what": "蓝色的滤水壶" },
+    { "id": "plant", "what": "白色花盆里的变叶木" },
+    { "id": "fruit_bowl", "what": "竹木碗，里面放着苹果和橘子" },
+    { "id": "baguette", "what": "纸袋装的法棍" }
+  ]
+}

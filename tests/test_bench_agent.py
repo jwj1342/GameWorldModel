@@ -65,3 +65,11 @@ def test_no_manifest_leaves_granularity_to_the_agent(cfg, tmp_path):
     assert not (ws / "inputs" / "manifest.json").exists()
     assert "{{" not in task
     assert "armchair_cushion" not in task
+
+
+def test_photos_only_input_has_no_point_cloud(cfg, tmp_path):
+    ws = agent.prepare(cfg, tmp_path / "ws", inputs="photos", score_tool=True)
+    task = (ws / "TASK.md").read_text(encoding="utf-8")
+    assert not (ws / "inputs" / "points.json").exists()
+    assert "{{" not in task and "points.json" not in task
+    assert (ws / "tools" / "score.sh").is_file() and "tools/score.sh" in task

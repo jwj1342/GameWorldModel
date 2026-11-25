@@ -12,15 +12,14 @@
 ```
 inputs/views/*.jpg      {{VIEW_COUNT}} 张训练视角的照片
 inputs/cameras.json     每张照片的相机：pos、quat [x,y,z,w]、fov_deg（竖直方向）、aspect
-inputs/points.json      稀疏三维点（xyz 和 rgb），和相机在同一个坐标系里
-inputs/frame.json       坐标系说明和房间大致范围
+{{POINTS_INPUT}}inputs/frame.json       坐标系说明和房间大致范围
 {{MANIFEST_INPUT}}tools/preview.sh        渲染你的场景并和照片并排，用来自己检查像不像
-tools/physics.sh        在物理引擎里把你的场景执行一遍，用来自己检查能不能动
+{{SCORE_TOOL}}tools/physics.sh        在物理引擎里把你的场景执行一遍，用来自己检查能不能动
 ```
 
-坐标系：**y 轴朝上，地面在 y = 0，单位大致是米**，墙大致沿 x 轴和 z 轴。相机是 three.js 的约定（x 右、y 上、看向 -z）。尺度是按拍摄者手持相机的高度估的，不是量出来的，所以以稀疏点和照片为准，不要套用你印象里家具的标准尺寸。
+坐标系：**y 轴朝上，地面在 y = 0，单位大致是米**，墙大致沿 x 轴和 z 轴。相机是 three.js 的约定（x 右、y 上、看向 -z）。尺度是按拍摄者手持相机的高度估的，不是量出来的，所以{{SCALE_SOURCE}}，不要套用你印象里家具的标准尺寸。
 
-稀疏点是你定位物体最可靠的依据：先看照片认出一个物体，再去点云里找它对应的那一簇点，读出它的位置和大小。
+{{POINTS_HINT}}
 
 ## 你要交什么
 
@@ -90,7 +89,7 @@ export function environment(THREE) {
 
 用 Read 工具打开 `preview/*.jpg` 看。重点看：家具的位置和大小有没有对上照片，地面和墙的交线对不对，有没有漏掉的大件。`tools/physics.sh` 报出不稳或者拖不动的物体时，多半是它悬空了、陷进了支撑面，或者和邻居插在一起。
 
-建议的顺序：先搭地面、墙和大件家具，预览对齐之后再加小物体，最后调颜色、材质和灯光，全程隔一阵就跑一次物理自检。你可以用 `node` 写一小段脚本去分析 `inputs/points.json`（比如统计某个范围内点的包围盒）。
+建议的顺序：先搭地面、墙和大件家具，预览对齐之后再加小物体，最后调颜色、材质和灯光，全程隔一阵就跑一次物理自检。{{POINTS_SCRIPT_HINT}}
 
 ## 什么时候算完成
 

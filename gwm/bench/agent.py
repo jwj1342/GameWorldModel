@@ -29,7 +29,8 @@ from .run import REPO, load_config, scene_out
 PROMPT = REPO / "prompts" / "bench_scene_writer.md"
 # 允许的工具：读写文件，加上两个自检脚本和 node。不给联网。
 ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep",
-                 "Bash(./tools/preview.sh:*)", "Bash(./tools/physics.sh:*)", "Bash(node:*)", "Bash(ls:*)"]
+                 "Bash(./tools/preview.sh:*)", "Bash(./tools/physics.sh:*)", "Bash(./tools/score.sh:*)",
+                 "Bash(node:*)", "Bash(ls:*)"]
 DISALLOWED_TOOLS = ["WebSearch", "WebFetch"]
 
 
@@ -55,14 +56,53 @@ WITHOUT_MANIFEST = {
 }
 
 
-def prepare(cfg: dict, workspace: Path, *, manifest: bool = True) -> Path:
+# 给智能体什么三维输入，提示词里有四处不一样。输入消融就靠这一个开关：只给照片、照片加 COLMAP 稀疏点
+# （默认）、再加单目深度对齐之后的稠密点（gwm/bench/depth_prior.py 事先算好放在场景包里）。
+POINTS_HINT = "先看照片认出一个物体，再去点云里找它对应的那一簇点，读出它的位置和大小。"
+INPUTS = {
+    "sparse": {
+        "POINTS_INPUT": "inputs/points.json      稀疏三维点（xyz 和 rgb），和相机在同一个坐标系里\n",
+        "SCALE_SOURCE": "以稀疏点和照片为准",
+        "POINTS_HINT": "稀疏点是你定位物体最可靠的依据：" + POINTS_HINT,
+        "POINTS_SCRIPT_HINT": "你可以用 `node` 写一小段脚本去分析 `inputs/points.json`（比如统计某个范围内点的包围盒）。",
+    },
+    "dense": {
+        "POINTS_INPUT": ("inputs/points.json      三维点（xyz 和 rgb），和相机在同一个坐标系里：COLMAP 稀疏点，"
+                         "加上单目深度估计对齐到稀疏点之后反投影出来的稠密点\n"),
+        "SCALE_SOURCE": "以点云和照片为准",
+        "POINTS_HINT": ("点云是你定位物体最可靠的依据：" + POINTS_HINT
+                        + "稠密点来自单目深度估计，大面上比稀疏点密得多，但物体边缘附近会有拖尾。"),
+        "POINTS_SCRIPT_HINT": "你可以用 `node` 写一小段脚本去分析 `inputs/points.json`（比如统计某个范围内点的包围盒）。",
+    },
+    "photos": {
+        "POINTS_INPUT": "",
+        "SCALE_SOURCE": "以照片为准",
+        "POINTS_HINT": "这次没有点云。物体的位置和大小要靠几张照片和它们的相机位姿去推：同一个物体在几个视角里各出现在哪里。",
+        "POINTS_SCRIPT_HINT": "你可以用 `node` 写一小段脚本，把一个三维点投到各个训练相机里，看它落在照片的哪个位置。",
+    },
+}
+SCORE_TOOL_LINE = "tools/score.sh          在给你的训练视角上算渲染和照片的 PSNR、LPIPS，给你数值反馈\n"
+
+
+def prepare(cfg: dict, workspace: Path, *, manifest: bool = True, inputs: str = "sparse",
+            score_tool: bool = False) -> Path:
     pack_agent = scene_out(cfg) / "pack" / "agent"
     if not pack_agent.is_dir():
         raise FileNotFoundError(f"没有场景包，先跑 python -m gwm.bench.run pack：{pack_agent}")
     if workspace.exists() and any(workspace.iterdir()):
         raise FileExistsError(f"工作区已经有内容，换一个目录，免得盖掉上一次的产物：{workspace}")
     workspace.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(pack_agent, workspace / "inputs")
+    shutil.copytree(pack_agent, workspace / "inputs", ignore=shutil.ignore_patterns("dense_points.json"))
+    if inputs == "photos":
+        (workspace / "inputs" / "points.json").unlink()
+    elif inputs == "dense":
+        sparse = json.loads((pack_agent / "points.json").read_text(encoding="utf-8"))
+        dense = json.loads((pack_agent / "dense_points.json").read_text(encoding="utf-8"))
+        (workspace / "inputs" / "points.json").write_text(json.dumps({
+            "note": "COLMAP 稀疏点在前，单目深度对齐之后的稠密点在后，坐标系和相机一致。xyz 单位大致是米，rgb 是 0-255。",
+            "sparse_count": len(sparse["xyz"]),
+            "xyz": sparse["xyz"] + dense["xyz"], "rgb": sparse["rgb"] + dense["rgb"],
+        }), encoding="utf-8")
     if manifest:
         objects = json.loads((REPO / cfg["manifest"]).read_text(encoding="utf-8"))["objects"]
         (workspace / "inputs" / "manifest.json").write_text(
@@ -75,6 +115,7 @@ def prepare(cfg: dict, workspace: Path, *, manifest: bool = True) -> Path:
 
     views = json.loads((workspace / "inputs" / "cameras.json").read_text(encoding="utf-8"))["views"]
     task = PROMPT.read_text(encoding="utf-8").replace("{{VIEW_COUNT}}", str(len(views)))
+    fill = {**fill, **INPUTS[inputs], "SCORE_TOOL": SCORE_TOOL_LINE if score_tool else ""}
     for key, text in fill.items():
         task = task.replace("{{" + key + "}}", text)
     (workspace / "TASK.md").write_text(task, encoding="utf-8")
@@ -90,6 +131,10 @@ def prepare(cfg: dict, workspace: Path, *, manifest: bool = True) -> Path:
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NAMES="${{1:-{default_names}}}"
+# 每次预览前存一份快照，事后用 python -m gwm.bench.run trajectory 逐个评测
+N=$(find snapshots -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+SNAP=$(printf "snapshots/%03d" "$N")
+mkdir -p "$SNAP" && cp scene.js "$SNAP/" && if [ -f materials.json ]; then cp materials.json "$SNAP/"; fi
 rm -rf preview/render
 node "{REPO}/harness/bench_render.mjs" --cand . --cameras inputs/cameras.json --out preview/render --mode flat --names "$NAMES"
 PYTHONPATH="{REPO}" "{python}" -m gwm.bench.agent sidebyside --workspace . --names "$NAMES"
@@ -100,7 +145,34 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 node "{REPO}/harness/bench_interact.mjs" --cand . --selfcheck --out preview/physics.json
 """)
+    if score_tool:
+        _script(tools / "score.sh", f"""#!/bin/bash
+# 在给你的训练视角上渲染当前场景（纯色模式），和照片比，打印每个视角和平均的 PSNR、LPIPS。
+set -euo pipefail
+cd "$(dirname "$0")/.."
+rm -rf preview/score
+node "{REPO}/harness/bench_render.mjs" --cand . --cameras inputs/cameras.json --out preview/score --mode flat
+PYTHONPATH="{REPO}" "{python}" -m gwm.bench.agent score --workspace .
+""")
     return workspace
+
+
+def score(workspace: Path) -> dict:
+    """tools/score.sh 的后一半：训练视角上的 PSNR 和 LPIPS。只用给智能体看过的那些视角，留出视角碰都不碰。"""
+    from . import fidelity
+    views = json.loads((workspace / "inputs" / "cameras.json").read_text(encoding="utf-8"))["views"]
+    lpips_fn = fidelity.Lpips(REPO / "models")
+    rows = []
+    for view in views:
+        stem = Path(view["name"]).stem
+        photo = fidelity.load_rgb(workspace / "inputs" / view["file"])
+        render = fidelity.load_rgb(workspace / "preview" / "score" / f"{stem}.png")
+        rows.append({"view": stem, "psnr": round(fidelity.psnr(photo, render), 2), "lpips": round(lpips_fn(photo, render), 3)})
+    mean = {k: round(sum(r[k] for r in rows) / len(rows), 3) for k in ("psnr", "lpips")}
+    for row in rows:
+        print(f"{row['view']}  PSNR {row['psnr']:6.2f}  LPIPS {row['lpips']:.3f}")
+    print(f"mean  PSNR {mean['psnr']:6.2f}  LPIPS {mean['lpips']:.3f}  （PSNR 越高越好，LPIPS 越低越好）")
+    return mean
 
 
 def sidebyside(workspace: Path, names: list[str] | None) -> list[Path]:
@@ -161,13 +233,15 @@ def run(cfg: dict, workspace: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("prepare", "run", "sidebyside"):
+    for name in ("prepare", "run", "sidebyside", "score"):
         p = sub.add_parser(name)
         p.add_argument("--workspace", required=True)
-        if name != "sidebyside":
+        if name not in ("sidebyside", "score"):
             p.add_argument("--config", required=True)
         if name == "prepare":
             p.add_argument("--no-manifest", action="store_true", help="不给智能体物体名单，粒度由它自己定")
+            p.add_argument("--inputs", choices=sorted(INPUTS), default="sparse", help="给什么三维输入：只给照片、稀疏点、稀疏加稠密点")
+            p.add_argument("--score-tool", action="store_true", help="给智能体一个在训练视角上算 PSNR、LPIPS 的工具")
         else:
             p.add_argument("--names", default=None)
     args = parser.parse_args(argv)
@@ -176,7 +250,10 @@ def main(argv: list[str] | None = None) -> int:
         for path in sidebyside(workspace, args.names.split(",") if args.names else None):
             print(path)
     elif args.command == "prepare":
-        print(prepare(load_config(args.config), workspace, manifest=not args.no_manifest))
+        print(prepare(load_config(args.config), workspace, manifest=not args.no_manifest,
+                      inputs=args.inputs, score_tool=args.score_tool))
+    elif args.command == "score":
+        score(workspace)
     else:
         record = run(load_config(args.config), workspace)
         result = record.get("result", {})

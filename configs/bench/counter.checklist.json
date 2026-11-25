@@ -1,0 +1,33 @@
+{
+  "scene": "counter",
+  "note": "交互清单，不给智能体看。每条说的是现实里成立的一件事，评测时逐条执行。这一版是对着照片写的，只收没有争议的条目：隔热手套和法棍是软的，刚体物理不合适，不计分。",
+  "annotated_by": "初版由 Claude 对照照片标注，待人工复核",
+  "items": [
+    { "target": "floor", "expect": "fixed" },
+    { "target": "counter", "expect": "fixed" },
+    { "target": "back_cabinets", "expect": "fixed" },
+    { "target": "steel_bowl", "expect": "movable" },
+    { "target": "onion_pan", "expect": "movable" },
+    { "target": "candle", "expect": "movable" },
+    { "target": "rolling_pin", "expect": "movable" },
+    { "target": "jar", "expect": "movable" },
+    { "target": "red_tin", "expect": "movable" },
+    { "target": "baking_tray", "expect": "movable" },
+    { "target": "egg_box", "expect": "movable" },
+    { "target": "processor_bowl", "expect": "movable" },
+    { "target": "processor_lid", "expect": "movable" },
+    { "target": "water_jug", "expect": "movable" },
+    { "target": "plant", "expect": "movable" },
+    { "target": "fruit_bowl", "expect": "movable" },
+    { "target": "steel_bowl", "expect": "rests" },
+    { "target": "candle", "expect": "rests" },
+    { "target": "rolling_pin", "expect": "rests" },
+    { "target": "jar", "expect": "rests" },
+    { "target": "red_tin", "expect": "rests" },
+    { "target": "baking_tray", "expect": "rests" },
+    { "target": "egg_box", "expect": "rests" },
+    { "target": "water_jug", "expect": "rests" },
+    { "target": "plant", "expect": "rests" },
+    { "target": "fruit_bowl", "expect": "rests" }
+  ]
+}

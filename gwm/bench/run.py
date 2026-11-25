@@ -2,6 +2,7 @@
 
     python -m gwm.bench.run pack   --config configs/bench/room.yaml
     python -m gwm.bench.run eval   --config configs/bench/room.yaml --cand DIR --label NAME [--modes flat,textured]
+    python -m gwm.bench.run trajectory --config configs/bench/room.yaml --workspace DIR --label NAME
     python -m gwm.bench.run report --config configs/bench/room.yaml [--runs ID,ID]
 
 pack    把数据集整理成场景包（坐标归一化、训练/留出划分），只需要跑一次。
@@ -25,6 +26,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 MODES = ("flat", "textured")
@@ -68,7 +70,7 @@ def cmd_pack(cfg: dict) -> dict:
     from .data import build_pack
     d = cfg["data"]
     frame = build_pack(REPO / d["root"], scene_out(cfg) / "pack", image_dir=d["image_dir"],
-                       camera_height_m=d["camera_height_m"], agent_views=d["agent_views"],
+                       camera_height_m=d["camera_height_m"], floor_band=d["floor_band"], agent_views=d["agent_views"],
                        agent_view_width=d["agent_view_width"], max_points=d["max_points"], seed=d.get("seed", 0))
     print(json.dumps(frame, ensure_ascii=False, indent=1))
     return frame
@@ -140,6 +142,13 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
         fidelity.write(result, run_dir / f"fidelity_{mode}.json")
         points.append({"name": f"{label}-{mode}", "label": label, "mode": mode, "fidelity": result["mean"]})
 
+    # 几何：留出视角的深度图和 COLMAP 在这些照片里实际看到的点比（geometry.py）
+    from . import geometry
+    depth_dir = run_dir / "renders" / "depth"
+    _node("bench_render.mjs", "--cand", str(cand_dir), "--cameras", str(cameras_file), "--out", str(depth_dir), "--mode", "depth")
+    geo = geometry.evaluate(pack / "eval" / "observed.json", depth_dir, views)
+    (run_dir / "geometry.json").write_text(json.dumps(geo, indent=1), encoding="utf-8")
+
     interact_file = run_dir / "interact.json"
     anchors = ["--anchors", str(REPO / cfg["anchors"])] if cfg.get("anchors") else []
     _node("bench_interact.mjs", "--cand", str(cand_dir), "--checklist", str(REPO / cfg["checklist"]),
@@ -160,16 +169,64 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
         "run_id": run_dir.name, "label": label, "scene": cfg["scene"],
         "held_out_views": len(views), "image_dir": cfg["data"]["image_dir"],
         "code_size": code_size(cand_dir / "scene.js"), "materials": len(materials),
-        "objects": interact["objects"], "points": points,
+        "objects": interact["objects"], "points": points, "geometry": geo["mean"],
         "texture_model": (texture_log or {}).get("model"),
         "finished": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     (run_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     for point in points:
         seq = " ".join(f"sequence_{k}={v['passed']}/{v['total']}" for k, v in sequence.items())
-        print(f"{point['name']}: fidelity={point['fidelity']} interact={interact['summary']['passed']}/{interact['summary']['total']} {seq}")
+        print(f"{point['name']}: fidelity={point['fidelity']} geometry={geo['mean']} interact={interact['summary']['passed']}/{interact['summary']['total']} {seq}")
     print(f"run dir: {run_dir}")
     return run_dir
+
+
+def cmd_trajectory(cfg: dict, workspace: Path, label: str) -> Path:
+    """把智能体每一轮预览时存下的快照都评一遍：留出视角和训练视角的保真度、几何、代码量。
+
+    两件事要靠它回答。一是代码写到多少行以后保真度不再涨，也就是代码该把细节交给生成器的那个点。
+    二是智能体对着训练视角越改越好的时候，留出视角是不是也在变好；第一次运行的最终版就不如中途快照。
+    只渲染纯色模式，贴图对 LPIPS 的影响只有 0.01，不值得每个快照都生成一遍。"""
+    from . import fidelity, geometry
+    pack = scene_out(cfg) / "pack"
+    held_views = json.loads((pack / "eval" / "cameras.json").read_text(encoding="utf-8"))["views"]
+    train_views = json.loads((pack / "agent" / "cameras.json").read_text(encoding="utf-8"))["views"]
+    snapshots = sorted(p for p in (workspace / "snapshots").iterdir() if (p / "scene.js").is_file())
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = scene_out(cfg) / "trajectories" / f"{stamp}-{label}"
+    # 训练视角的照片在场景包里是 jpg，fidelity.evaluate 按 png 找，先转一份
+    train_gt = out / "train_gt"
+    train_gt.mkdir(parents=True)
+    for view in train_views:
+        Image.open(pack / "agent" / view["file"]).convert("RGB").save(train_gt / f"{Path(view['name']).stem}.png")
+    lpips_fn = fidelity.Lpips(REPO / cfg["paths"]["weights"], net=cfg["fidelity"]["lpips_net"])
+    rows = []
+    for snap in [*snapshots, workspace]:
+        name = "final" if snap == workspace else snap.name
+        cand = out / "candidates" / name
+        cand.mkdir(parents=True)
+        for file in ("scene.js", "materials.json"):
+            shutil.copy2(snap / file, cand / file)
+        (cand / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
+        renders = out / "renders" / name
+        _node("bench_render.mjs", "--cand", str(cand), "--cameras", str(pack / "eval" / "cameras.json"),
+              "--out", str(renders / "held_flat"), "--mode", "flat")
+        _node("bench_render.mjs", "--cand", str(cand), "--cameras", str(pack / "eval" / "cameras.json"),
+              "--out", str(renders / "held_depth"), "--mode", "depth")
+        _node("bench_render.mjs", "--cand", str(cand), "--cameras", str(pack / "agent" / "cameras.json"),
+              "--out", str(renders / "train_flat"), "--mode", "flat")
+        rows.append({
+            "snapshot": name, "code": code_size(cand / "scene.js"),
+            "held_out": fidelity.evaluate(pack / "eval" / "gt", renders / "held_flat", held_views, lpips_fn)["mean"],
+            "train": fidelity.evaluate(train_gt, renders / "train_flat", train_views, lpips_fn)["mean"],
+            "geometry": geometry.evaluate(pack / "eval" / "observed.json", renders / "held_depth", held_views)["mean"],
+        })
+        print(json.dumps(rows[-1]))
+    (out / "trajectory.json").write_text(json.dumps({
+        "label": label, "workspace": str(workspace.resolve()), "scene": cfg["scene"], "rows": rows,
+    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"trajectory: {out}")
+    return out
 
 
 def cmd_report(cfg: dict, run_ids: list[str] | None) -> Path:
@@ -194,9 +251,12 @@ def cmd_report(cfg: dict, run_ids: list[str] | None) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("pack", "eval", "report"):
+    for name in ("pack", "eval", "trajectory", "report"):
         p = sub.add_parser(name)
         p.add_argument("--config", required=True)
+        if name == "trajectory":
+            p.add_argument("--workspace", required=True)
+            p.add_argument("--label", required=True)
         if name == "eval":
             p.add_argument("--cand", required=True)
             p.add_argument("--label", required=True)
@@ -210,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
         cmd_pack(cfg)
     elif args.command == "eval":
         cmd_eval(cfg, Path(args.cand), args.label, args.modes.split(","), skip_lpips=args.skip_lpips)
+    elif args.command == "trajectory":
+        cmd_trajectory(cfg, Path(args.workspace), args.label)
     else:
         cmd_report(cfg, args.runs.split(",") if args.runs else None)
     return 0

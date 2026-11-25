@@ -6,6 +6,7 @@ data:
   root: data/mipnerf360/room      # 解压后的场景目录，里面有 images_4/ 和 sparse/0/
   image_dir: images_4             # 评测分辨率。三维高斯在室内场景上通常用 images_2，这里先用小一档求快
   camera_height_m: 1.4            # 尺度先验：手持拍摄时相机离地高度的中位数（COLMAP 给不出绝对尺度）
+  floor_band: 0.15                # 拟合地面时只看点云最低的这一段（按高度的分位数），免得把桌面当成地面
   agent_views: 24                 # 给智能体看的训练视角照片数，均匀抽取
   agent_view_width: 1024
   max_points: 20000               # 给智能体的稀疏点上限
@@ -36,6 +37,12 @@ sequence: configs/bench/room.sequence.json      # 连续交互：一串不重置
 
 # 参考点：不是在这台机器上算出来的数，来源写在 note 里，网页上会单独标出来
 references:
+  - name: 3DGS（本机）
+    fidelity: {psnr: 32.227, ssim: 0.940, lpips: 0.171}
+    interact_pass_rate: 0.0
+    note: >-
+      python -m gwm.bench.gs_baseline 在同一个场景包、同样的 images_4 和留出视角上训练的，30k 步，
+      L40S 上 13 分钟。产物在 docs/results/bench-room-3dgs/。交互记 0 的理由同下。
   - name: 3DGS（论文值）
     fidelity: {psnr: 30.632, ssim: 0.914, lpips: 0.220}
     interact_pass_rate: 0.0

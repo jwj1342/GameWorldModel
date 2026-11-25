@@ -80,6 +80,10 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 
 **保真度**（`gwm/bench/fidelity.py`）。留出视角按三维高斯那边的通用约定取：文件名排序后每 8 张留 1 张，room 是 311 张里的 39 张。渲染分辨率和照片一致。主看 LPIPS：生成的贴图是「合理」而不是「相同」，PSNR 和 SSIM 天然吃亏，一起报是为了能和别人的表对上。
 
+**几何**（`gwm/bench/geometry.py`）。PSNR、SSIM、LPIPS 把几何、光照和贴图混在一起量，单看它们分不清瓶颈在哪。几何单独量：留出视角再按深度模式渲染一遍（`kernel/bench_view.js` 的 `mode=depth`，视空间深度按毫米写进 RGB），然后取 COLMAP 在这张照片里实际观测到的三维点（场景包的 `eval/observed.json`，被挡住的和画面外的不算），投到同一个相机里，和那个像素上渲染出来的深度比。报四个数：`coverage` 是投进画面的点里有几何的比例，`median_abs_m` 是深度差绝对值的中位数，`within_10cm` 是深度差不超过 10 厘米的比例（没几何的点算不合格），`median_rel` 是相对误差的中位数。单位是场景包的先验尺度，大致是米。三维高斯基线用同一套点、同一个函数量。
+
+**快照轨迹**（`python -m gwm.bench.run trajectory`）。智能体每次跑 `tools/preview.sh` 都会先把当前的 `scene.js` 和 `materials.json` 存进工作区的 `snapshots/`。事后把每一份快照都在留出视角和给智能体看的训练视角上评一遍（纯色模式），连同几何和代码行数写进 `trajectory.json`。它回答两件事：代码写到多少行以后保真度不再涨，以及智能体对着训练视角越改越好的时候，留出视角是不是也在变好。
+
 **交互**（`harness/bench_interact.mjs`）。清单每条是 `{ target, expect }`，五种期望：
 
 | expect | 怎么执行 | 通过条件 |
@@ -125,11 +129,31 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 
 网页在 `out/bench/room/report/index.html`。
 
+## 在 Vulcan 上跑
+
+环境在 `scripts/setup_bench_env.sh`（模块、venv、Chromium 和缓存的路径）。计算节点的代理不放行 npm 源，所以 npm 包和 Playwright 的 Chromium 要先在登录节点下载（`npm install --ignore-scripts`，再 `npx playwright install chromium`，`PLAYWRIGHT_BROWSERS_PATH` 指到 scratch）；Python 依赖全部能从集群轮子库装（`pip install --no-index -r requirements-bench.txt`，gsplat 也在）。
+
+三维高斯基线：`python -m gwm.bench.gs_baseline --config configs/bench/room.yaml`。它用 gsplat 的光栅化和默认致密化策略按标准设置训练 30k 步，坐标系、相机（竖直视场角、主点在图像中心）和留出视角都和场景包一致，评测直接用 `fidelity.py` 和 `geometry.py`，产物在 `out/bench/<scene>/baselines/`。
+
+## 三维高斯基线和几何（2026-11-25，Vulcan）
+
+在 Vulcan 上重新评测了入库的场景，纯色模式的三项指标和第一次运行一致（PSNR 13.886、SSIM 0.4876、LPIPS 0.6128），说明两台机器的环境对得上。同一个场景包上训练了本机的三维高斯基线（gsplat，30k 步，L40S 上 13 分钟，最后 147 万个高斯）。两边都加了几何这一列。
+
+| 点 | LPIPS ↓ | PSNR ↑ | SSIM ↑ | 深度差中位数 | 10 厘米内 | 交互清单 |
+|---|---|---|---|---|---|---|
+| 智能体写的场景，纯色 | 0.613 | 13.89 | 0.488 | 3.8 厘米 | 77% | 29/30 |
+| 三维高斯（本机，`images_4`） | 0.171 | 32.23 | 0.940 | 1.6 厘米 | 88% | 0（按定义） |
+| 三维高斯（论文值，`images_2`） | 0.220 | 30.63 | 0.914 | — | — | 0（按定义） |
+
+几何上两边差得没有外观那么多。代码场景深度差的中位数是三维高斯的 2.4 倍，10 厘米内的比例是 77% 对 88%；把观测点按误差上色叠到图上看，墙、地板、地毯这些大面基本都对，误差集中在几个摆错位置或者尺寸偏大的前景物体上（比如左前方那块黑色的音箱，把后面的书架和窗户整片挡住了）。外观上差得远得多：LPIPS 0.61 对 0.17。所以之前「瓶颈在几何和光照」的说法要改：布局已经大致对了，拉开差距的主要是外观和光照，几何上要补的是前景物体的位置和尺寸。
+
+读这张表要注意两点。一是几何只在 COLMAP 的特征点上量，这些点偏向有纹理的表面，大片白墙上点很少。二是三维高斯本来就是从这些稀疏点初始化的，智能体也拿到了其中的两万个，所以这一列对两边都不算盲测。产物在 `docs/results/bench-room-3dgs/`。
+
 ## 现在要知道的局限
 
 - **尺度是先验，不是量出来的。** COLMAP 给不出绝对尺度，这里假定相机离地高度的中位数是 1.4 米。物理只需要大致的米制尺度，但质量、摩擦这类量因此没有真值可比。
 - **交互清单是对着照片写的初版，待人工复核。** 只收了没有争议的条目，钢琴、电视和地毯不计分。清单能查「判得对不对、执行出来成不成立」，查不了质量和摩擦系数准不准。
-- **高斯重建那个参考点是论文值。** 不是在这台机器上算的，分辨率也不同（论文用 `images_2`，这里用 `images_4`），网页上单独标了出来。它的交互分是按定义记的 0。
+- **高斯重建的参考点现在有本机的数了**（上一节），论文值留作对照。它的交互分是按定义记的 0。
 - **没有沙箱。** 智能体被允许运行 node，原则上读得到磁盘上别的文件。demo 阶段靠不告诉它留出照片在哪，正式做 benchmark 要进容器。
 - **相机主点偏移没有建模。** 渲染相机只用了焦距，主点按图像中心算。
 - **贴图模型的许可是非商用为主。** `sd-turbo` 用的是 Stability AI Community License，做研究和 demo 可以，商用前要核对条款或者换模型。
@@ -145,7 +169,9 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 | `gwm/bench/texture.py` | 本机扩散模型把「文字加种子」变成可平铺贴图 |
 | `gwm/bench/appearance.py` | 把贴图的平均色绑到从照片估的底色上 |
 | `gwm/bench/fidelity.py` | PSNR、SSIM、LPIPS |
-| `gwm/bench/run.py` | 命令行入口：`pack`、`eval`、`report` |
+| `gwm/bench/geometry.py` | 渲染深度和 COLMAP 观测点之间的几何误差 |
+| `gwm/bench/gs_baseline.py` | 本机的三维高斯基线，同分辨率、同留出视角 |
+| `gwm/bench/run.py` | 命令行入口：`pack`、`eval`、`trajectory`、`report` |
 | `gwm/bench/report.py` | 生成对比网页 |
 | `kernel/bench_scene.js` | 把智能体写的模块变成场景和物理注册表（浏览器和 Node 共用） |
 | `kernel/bench_view.{html,js}` | 渲染页 |

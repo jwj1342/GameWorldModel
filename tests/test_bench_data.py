@@ -40,7 +40,7 @@ def _scene(seed=0):
 
 def test_floor_lands_on_zero_and_scale_follows_camera_height():
     cameras, points, height = _scene()
-    r, scale, t, info = data.normalise(cameras, points, camera_height_m=height)
+    r, scale, t, info = data.normalise(cameras, points, camera_height_m=height, floor_band=0.15)
     world = scale * points @ r.T + t
     floor = world[:4000]
     assert abs(float(np.median(floor[:, 1]))) < 0.01
@@ -56,7 +56,7 @@ def test_floor_lands_on_zero_and_scale_follows_camera_height():
 def test_three_camera_projects_like_colmap():
     """同一个三维点，按 COLMAP 的投影和按换算后的 three.js 相机投影，要落在同一个像素上。"""
     cameras, points, height = _scene(seed=1)
-    r, scale, t, _ = data.normalise(cameras, points, camera_height_m=height)
+    r, scale, t, _ = data.normalise(cameras, points, camera_height_m=height, floor_band=0.15)
     cam = cameras[5]
     view = data.three_camera(cam, r, scale, t)
     x, y, z, w = view["quat"]

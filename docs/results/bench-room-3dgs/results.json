@@ -1,0 +1,19 @@
+{
+ "scene": "room",
+ "image_dir": "images_4",
+ "iters": 30000,
+ "gaussians": 1473170,
+ "train_seconds": 785,
+ "fidelity": {
+  "psnr": 32.2273,
+  "ssim": 0.9396,
+  "lpips": 0.1714
+ },
+ "geometry": {
+  "coverage": 0.9962,
+  "median_abs_m": 0.0162,
+  "within_10cm": 0.8814,
+  "median_rel": 0.006
+ },
+ "gpu": "NVIDIA L40S"
+}
