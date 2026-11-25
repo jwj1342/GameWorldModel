@@ -129,6 +129,39 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 
 网页在 `out/bench/room/report/index.html`。
 
+## 在 Mac 上跑这一轮（Kimi 当智能体）
+
+Claude 的订阅额度撑不住一次跑好几个智能体（2026-11-25 在 Vulcan 上同时开 8 个，十分钟就把 5 小时的额度用完了，一个也没跑完），所以这一轮的方差和消融全部用 Kimi 的 `kimi-for-coding` 当智能体：同一个 `claude` 命令行、同样的任务和工具，只是经 Kimi 兼容 Anthropic 的接口换了模型，不占 Claude 的额度。Fable 那边先只有第一次运行那一个点，等额度允许再补。一次只跑一个，Kimi 那边的限速还不清楚。每次大约 40 到 60 分钟，全部跑完要大半天，适合晚上挂着。
+
+准备（只做一次）：
+
+```bash
+git fetch && git checkout demo/bench-mac-runs
+mkdir -p ~/.config/gwm-bench && chmod 700 ~/.config/gwm-bench
+# 把 Kimi 的 key 写进 ~/.config/gwm-bench/kimi_api_key，然后 chmod 600 它
+(cd data/mipnerf360 && unzip -q -n 360_v2.zip 'counter/*')
+venv/bin/python -m gwm.bench.run pack --config configs/bench/room.yaml       # 重新打包：多了留出视角的观测点，给几何那一列用
+venv/bin/python -m gwm.bench.run pack --config configs/bench/counter.yaml
+venv/bin/python -m gwm.bench.depth_prior --config configs/bench/room.yaml    # 稠密点，只有 --inputs dense 用
+```
+
+room 重新打包不会改变给智能体的输入：归一化的参数和以前一样，只是多写了 `eval/observed.json`。
+
+然后按这个顺序跑，每条跑完会打印 `DONE <label>`，结果拷在 `docs/results/runs/<场景>-<label>/`：
+
+```bash
+for L in kimi-var1 kimi-var2 kimi-var3; do scripts/bench_agent_run.sh kimi configs/bench/room.yaml $L; done   # 方差：和第一次运行同样的设置
+scripts/bench_agent_run.sh kimi configs/bench/room.yaml kimi-dense --inputs dense        # 输入消融：再加稠密点
+scripts/bench_agent_run.sh kimi configs/bench/room.yaml kimi-photos --inputs photos      # 输入消融：只给照片
+scripts/bench_agent_run.sh kimi configs/bench/room.yaml kimi-score --score-tool          # 反馈消融：训练视角上的数值反馈
+scripts/bench_agent_run.sh kimi configs/bench/room.yaml kimi-nomanifest --no-manifest    # 粒度：不给物体名单
+scripts/bench_agent_run.sh kimi configs/bench/counter.yaml kimi-counter                  # 第二个场景
+```
+
+光照归因不用智能体，命令在 PR #98 的评论里（`geom-*-light-*` 那四次 eval），跑完把四个 run 目录里的 `results.json` 和 `geometry.json` 拷进 `docs/results/runs/lighting-<geom>-<light>/`。
+
+最后 `git add docs/results/runs && git commit && git push`，分析在别的机器上做。三维高斯基线和外观投影的分析要 CUDA，留在 Vulcan 上跑。
+
 ## 在 Vulcan 上跑
 
 环境在 `scripts/setup_bench_env.sh`（模块、venv、Chromium 和缓存的路径）。计算节点的代理不放行 npm 源，所以 npm 包和 Playwright 的 Chromium 要先在登录节点下载（`npm install --ignore-scripts`，再 `npx playwright install chromium`，`PLAYWRIGHT_BROWSERS_PATH` 指到 scratch）；Python 依赖全部能从集群轮子库装（`pip install --no-index -r requirements-bench.txt`，gsplat 也在）。
@@ -172,6 +205,9 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 | `gwm/bench/geometry.py` | 渲染深度和 COLMAP 观测点之间的几何误差 |
 | `gwm/bench/gs_baseline.py` | 本机的三维高斯基线，同分辨率、同留出视角 |
 | `gwm/bench/run.py` | 命令行入口：`pack`、`eval`、`trajectory`、`report` |
+| `gwm/bench/depth_prior.py` | 输入消融用的稠密点：单目深度对齐到稀疏点之后反投影 |
+| `gwm/bench/reproject.py` | 分析用：颜色从训练照片投到某套几何上，拆开几何和外观的差距 |
+| `scripts/bench_agent_run.sh` | 一次完整运行（claude 或 kimi），跑完把结果拷进 `docs/results/runs/` |
 | `gwm/bench/report.py` | 生成对比网页 |
 | `kernel/bench_scene.js` | 把智能体写的模块变成场景和物理注册表（浏览器和 Node 共用） |
 | `kernel/bench_view.{html,js}` | 渲染页 |

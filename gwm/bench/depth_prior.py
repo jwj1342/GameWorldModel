@@ -54,14 +54,16 @@ def main(argv: list[str] | None = None) -> int:
     agent_dir = scene_out(cfg) / "pack" / "agent"
     views = json.loads((agent_dir / "cameras.json").read_text(encoding="utf-8"))["views"]
 
+    # Vulcan 上用 CUDA，Mac 上用 MPS
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     processor = AutoImageProcessor.from_pretrained(MODEL)
-    model = AutoModelForDepthEstimation.from_pretrained(MODEL).to("cuda").eval()
+    model = AutoModelForDepthEstimation.from_pretrained(MODEL).to(device).eval()
     xyz_all, rgb_all, fits = [], [], []
     for view in views:
         img = Image.open(agent_dir / view["file"]).convert("RGB")
         width, height = img.size
         with torch.no_grad():
-            out = model(**processor(images=img, return_tensors="pt").to("cuda"))
+            out = model(**processor(images=img, return_tensors="pt").to(device))
         pred = processor.post_process_depth_estimation(out, target_sizes=[(height, width)])[0]["predicted_depth"]
         pred = pred.float().cpu().numpy()
 
