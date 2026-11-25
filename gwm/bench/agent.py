@@ -38,7 +38,24 @@ def _script(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def prepare(cfg: dict, workspace: Path) -> Path:
+# 给不给物体名单，提示词里有四处不一样。不给名单时，场景里有哪些物体、每个物体拆成多细都由
+# 智能体自己定，评测按位置把清单对到它写的物体上（configs/bench/*.anchors.json）。
+WITH_MANIFEST = {
+    "MANIFEST_INPUT": "inputs/manifest.json    物体名单：场景里必须出现这些 id\n",
+    "ID_RULE": "- `id`：名单里的物体必须用名单给的 id。名单之外的物体可以自己起名，不要重复。",
+    "MANIFEST_DONE": "- 名单里的每个 id 都在场景里。",
+}
+WITHOUT_MANIFEST = {
+    "MANIFEST_INPUT": "",
+    "ID_RULE": ("- `id`：自己起名，不要重复。评测不看名字，按位置找物体：清单里每一条对应房间里的一个位置，"
+                "评测时取占着那个位置的物体。所以现实里能单独拿起、推开、打开的东西要各自写成一个物体；"
+                "现实里不会分开的部件放进同一个物体。"),
+    "MANIFEST_DONE": "- 照片里认得出来的家具和物件都在场景里，现实里能分开动的东西各自是一个物体。",
+    "MANIFEST_SECTION": "## 物体\n\n这次没有物体名单。房间里有哪些物体、每个物体拆成多细，由你对着照片自己决定。",
+}
+
+
+def prepare(cfg: dict, workspace: Path, *, manifest: bool = True) -> Path:
     pack_agent = scene_out(cfg) / "pack" / "agent"
     if not pack_agent.is_dir():
         raise FileNotFoundError(f"没有场景包，先跑 python -m gwm.bench.run pack：{pack_agent}")
@@ -46,16 +63,20 @@ def prepare(cfg: dict, workspace: Path) -> Path:
         raise FileExistsError(f"工作区已经有内容，换一个目录，免得盖掉上一次的产物：{workspace}")
     workspace.mkdir(parents=True, exist_ok=True)
     shutil.copytree(pack_agent, workspace / "inputs")
-    manifest = json.loads((REPO / cfg["manifest"]).read_text(encoding="utf-8"))
-    (workspace / "inputs" / "manifest.json").write_text(
-        json.dumps(manifest["objects"], ensure_ascii=False, indent=1), encoding="utf-8")
+    if manifest:
+        objects = json.loads((REPO / cfg["manifest"]).read_text(encoding="utf-8"))["objects"]
+        (workspace / "inputs" / "manifest.json").write_text(
+            json.dumps(objects, ensure_ascii=False, indent=1), encoding="utf-8")
+        listing = "\n".join(f"- `{o['id']}`：{o['what']}" for o in objects)
+        fill = {**WITH_MANIFEST, "MANIFEST_SECTION": f"## 物体名单\n\n{listing}"}
+    else:
+        fill = WITHOUT_MANIFEST
     (workspace / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
 
     views = json.loads((workspace / "inputs" / "cameras.json").read_text(encoding="utf-8"))["views"]
-    listing = "\n".join(f"- `{o['id']}`：{o['what']}" for o in manifest["objects"])
-    task = (PROMPT.read_text(encoding="utf-8")
-            .replace("{{VIEW_COUNT}}", str(len(views)))
-            .replace("{{MANIFEST}}", listing))
+    task = PROMPT.read_text(encoding="utf-8").replace("{{VIEW_COUNT}}", str(len(views)))
+    for key, text in fill.items():
+        task = task.replace("{{" + key + "}}", text)
     (workspace / "TASK.md").write_text(task, encoding="utf-8")
 
     count = int(cfg["agent"].get("preview_views", 6))
@@ -145,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--workspace", required=True)
         if name != "sidebyside":
             p.add_argument("--config", required=True)
+        if name == "prepare":
+            p.add_argument("--no-manifest", action="store_true", help="不给智能体物体名单，粒度由它自己定")
         else:
             p.add_argument("--names", default=None)
     args = parser.parse_args(argv)
@@ -153,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in sidebyside(workspace, args.names.split(",") if args.names else None):
             print(path)
     elif args.command == "prepare":
-        print(prepare(load_config(args.config), workspace))
+        print(prepare(load_config(args.config), workspace, manifest=not args.no_manifest))
     else:
         record = run(load_config(args.config), workspace)
         result = record.get("result", {})

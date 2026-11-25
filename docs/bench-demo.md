@@ -45,7 +45,7 @@ unzip -q 360_v2.zip 'room/*'
 venv/bin/python -m gwm.bench.run pack --config configs/bench/room.yaml
 
 W=out/bench/room/workspaces/$(date +%Y%m%d-%H%M%S)
-venv/bin/python -m gwm.bench.agent prepare --config configs/bench/room.yaml --workspace $W
+venv/bin/python -m gwm.bench.agent prepare --config configs/bench/room.yaml --workspace $W   # 加 --no-manifest 则不给物体名单
 venv/bin/python -m gwm.bench.agent run     --config configs/bench/room.yaml --workspace $W   # 需要 claude 命令行已登录
 
 venv/bin/python -m gwm.bench.run eval   --config configs/bench/room.yaml --cand $W --label agent
@@ -92,6 +92,14 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 
 清单不给智能体看。它只拿到物体名单（场景里要有哪些 id），哪些能动要自己判断。它能用 `tools/physics.sh` 把自己声明成能动的物体执行一遍，但不知道清单期望的是哪些。
 
+**连续交互**（`harness/bench_sequence.mjs`，清单在 `configs/bench/room.sequence.json`）。上面那份清单每条各开一个新世界，只能说明单个物体判得对不对，说明不了动作之间的后果。连续交互在同一个世界里按顺序做一串动作，中途不重置：推边几，看上面的碗、水瓶、杯子是不是跟着走；把杯子端到地毯上、把碗端到脚凳上；推躺椅，看靠垫还在不在；开门；再把边几推回去，看前面放下的东西还在不在原处；最后看没碰过的东西有没有被带动。每一步检查四种事：被推的东西走到了没有（`followed`），某样东西是不是放在某样东西上（`on`，从它中心往下打射线看正下方是谁、隔了多远），有没有倒（`upright`），门转了没有（`turned`），没碰过的有没有动（`stayed`）。
+
+「手」的定义会直接影响分数，这里写明：内核的抓取是给鼠标拖动用的，抓住期间关掉重力、不管朝向；照原样平推一张悬臂边几，它会被台面上东西的重量带着慢慢转起来，把东西甩出去。连续交互里的手稳住抓住那一刻的朝向，移动缓起缓停，端东西时先抬到 1.2 米以上再平移，不去扫别的物体。
+
+同一串动作跑两种条件。默认（lazy）是内核原本的样子：没被碰到的物体是焊死的，只有手上那个和它直接碰到的会被唤醒。`settled` 在开始前把所有能动的物体交给物理落稳一遍。两种都跑，才分得清失败是场景写得不对，还是运行时只唤醒直接接触者。
+
+**按位置找目标**（`configs/bench/room.anchors.json`）。清单和连续交互里的物体名字只是标签，评测按锚点（房间坐标系里的一个点）去找场景里占着那个点的物体。两个标签落到同一个物体上记为 `merged`，除了「推不动」那类，其余几类都判不通过：碗和边几写成了一个物体，拖「碗」拖的是一整张桌子，不能算碗能拿起来。这样就可以不给智能体物体名单，让它自己决定房间里有哪些物体、每个拆成多细，粒度切得对不对会直接反映在分数里。锚点目前取自第一次运行的场景（每个物体最大那块网格的中心），待对照照片复核；在第一次运行的场景上，按位置找和按 id 找的结果完全相同（29/30）。
+
 ## 第一次运行的结果（2026-11-25）
 
 `room` 场景，39 个留出视角，`images_4` 分辨率。场景由 Claude Fable 5.2 写成：31 个物体、469 行代码、67 种材质，对着训练视角渲染比对了 12 轮。
@@ -109,6 +117,8 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 - **贴图几乎不改变 LPIPS**（0.613 到 0.602）。瓶颈在几何和光照：物体是盒子拼的，灯光是均匀的。先别急着微调贴图模型。
 - **最终版在保真度上不如中途快照。** 智能体后期把灯光换成了均匀的环境光，画面比照片亮，像素指标掉了 1.5 dB。它在训练视角上自己看着更好，留出视角上并没有。这说明只靠智能体目测对比是不够的，它需要拿到数值反馈。
 - **交互清单偏容易。** 30 条过了 29 条（没过的是沙发被判成固定），这个分数现在分不开好坏，清单需要加难：更多铰接物体、质量和摩擦、物体之间的支撑关系。
+- **单步清单把后果记下来了，但没计分。** 拖边几那一条的记录里，台面上 3 样东西被撞开了 0.86 米；拖躺椅那一条，靠垫被甩出去 2.3 米（`interact.json` 里的 `max_disturbance`）。两条都算通过。
+- **连续交互是 22/24（lazy）和 19/24（settled）。** 两种条件下都是推边几时杯子从台面上滑了下去：它的包围盒边缘正好和台面边缘重合。之后把它端到地毯上时它是躺着的，这是前一步的连带。settled 下另有三条：边几推完松手后退回了约 8 厘米（底杆落稳后贴着高出地面 3 毫米的地毯边，退回的确切原因还没查清）、碗放到脚凳上是倒扣的、推回边几时水瓶掉了。结果在 `docs/results/bench-room-20261125/sequence_*.json`。这一串动作和期望是 Claude 按常识写的初版，待人工复核。
 - **只有一个场景、一次运行**，没有方差。
 - **这次写场景的不是 `claude -p`**，而是会话内的子智能体（当时命令行没登录）。任务说明、输入和工具与命令行路径完全相同，运行记录在 `out/bench/room/workspaces/subagent-001/agent_run.json`。命令行登录后用上面「怎么跑」里的 `agent run` 可以原样重跑。
 - **运行中途改过一次交互判定。** 原来 `movable` 只朝 +x 一个方向拖，贴墙的家具被误判成拖不动；改成多方向并允许平推之后，智能体看到的自检结论前后不一致，它因此调低了几个物体的质量、缩短了边几的底杆。这两处改动是被旧判定带出来的。
@@ -140,7 +150,8 @@ venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 | `kernel/bench_scene.js` | 把智能体写的模块变成场景和物理注册表（浏览器和 Node 共用） |
 | `kernel/bench_view.{html,js}` | 渲染页 |
 | `harness/bench_render.mjs` | 无头浏览器按给定相机出图 |
-| `harness/bench_interact.mjs` | 执行交互清单 |
-| `configs/bench/room.*` | 场景配置、物体名单、交互清单 |
+| `harness/bench_interact.mjs` | 执行交互清单；按锚点把标签对到场景物体上 |
+| `harness/bench_sequence.mjs` | 连续交互：同一个世界里按顺序做一串动作 |
+| `configs/bench/room.*` | 场景配置、物体名单、交互清单、锚点、连续交互清单 |
 | `prompts/bench_scene_writer.md` | 给智能体的任务说明 |
 | `examples/bench_smoke/` | 管线的冒烟场景 |

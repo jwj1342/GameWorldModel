@@ -10,6 +10,8 @@
 | `results.json` | 两个点的汇总：纯色和生成贴图各自的保真度，加上共用的交互分 |
 | `fidelity_flat.json`、`fidelity_textured.json` | 39 个留出视角逐个的 PSNR、SSIM、LPIPS |
 | `interact.json` | 交互清单 30 条逐条的执行结果 |
+| `sequence_lazy.json`、`sequence_settled.json` | 连续交互 24 条检查的结果，两种条件（见 `docs/bench-demo.md`）。这两份是后来在 Vulcan 上补跑的，不是 `eval` 当时的产物 |
+| `package.json` | 只有 `{"type":"module"}`，让 Node 22 以前的版本也能把这里的 `scene.js` 当 ES 模块加载 |
 | `run.json` | 运行时的配置快照和 git 提交 |
 | `renders/` | 留出视角 `DSCF4699` 的两张渲染图（纯色、生成贴图） |
 

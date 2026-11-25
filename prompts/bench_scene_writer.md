@@ -14,8 +14,7 @@ inputs/views/*.jpg      {{VIEW_COUNT}} 张训练视角的照片
 inputs/cameras.json     每张照片的相机：pos、quat [x,y,z,w]、fov_deg（竖直方向）、aspect
 inputs/points.json      稀疏三维点（xyz 和 rgb），和相机在同一个坐标系里
 inputs/frame.json       坐标系说明和房间大致范围
-inputs/manifest.json    物体名单：场景里必须出现这些 id
-tools/preview.sh        渲染你的场景并和照片并排，用来自己检查像不像
+{{MANIFEST_INPUT}}tools/preview.sh        渲染你的场景并和照片并排，用来自己检查像不像
 tools/physics.sh        在物理引擎里把你的场景执行一遍，用来自己检查能不能动
 ```
 
@@ -46,7 +45,7 @@ export function environment(THREE) {
 
 每一项的字段：
 
-- `id`：名单里的物体必须用名单给的 id。名单之外的物体可以自己起名，不要重复。
+{{ID_RULE}}
 - `kind`：只有两种。`'static'` 是这个房间里搬不动的东西；`'movable'` 是人能徒手挪动的东西。这是你要对着照片做的判断。
 - `object3D`：一个 `THREE.Object3D`，通常是一个 `Group`，里面放若干个基本体网格（盒子、圆柱、球、平面等）。它自己的 `position` 和 `quaternion` 就是这个物体在世界里的位姿。物体由哪些部件组成，就拆成哪些网格：桌子是一块面板加几条腿，不是一个实心方块。
 - `mass_kg`（可选）：能动的物体的大致质量。
@@ -95,11 +94,9 @@ export function environment(THREE) {
 
 ## 什么时候算完成
 
-- 名单里的每个 id 都在场景里。
+{{MANIFEST_DONE}}
 - `./tools/preview.sh` 能跑通，画面里主要家具的位置和大小与照片大致吻合。
 - `./tools/physics.sh` 里你声明能动的物体都通过。
 - 最后用几句话说明：哪些物体你判成了能动、哪些判成了不能动、还有哪些地方你知道没做好。
 
-## 物体名单
-
-{{MANIFEST}}
+{{MANIFEST_SECTION}}

@@ -141,11 +141,21 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
         points.append({"name": f"{label}-{mode}", "label": label, "mode": mode, "fidelity": result["mean"]})
 
     interact_file = run_dir / "interact.json"
+    anchors = ["--anchors", str(REPO / cfg["anchors"])] if cfg.get("anchors") else []
     _node("bench_interact.mjs", "--cand", str(cand_dir), "--checklist", str(REPO / cfg["checklist"]),
-          "--out", str(interact_file))
+          "--out", str(interact_file), *anchors)
     interact = json.loads(interact_file.read_text(encoding="utf-8"))
+    # 连续交互：同一个世界里按顺序做一串动作。两种条件都跑，见 harness/bench_sequence.mjs
+    sequence = {}
+    if cfg.get("sequence"):
+        for condition, flags in (("lazy", []), ("settled", ["--settle"])):
+            out = run_dir / f"sequence_{condition}.json"
+            _node("bench_sequence.mjs", "--cand", str(cand_dir), "--sequence", str(REPO / cfg["sequence"]),
+                  "--out", str(out), *anchors, *flags)
+            sequence[condition] = json.loads(out.read_text(encoding="utf-8"))["summary"]
     for point in points:
         point["interact"] = interact["summary"]
+        point["sequence"] = sequence
     results = {
         "run_id": run_dir.name, "label": label, "scene": cfg["scene"],
         "held_out_views": len(views), "image_dir": cfg["data"]["image_dir"],
@@ -156,7 +166,8 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
     }
     (run_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     for point in points:
-        print(f"{point['name']}: fidelity={point['fidelity']} interact={interact['summary']['passed']}/{interact['summary']['total']}")
+        seq = " ".join(f"sequence_{k}={v['passed']}/{v['total']}" for k, v in sequence.items())
+        print(f"{point['name']}: fidelity={point['fidelity']} interact={interact['summary']['passed']}/{interact['summary']['total']} {seq}")
     print(f"run dir: {run_dir}")
     return run_dir
 

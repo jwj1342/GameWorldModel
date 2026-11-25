@@ -6,13 +6,15 @@
 //   { "target": "cushion_left", "expect": "rests" }     垫子放着不会自己掉下去或者弹开
 //   { "target": "door",         "expect": "hinge" }     门是绕轴转的，转得动、卡得住限位
 // 清单不给智能体看。智能体只拿到物体名单（要用哪些 id），哪些能动、哪些不能动要它自己判断。
+// 给了 --anchors 的话，清单里的 target 就只是个标签，按位置去找场景里对应的物体（见 resolveTargets），
+// 这时连名单也可以不给智能体，物体拆成多细由它自己决定。
 //
 // 每一条都是执行出来的，不是数声明：movable 走的是 interaction_probe.mjs 那套
 // 抓住、提起、横拖、松手、等它稳；rests 是把物体放开让它在重力下待 2.5 秒看挪没挪。
 // 没有画面、不开浏览器，所以外观换成什么都不影响这里的结果。
 //
 // 用法:
-//   node harness/bench_interact.mjs --cand DIR --checklist FILE --out FILE
+//   node harness/bench_interact.mjs --cand DIR --checklist FILE --out FILE [--anchors FILE]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,6 +40,44 @@ export async function loadCandidate(dir) {
   const materialsFile = path.join(path.resolve(dir), 'materials.json');
   const materials = fs.existsSync(materialsFile) ? JSON.parse(fs.readFileSync(materialsFile, 'utf8')) : {};
   return { module, materials };
+}
+
+/** 按位置把清单里的标签对到场景里的物体上。
+ *
+ *  anchors 是 { 标签: [x, y, z] }。包围盒包住这个点的网格里取包得最紧的那个；一个都不包时取
+ *  15 厘米以内最近的；再远就算场景里没有。没给 anchors 时标签就是 id。
+ *  两个标签落到同一个物体上记为 merged：现实里分开的两样东西被写成了一个，比如碗和边几焊在一起。 */
+const ANCHOR_NEAR_M = 0.15;
+
+export function resolveTargets(registry, labels, anchors) {
+  const out = new Map();
+  if (!anchors) {
+    for (const label of labels) out.set(label, { id: registry.some(e => e.id === label) ? label : null, merged: false });
+    return out;
+  }
+  const boxes = registry.flatMap(entry => {
+    const list = [];
+    entry.group.updateMatrixWorld(true);
+    entry.group.traverse(n => { if (n.isMesh) list.push({ entry, box: new THREE.Box3().setFromObject(n) }); });
+    return list;
+  });
+  const volume = (b) => { const s = b.getSize(new THREE.Vector3()); return s.x * s.y * s.z; };
+  for (const label of labels) {
+    if (!anchors[label]) throw new Error(`anchors 里没有 ${label}`);
+    const point = new THREE.Vector3(...anchors[label]);
+    const inside = boxes.filter(b => b.box.containsPoint(point))
+      .sort((a, b) => volume(a.box) - volume(b.box));
+    let hit = inside[0] ?? null;
+    if (!hit) {
+      const near = boxes.map(b => ({ ...b, d: b.box.distanceToPoint(point) })).sort((a, b) => a.d - b.d)[0];
+      hit = near && near.d <= ANCHOR_NEAR_M ? near : null;
+    }
+    out.set(label, { id: hit ? hit.entry.id : null, merged: false });
+  }
+  const count = new Map();
+  for (const { id } of out.values()) if (id) count.set(id, (count.get(id) ?? 0) + 1);
+  for (const r of out.values()) r.merged = r.id != null && count.get(r.id) > 1;
+  return out;
 }
 
 /** 每条清单各开一个世界，前一条把场景搅乱了不该算到后一条头上。 */
@@ -84,11 +124,13 @@ function judgeMovable(candidate, target) {
   return { pass: false, reason: 'drag_failed', detail: { ...best, attempts_tried: MOVE_ATTEMPTS.length } };
 }
 
-export function judgeItem(candidate, item) {
+export function judgeItem(candidate, item, target = { id: item.target, merged: false }) {
   if (!EXPECTATIONS.includes(item.expect)) throw new Error(`清单里有不认识的 expect：${item.expect}`);
   const world = freshWorld(candidate);
-  const entry = world.registry.find(e => e.id === item.target);
+  const entry = world.registry.find(e => e.id === target.id);
   if (!entry) return { pass: false, reason: 'missing_object', detail: null };
+  // 和别的标签落在同一个物体上时，只有「推不动」那类还能算数；要动的那几类拖的是一整坨，不算
+  if (target.merged && item.expect !== 'fixed') return { pass: false, reason: 'merged', detail: null };
   const grabbable = canGrab(entry);
 
   if (item.expect === 'fixed') {
@@ -105,7 +147,7 @@ export function judgeItem(candidate, item) {
       const pass = succeeded({ drag });
       return { pass, reason: pass ? null : 'drag_failed', detail: drag };
     }
-    return judgeMovable(candidate, item.target);
+    return judgeMovable(candidate, target.id);
   }
   // hinge / slide：声明的约束类型要对，而且执行出来确实沿约束动、卡得住限位
   if (constraint.mode !== item.expect) return { pass: false, reason: `declared_${constraint.mode}`, detail: null };
@@ -126,8 +168,12 @@ export function selfChecklist(candidate) {
   return { scene: 'selfcheck', items };
 }
 
-export function runChecklist(candidate, checklist) {
-  const items = checklist.items.map(item => ({ ...item, ...judgeItem(candidate, item) }));
+export function runChecklist(candidate, checklist, anchors = null) {
+  const resolved = resolveTargets(freshWorld(candidate).registry, [...new Set(checklist.items.map(i => i.target))], anchors);
+  const items = checklist.items.map(item => {
+    const target = resolved.get(item.target);
+    return { ...item, resolved: target.id, ...judgeItem(candidate, item, target) };
+  });
   const byExpect = {};
   for (const item of items) {
     const row = byExpect[item.expect] ??= { passed: 0, total: 0 };
@@ -153,7 +199,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // 这是给写场景的智能体自己用的：它能看到自己的场景执行起来成不成立，
   // 但看不到真正的清单里期望哪些物体能动。
   const checklist = selfcheck ? selfChecklist(candidate) : JSON.parse(fs.readFileSync(args.checklist, 'utf8'));
-  const report = runChecklist(candidate, checklist);
+  const anchors = args.anchors ? JSON.parse(fs.readFileSync(args.anchors, 'utf8')).anchors : null;
+  const report = runChecklist(candidate, checklist, anchors);
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, JSON.stringify(report, null, 1));
   const s = report.summary;

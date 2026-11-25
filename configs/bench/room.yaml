@@ -30,7 +30,9 @@ agent:
   preview_views: 6                # 自检时并排对比的训练视角数
 
 checklist: configs/bench/room.checklist.json
-manifest: configs/bench/room.manifest.json
+manifest: configs/bench/room.manifest.json      # agent prepare --no-manifest 时不给智能体
+anchors: configs/bench/room.anchors.json        # 按位置把清单里的标签对到场景物体上，不依赖 id
+sequence: configs/bench/room.sequence.json      # 连续交互：一串不重置的动作
 
 # 参考点：不是在这台机器上算出来的数，来源写在 note 里，网页上会单独标出来
 references:

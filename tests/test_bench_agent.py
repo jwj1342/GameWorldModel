@@ -57,3 +57,11 @@ def test_prepare_refuses_a_used_workspace(cfg, tmp_path):
     agent.prepare(cfg, tmp_path / "ws")
     with pytest.raises(FileExistsError):
         agent.prepare(cfg, tmp_path / "ws")
+
+
+def test_no_manifest_leaves_granularity_to_the_agent(cfg, tmp_path):
+    ws = agent.prepare(cfg, tmp_path / "ws", manifest=False)
+    task = (ws / "TASK.md").read_text(encoding="utf-8")
+    assert not (ws / "inputs" / "manifest.json").exists()
+    assert "{{" not in task
+    assert "armchair_cushion" not in task

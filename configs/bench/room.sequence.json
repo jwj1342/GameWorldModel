@@ -1,0 +1,25 @@
+{
+  "scene": "room",
+  "note": "连续交互清单，不给智能体看。同一个世界里按顺序做，中途不重置。每条期望说的是现实里会发生的事：轻推边几，上面的东西跟着走；杯子放到地毯上，之后推别的东西它也还在地毯上；没碰过的东西不该动。坐标是场景包归一化之后的米制坐标。",
+  "annotated_by": "初版由 Claude 按常识写，待人工复核",
+  "steps": [
+    { "action": "push", "target": "coffee_table", "by": [0.25, 0],
+      "expect": [ { "followed": "coffee_table" },
+                  { "on": ["bowl", "coffee_table"] }, { "on": ["carafe", "coffee_table"] }, { "on": ["wine_glass", "coffee_table"] } ] },
+    { "action": "carry", "target": "wine_glass", "onto": "rug_dark", "at": [0.3, 0.15],
+      "expect": [ { "on": ["wine_glass", "rug_dark"] }, { "upright": "wine_glass" } ] },
+    { "action": "push", "target": "armchair", "by": [0, 0.2],
+      "expect": [ { "followed": "armchair" }, { "on": ["armchair_cushion", "armchair"] } ] },
+    { "action": "carry", "target": "bowl", "onto": "footstool", "at": [-0.47, -1.15],
+      "expect": [ { "on": ["bowl", "footstool"] }, { "upright": "bowl" } ] },
+    { "action": "turn", "target": "door", "angle": 0.6,
+      "expect": [ { "turned": "door", "min_deg": 20 } ] },
+    { "action": "push", "target": "coffee_table", "by": [-0.25, 0],
+      "expect": [ { "followed": "coffee_table" }, { "on": ["carafe", "coffee_table"] },
+                  { "on": ["wine_glass", "rug_dark"] }, { "on": ["bowl", "footstool"] } ] }
+  ],
+  "final": [
+    { "on": ["armchair_cushion", "armchair"] },
+    { "stayed": ["slipper_left", "slipper_right", "subwoofer", "speaker_left", "speaker_right", "plant", "piano_bench", "tv"] }
+  ]
+}

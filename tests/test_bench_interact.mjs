@@ -73,3 +73,14 @@ test('贴着墙的物体换个方向拖得动，就算能挪动', async () => {
   assert.equal(trapped.pass, false, JSON.stringify(trapped.detail));
   assert.equal(trapped.detail.attempts_tried, 8);
 });
+
+test('按位置找目标：两个标签落到同一个物体上，要动的那几条判 merged', () => {
+  // 杯子的锚点故意放在桌面里：等于说场景把杯子和桌子写成了一个物体
+  const anchors = { table: [0, 0.725, 0], mug: [0.1, 0.725, 0], floor: [0, -0.1, 0] };
+  const out = runChecklist(candidate, { items: [{ target: 'floor', expect: 'fixed' }, { target: 'table', expect: 'movable' },
+                                                { target: 'mug', expect: 'movable' }] }, anchors);
+  const by = Object.fromEntries(out.items.map(i => [i.target, i]));
+  assert.equal(by.floor.resolved, 'floor'); assert.equal(by.floor.pass, true);
+  assert.equal(by.table.resolved, 'table'); assert.equal(by.mug.resolved, 'table');
+  assert.equal(by.table.reason, 'merged'); assert.equal(by.mug.reason, 'merged');
+});
