@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -198,20 +199,23 @@ def sidebyside(workspace: Path, names: list[str] | None) -> list[Path]:
     return out
 
 
-def run(cfg: dict, workspace: Path) -> dict:
-    """调起 claude -p。花费上限、模型都从配置里读；原始输出存成 agent_run.json。"""
+def run(cfg: dict, workspace: Path, *, model: str | None = None) -> dict:
+    """调起 claude -p。花费上限、模型都从配置里读，model 可以覆盖；原始输出存成 agent_run.json。
+
+    换别家模型做对比时，同一套命令行、任务和工具不变，只靠环境变量把 claude 指到兼容 Anthropic
+    接口的地址上（ANTHROPIC_BASE_URL 加 ANTHROPIC_API_KEY），再用 model 指定模型名。记录里只写地址，不写 key。"""
     if not (workspace / "TASK.md").is_file():
         raise FileNotFoundError(f"工作区还没准备好，先跑 prepare：{workspace}")
     agent = cfg["agent"]
     cmd = ["claude", "-p", "按 TASK.md 完成任务。先读 TASK.md。",
-           "--model", agent["model"], "--output-format", "json",
+           "--model", model or agent["model"], "--output-format", "json",
            "--permission-mode", "acceptEdits",
            "--max-budget-usd", str(agent["max_budget_usd"]),
            "--allowedTools", *ALLOWED_TOOLS, "--disallowedTools", *DISALLOWED_TOOLS]
     started = _dt.datetime.now()
     done = subprocess.run(cmd, cwd=workspace, capture_output=True, text=True)
     record: dict = {
-        "command": cmd, "started": started.isoformat(timespec="seconds"),
+        "command": cmd, "base_url": os.environ.get("ANTHROPIC_BASE_URL"), "started": started.isoformat(timespec="seconds"),
         "seconds": round((_dt.datetime.now() - started).total_seconds(), 1),
         "returncode": done.returncode,
         "cli_version": subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout.strip(),
@@ -238,6 +242,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--workspace", required=True)
         if name not in ("sidebyside", "score"):
             p.add_argument("--config", required=True)
+        if name == "run":
+            p.add_argument("--model", default=None, help="覆盖配置里的模型，接别家兼容接口时用")
         if name == "prepare":
             p.add_argument("--no-manifest", action="store_true", help="不给智能体物体名单，粒度由它自己定")
             p.add_argument("--inputs", choices=sorted(INPUTS), default="sparse", help="给什么三维输入：只给照片、稀疏点、稀疏加稠密点")
@@ -255,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "score":
         score(workspace)
     else:
-        record = run(load_config(args.config), workspace)
+        record = run(load_config(args.config), workspace, model=args.model)
         result = record.get("result", {})
         print(f"done in {record['seconds']} s, cost ${result.get('total_cost_usd')}, turns {result.get('num_turns')}")
     return 0

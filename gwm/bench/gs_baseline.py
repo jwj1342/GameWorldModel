@@ -150,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         if step % 1000 == 0:
             print(f"step {step} loss {loss.item():.4f} gaussians {len(params['means'])} {time.time() - started:.0f}s", flush=True)
     train_seconds = time.time() - started
+    torch.save({k: v.detach().cpu() for k, v in params.items()}, out / "gaussians.pt")
 
     flat_dir, depth_dir = out / "renders" / "flat", out / "renders" / "depth"
     flat_dir.mkdir(parents=True)
