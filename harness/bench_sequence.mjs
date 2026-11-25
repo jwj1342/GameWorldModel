@@ -37,12 +37,14 @@ function buildWorld({ module, materials }) {
   return makeWorldFrom(buildBenchScene(module, makeContext({ materials, mode: 'flat' })));
 }
 
+/** 标签对不上场景里的物体时返回 null：这是场景的失败，要记进分数里，不能让整次评测崩掉。 */
 function entryOf(world, label) {
   const id = world.labels.get(label)?.id;
-  const entry = world.registry.find(e => e.id === id);
-  if (!entry) throw new Error(`场景里找不到 ${label}`);
-  return entry;
+  return world.registry.find(e => e.id === id) ?? null;
 }
+
+const missing = (world, labels) => labels.filter(label => !entryOf(world, label));
+const MISSING = { reason: 'missing_object' };
 
 function labelsOf(sequence) {
   const out = new Set();
@@ -76,8 +78,7 @@ function topAt(world, support, x, z) {
   world.scene.updateMatrixWorld(true);
   const ray = new THREE.Raycaster(new THREE.Vector3(x, 50, z), new THREE.Vector3(0, -1, 0));
   const hit = ray.intersectObject(support.group, true)[0];
-  if (!hit) throw new Error(`${support.id} 在 (${x}, ${z}) 处没有上表面`);
-  return hit.point.y;
+  return hit ? hit.point.y : null;   // null：支撑物不在清单说的那个位置上
 }
 
 // 内核的抓取是给鼠标拖动设计的：抓住期间关掉重力、不管朝向。平推一张悬臂边几时，台面上东西的
@@ -104,6 +105,7 @@ function glide(world, entry, quat, from, to) {
 }
 
 function perform(world, step) {
+  if (missing(world, [step.target, ...(step.onto ? [step.onto] : [])]).length) return { grabbed: false, ...MISSING };
   const entry = entryOf(world, step.target);
   const start = entry.group.position.clone();
   const quat = entry.group.quaternion.clone();
@@ -113,6 +115,7 @@ function perform(world, step) {
   } else if (step.action === 'carry') {
     const lift = start.y - new THREE.Box3().setFromObject(entry.group).min.y;   // 原点离底面多高
     const top = topAt(world, entryOf(world, step.onto), step.at[0], step.at[1]);
+    if (top == null) { world.manipulator.release(); return { grabbed: false, reason: 'no_surface_at_target' }; }
     const high = Math.max(start.y + 0.2, top + lift + 0.2, CARRY_HEIGHT);
     const up = start.clone().setY(high);
     const over = new THREE.Vector3(step.at[0], high, step.at[1]);
@@ -148,11 +151,13 @@ function perform(world, step) {
 function judge(world, check, ctx) {
   if (check.on) {
     const [id, support] = check.on;
+    if (missing(world, [id]).length) return { kind: 'on', target: id, expect: support, pass: false, detail: MISSING };
     const { under, gap } = below(world, entryOf(world, id));
     const pass = under === support && gap != null && Math.abs(gap) <= ON_GAP_M;
     return { kind: 'on', target: id, expect: support, pass, detail: { under, gap_m: round(gap) } };
   }
   if (check.followed) {
+    if (missing(world, [check.followed]).length) return { kind: 'followed', target: check.followed, pass: false, detail: MISSING };
     const moved = entryOf(world, check.followed).group.position.clone().sub(ctx.before.get(check.followed));
     const want = new THREE.Vector3(ctx.step.by[0], 0, ctx.step.by[1]);
     const error = moved.clone().setY(0).sub(want).length() / want.length();
@@ -160,18 +165,21 @@ function judge(world, check, ctx) {
              detail: { moved_m: moved.toArray().map(round), error: round(error) } };
   }
   if (check.upright) {
+    if (missing(world, [check.upright]).length) return { kind: 'upright', target: check.upright, pass: false, detail: MISSING };
     const entry = entryOf(world, check.upright);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(entry.group.quaternion);
     const tilt = THREE.MathUtils.radToDeg(up.angleTo(new THREE.Vector3(0, 1, 0)));
     return { kind: 'upright', target: check.upright, pass: tilt <= UPRIGHT_DEG, detail: { tilt_deg: round(tilt) } };
   }
   if (check.turned) {
+    if (missing(world, [check.turned]).length) return { kind: 'turned', target: check.turned, pass: false, detail: MISSING };
     const entry = entryOf(world, check.turned);
     const turned = THREE.MathUtils.radToDeg(entry.group.quaternion.angleTo(ctx.beforeQuat.get(check.turned)));
     return { kind: 'turned', target: check.turned, pass: turned >= check.min_deg, detail: { turned_deg: round(turned) } };
   }
   if (check.stayed) {
     return check.stayed.map(id => {
+      if (missing(world, [id]).length) return { kind: 'stayed', target: id, pass: false, detail: MISSING };
       const shift = entryOf(world, id).group.position.distanceTo(ctx.initial.get(id));
       return { kind: 'stayed', target: id, pass: shift <= STAYED_M, detail: { shift_m: round(shift) } };
     });
@@ -198,10 +206,10 @@ export function runSequence(candidate, sequence, { settle = false, anchors = nul
     const wokenBefore = world.manipulator.woken.length;
     const done = perform(world, step);
     const checks = step.expect.flatMap(c => judge(world, c, { step, before, beforeQuat, initial }));
-    const moved = entryOf(world, step.target).group;
-    const tilt = THREE.MathUtils.radToDeg(new THREE.Vector3(0, 1, 0).applyQuaternion(moved.quaternion).angleTo(new THREE.Vector3(0, 1, 0)));
+    const moved = entryOf(world, step.target)?.group ?? null;
+    const tilt = moved && THREE.MathUtils.radToDeg(new THREE.Vector3(0, 1, 0).applyQuaternion(moved.quaternion).angleTo(new THREE.Vector3(0, 1, 0)));
     steps.push({ action: step.action, target: step.target, ...done,
-                 target_after: { pos: moved.position.toArray().map(round), tilt_deg: round(tilt) },
+                 target_after: moved && { pos: moved.position.toArray().map(round), tilt_deg: round(tilt) },
                  woken: world.manipulator.woken.slice(wokenBefore).map(w => w.id), checks });
   }
   const final = sequence.final.flatMap(c => judge(world, c, { initial }));

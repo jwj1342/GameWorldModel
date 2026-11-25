@@ -1,0 +1,260 @@
+{
+ "label": "kimi-var1",
+ "workspace": "/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-021043-kimi-var1",
+ "scene": "room",
+ "rows": [
+  {
+   "snapshot": "000",
+   "code": {
+    "lines": 456,
+    "bytes": 24891
+   },
+   "held_out": {
+    "psnr": 10.467,
+    "ssim": 0.4134,
+    "lpips": 0.7249
+   },
+   "train": {
+    "psnr": 10.486,
+    "ssim": 0.399,
+    "lpips": 0.7017
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1281,
+    "within_10cm": 0.4611,
+    "median_rel": 0.0485
+   }
+  },
+  {
+   "snapshot": "001",
+   "code": {
+    "lines": 456,
+    "bytes": 24891
+   },
+   "held_out": {
+    "psnr": 10.467,
+    "ssim": 0.4134,
+    "lpips": 0.7249
+   },
+   "train": {
+    "psnr": 10.486,
+    "ssim": 0.399,
+    "lpips": 0.7017
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1281,
+    "within_10cm": 0.4611,
+    "median_rel": 0.0485
+   }
+  },
+  {
+   "snapshot": "002",
+   "code": {
+    "lines": 465,
+    "bytes": 25511
+   },
+   "held_out": {
+    "psnr": 10.3952,
+    "ssim": 0.4081,
+    "lpips": 0.7299
+   },
+   "train": {
+    "psnr": 10.461,
+    "ssim": 0.3935,
+    "lpips": 0.7075
+   },
+   "geometry": {
+    "coverage": 0.9975,
+    "median_abs_m": 0.1324,
+    "within_10cm": 0.4442,
+    "median_rel": 0.0502
+   }
+  },
+  {
+   "snapshot": "003",
+   "code": {
+    "lines": 469,
+    "bytes": 25834
+   },
+   "held_out": {
+    "psnr": 10.5454,
+    "ssim": 0.4078,
+    "lpips": 0.731
+   },
+   "train": {
+    "psnr": 10.5743,
+    "ssim": 0.3934,
+    "lpips": 0.7076
+   },
+   "geometry": {
+    "coverage": 0.9975,
+    "median_abs_m": 0.1427,
+    "within_10cm": 0.419,
+    "median_rel": 0.0564
+   }
+  },
+  {
+   "snapshot": "004",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.5226,
+    "ssim": 0.4095,
+    "lpips": 0.7299
+   },
+   "train": {
+    "psnr": 10.5646,
+    "ssim": 0.396,
+    "lpips": 0.7062
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.136,
+    "within_10cm": 0.4275,
+    "median_rel": 0.0522
+   }
+  },
+  {
+   "snapshot": "005",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.5001,
+    "ssim": 0.4092,
+    "lpips": 0.7291
+   },
+   "train": {
+    "psnr": 10.5577,
+    "ssim": 0.3959,
+    "lpips": 0.7054
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1357,
+    "within_10cm": 0.4304,
+    "median_rel": 0.0516
+   }
+  },
+  {
+   "snapshot": "006",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.5116,
+    "ssim": 0.4101,
+    "lpips": 0.7284
+   },
+   "train": {
+    "psnr": 10.5743,
+    "ssim": 0.3973,
+    "lpips": 0.7044
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1354,
+    "within_10cm": 0.4306,
+    "median_rel": 0.0516
+   }
+  },
+  {
+   "snapshot": "007",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.5116,
+    "ssim": 0.4101,
+    "lpips": 0.7284
+   },
+   "train": {
+    "psnr": 10.5743,
+    "ssim": 0.3973,
+    "lpips": 0.7044
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1354,
+    "within_10cm": 0.4306,
+    "median_rel": 0.0516
+   }
+  },
+  {
+   "snapshot": "008",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.4919,
+    "ssim": 0.4103,
+    "lpips": 0.7266
+   },
+   "train": {
+    "psnr": 10.5525,
+    "ssim": 0.3971,
+    "lpips": 0.7015
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1398,
+    "within_10cm": 0.443,
+    "median_rel": 0.0555
+   }
+  },
+  {
+   "snapshot": "009",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.4919,
+    "ssim": 0.4103,
+    "lpips": 0.7266
+   },
+   "train": {
+    "psnr": 10.5525,
+    "ssim": 0.3971,
+    "lpips": 0.7015
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1398,
+    "within_10cm": 0.443,
+    "median_rel": 0.0555
+   }
+  },
+  {
+   "snapshot": "final",
+   "code": {
+    "lines": 474,
+    "bytes": 26150
+   },
+   "held_out": {
+    "psnr": 10.4919,
+    "ssim": 0.4103,
+    "lpips": 0.7266
+   },
+   "train": {
+    "psnr": 10.5525,
+    "ssim": 0.3971,
+    "lpips": 0.7015
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.1398,
+    "within_10cm": 0.443,
+    "median_rel": 0.0555
+   }
+  }
+ ]
+}
