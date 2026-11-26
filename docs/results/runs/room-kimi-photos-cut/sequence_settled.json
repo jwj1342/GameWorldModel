@@ -1,0 +1,356 @@
+{
+ "scene": "room",
+ "condition": "settled",
+ "resolved": {
+  "coffee_table": "bowl",
+  "bowl": "bowl",
+  "carafe": "wine_glass",
+  "wine_glass": "bowl",
+  "rug_dark": "floor",
+  "armchair": "armchair",
+  "armchair_cushion": "armchair",
+  "footstool": "footstool",
+  "door": "door",
+  "slipper_left": "slipper_left",
+  "slipper_right": "slipper_right",
+  "subwoofer": "subwoofer",
+  "speaker_left": "desk",
+  "speaker_right": "speaker_right",
+  "plant": "plant",
+  "piano_bench": "walls",
+  "tv": "tv"
+ },
+ "summary": {
+  "passed": 15,
+  "total": 24,
+  "pass_rate": 0.625
+ },
+ "steps": [
+  {
+   "action": "push",
+   "target": "coffee_table",
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     -0.59,
+     0.544,
+     -0.058
+    ],
+    "tilt_deg": 0.009
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "followed",
+     "target": "coffee_table",
+     "pass": true,
+     "detail": {
+      "moved_m": [
+       0.21,
+       0,
+       0.001
+      ],
+      "error": 0.159
+     }
+    },
+    {
+     "kind": "on",
+     "target": "bowl",
+     "expect": "coffee_table",
+     "pass": true,
+     "detail": {
+      "under": "coffee_table",
+      "gap_m": -0.001
+     }
+    },
+    {
+     "kind": "on",
+     "target": "carafe",
+     "expect": "coffee_table",
+     "pass": false,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": 0
+     }
+    },
+    {
+     "kind": "on",
+     "target": "wine_glass",
+     "expect": "coffee_table",
+     "pass": true,
+     "detail": {
+      "under": "coffee_table",
+      "gap_m": -0.001
+     }
+    }
+   ]
+  },
+  {
+   "action": "carry",
+   "target": "wine_glass",
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     0.299,
+     0.013,
+     0.15
+    ],
+    "tilt_deg": 0.409
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "on",
+     "target": "wine_glass",
+     "expect": "rug_dark",
+     "pass": true,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": -0.001
+     }
+    },
+    {
+     "kind": "upright",
+     "target": "wine_glass",
+     "pass": true,
+     "detail": {
+      "tilt_deg": 0.409
+     }
+    }
+   ]
+  },
+  {
+   "action": "push",
+   "target": "armchair",
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     -0.086,
+     0.015,
+     -1.724
+    ],
+    "tilt_deg": 0.092
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "followed",
+     "target": "armchair",
+     "pass": false,
+     "detail": {
+      "moved_m": [
+       0.023,
+       0.004,
+       0.051
+      ],
+      "error": 0.752
+     }
+    },
+    {
+     "kind": "on",
+     "target": "armchair_cushion",
+     "expect": "armchair",
+     "pass": false,
+     "detail": {
+      "under": "floor",
+      "gap_m": 0.014
+     }
+    }
+   ]
+  },
+  {
+   "action": "carry",
+   "target": "bowl",
+   "grabbed": false,
+   "reason": "no_surface_at_target",
+   "target_after": {
+    "pos": [
+     0.293,
+     0.022,
+     0.153
+    ],
+    "tilt_deg": 1.061
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "on",
+     "target": "bowl",
+     "expect": "footstool",
+     "pass": false,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": -0.003
+     }
+    },
+    {
+     "kind": "upright",
+     "target": "bowl",
+     "pass": true,
+     "detail": {
+      "tilt_deg": 1.061
+     }
+    }
+   ]
+  },
+  {
+   "action": "turn",
+   "target": "door",
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     -0.895,
+     0.95,
+     2.342
+    ],
+    "tilt_deg": 0.011
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "turned",
+     "target": "door",
+     "pass": true,
+     "detail": {
+      "turned_deg": 34.428
+     }
+    }
+   ]
+  },
+  {
+   "action": "push",
+   "target": "coffee_table",
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     0.05,
+     0.021,
+     0.149
+    ],
+    "tilt_deg": 1.084
+   },
+   "woken": [],
+   "checks": [
+    {
+     "kind": "followed",
+     "target": "coffee_table",
+     "pass": true,
+     "detail": {
+      "moved_m": [
+       -0.243,
+       -0.001,
+       -0.003
+      ],
+      "error": 0.031
+     }
+    },
+    {
+     "kind": "on",
+     "target": "carafe",
+     "expect": "coffee_table",
+     "pass": false,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": -0.001
+     }
+    },
+    {
+     "kind": "on",
+     "target": "wine_glass",
+     "expect": "rug_dark",
+     "pass": true,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": -0.003
+     }
+    },
+    {
+     "kind": "on",
+     "target": "bowl",
+     "expect": "footstool",
+     "pass": false,
+     "detail": {
+      "under": "rug_dark",
+      "gap_m": -0.003
+     }
+    }
+   ]
+  }
+ ],
+ "final": [
+  {
+   "kind": "on",
+   "target": "armchair_cushion",
+   "expect": "armchair",
+   "pass": false,
+   "detail": {
+    "under": "floor",
+    "gap_m": 0.014
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "slipper_left",
+   "pass": false,
+   "detail": {
+    "shift_m": 0.031
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "slipper_right",
+   "pass": false,
+   "detail": {
+    "shift_m": 0.038
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "subwoofer",
+   "pass": true,
+   "detail": {
+    "shift_m": 0
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "speaker_left",
+   "pass": true,
+   "detail": {
+    "shift_m": 0
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "speaker_right",
+   "pass": true,
+   "detail": {
+    "shift_m": 0.004
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "plant",
+   "pass": true,
+   "detail": {
+    "shift_m": 0.004
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "piano_bench",
+   "pass": true,
+   "detail": {
+    "shift_m": 0
+   }
+  },
+  {
+   "kind": "stayed",
+   "target": "tv",
+   "pass": true,
+   "detail": {
+    "shift_m": 0.001
+   }
+  }
+ ]
+}
