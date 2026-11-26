@@ -133,6 +133,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 NAMES="${{1:-{default_names}}}"
 # 每次预览前存一份快照，事后用 python -m gwm.bench.run trajectory 逐个评测
+mkdir -p snapshots   # 没有这个目录时 find 会报错，加上 pipefail，第一次调用就整个退出
 N=$(find snapshots -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
 SNAP=$(printf "snapshots/%03d" "$N")
 mkdir -p "$SNAP" && cp scene.js "$SNAP/" && if [ -f materials.json ]; then cp materials.json "$SNAP/"; fi

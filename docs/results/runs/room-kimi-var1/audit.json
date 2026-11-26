@@ -1,0 +1,36 @@
+{
+ "label": "kimi-var1",
+ "workspace": "20261126-021043-kimi-var1",
+ "source": "Mac 上嵌套 claude 的会话记录（~/.claude/projects），事后扫描",
+ "tool_calls": {
+  "Read": 78,
+  "Bash": 60,
+  "Write": 14,
+  "Edit": 38,
+  "Grep": 8
+ },
+ "denied_tool_calls": 12,
+ "preview_tool": {
+  "calls": 11,
+  "ok": 9,
+  "first_call_failed": true
+ },
+ "outside_workspace_paths": {
+  "harness/bench_render.mjs": 12,
+  "venv/bin/python": 3,
+  "harness/interaction_probe.mjs": 3,
+  "harness": 1,
+  "kernel/bench_view.js": 1,
+  "kernel/bench_scene.js": 1,
+  "docs/results/bench-room-20261125/scene.js": 1,
+  "harness/bench_interact.mjs": 1
+ },
+ "flagged": [
+  {
+   "kind": "prior_answer",
+   "tool": "Read",
+   "input": "{\"file_path\": \"/Users/jwj/Code/GameWorldModel/docs/results/bench-room-20261125/scene.js\"}",
+   "time": "2026-11-25T18:24:28.719Z"
+  }
+ ]
+}
