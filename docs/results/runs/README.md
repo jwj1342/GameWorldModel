@@ -13,3 +13,5 @@
 - `mac-logs/`：Mac 上这一轮的运行日志和排队脚本（`queue.log` 记了 Kimi 额度用完和恢复的时间），
   以及从嵌套会话记录生成各目录 `audit.json` 的 `audit.py`。脚本里写的是当时机器上的绝对路径，换机器要改。
   嵌套会话的原始记录没有放进仓库。
+- `room-kimi-*/agent_scratch/`：智能体在工作区里自己写的分析脚本和笔记，目录结构照原样保留（`agent_scratch_first_attempt/` 来自撞上额度上限而中止的那一次）。
+  第一次运行（Fable）的在 `docs/results/bench-room-20261125/agent_scratch/`。脚本产出的图片没有放进来。
