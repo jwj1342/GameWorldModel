@@ -1,0 +1,606 @@
+{
+ "scene": "room",
+ "summary": {
+  "passed": 13,
+  "total": 30,
+  "pass_rate": 0.433,
+  "by_expect": {
+   "fixed": {
+    "passed": 3,
+    "total": 4
+   },
+   "hinge": {
+    "passed": 0,
+    "total": 1
+   },
+   "movable": {
+    "passed": 6,
+    "total": 15
+   },
+   "rests": {
+    "passed": 4,
+    "total": 10
+   }
+  }
+ },
+ "objects": [
+  {
+   "id": "floor",
+   "kind": "static",
+   "colliders": 1
+  },
+  {
+   "id": "walls",
+   "kind": "static",
+   "colliders": 29
+  },
+  {
+   "id": "hallway",
+   "kind": "static",
+   "colliders": 4
+  },
+  {
+   "id": "door",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "window",
+   "kind": "static",
+   "colliders": 9
+  },
+  {
+   "id": "window2",
+   "kind": "static",
+   "colliders": 6
+  },
+  {
+   "id": "curtains",
+   "kind": "static",
+   "colliders": 6
+  },
+  {
+   "id": "radiator",
+   "kind": "static",
+   "colliders": 2
+  },
+  {
+   "id": "alcove_shelves",
+   "kind": "static",
+   "colliders": 36
+  },
+  {
+   "id": "sofa",
+   "kind": "static",
+   "colliders": 13
+  },
+  {
+   "id": "side_table",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "keyboard",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "armchair",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "armchair_cushion",
+   "kind": "movable",
+   "colliders": 1
+  },
+  {
+   "id": "footstool",
+   "kind": "movable",
+   "colliders": 9
+  },
+  {
+   "id": "coffee_table",
+   "kind": "movable",
+   "colliders": 5
+  },
+  {
+   "id": "bowl",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "carafe",
+   "kind": "movable",
+   "colliders": 3
+  },
+  {
+   "id": "wine_glass",
+   "kind": "movable",
+   "colliders": 3
+  },
+  {
+   "id": "glass_cup",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "slipper_left",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "slipper_right",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "rug_dark",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "rug_light",
+   "kind": "movable",
+   "colliders": 1
+  },
+  {
+   "id": "piano_rug",
+   "kind": "static",
+   "colliders": 1
+  },
+  {
+   "id": "subwoofer",
+   "kind": "movable",
+   "colliders": 2
+  },
+  {
+   "id": "tv_stand",
+   "kind": "movable",
+   "colliders": 11
+  },
+  {
+   "id": "tv",
+   "kind": "movable",
+   "colliders": 4
+  },
+  {
+   "id": "speaker_left",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "speaker_right",
+   "kind": "movable",
+   "colliders": 7
+  },
+  {
+   "id": "storage_shelf",
+   "kind": "static",
+   "colliders": 2
+  },
+  {
+   "id": "plant",
+   "kind": "movable",
+   "colliders": 14
+  },
+  {
+   "id": "piano",
+   "kind": "static",
+   "colliders": 14
+  },
+  {
+   "id": "piano_bench",
+   "kind": "movable",
+   "colliders": 5
+  }
+ ],
+ "items": [
+  {
+   "target": "floor",
+   "expect": "fixed",
+   "resolved": "floor",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
+  },
+  {
+   "target": "walls",
+   "expect": "fixed",
+   "resolved": "walls",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
+  },
+  {
+   "target": "window",
+   "expect": "fixed",
+   "resolved": null,
+   "pass": false,
+   "reason": "missing_object",
+   "detail": null
+  },
+  {
+   "target": "alcove_shelves",
+   "expect": "fixed",
+   "resolved": "alcove_shelves",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
+  },
+  {
+   "target": "door",
+   "expect": "hinge",
+   "resolved": "piano",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "sofa",
+   "expect": "movable",
+   "resolved": "sofa",
+   "pass": false,
+   "reason": "declared_static",
+   "detail": null
+  },
+  {
+   "target": "armchair",
+   "expect": "movable",
+   "resolved": "armchair",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "armchair_cushion",
+   "expect": "movable",
+   "resolved": "armchair",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "footstool",
+   "expect": "movable",
+   "resolved": "footstool",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.348,
+    "penetration": 0.019,
+    "penetrating_with": "sofa",
+    "contacts": 8,
+    "lift_progress": 1.04,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.543,
+    "max_disturbance": 0.482,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
+  },
+  {
+   "target": "coffee_table",
+   "expect": "movable",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "bowl",
+   "expect": "movable",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "carafe",
+   "expect": "movable",
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.09,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.011,
+    "max_disturbance": 0.007,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
+  },
+  {
+   "target": "wine_glass",
+   "expect": "movable",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "slipper_left",
+   "expect": "movable",
+   "resolved": "rug_dark",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "slipper_right",
+   "expect": "movable",
+   "resolved": "rug_dark",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "subwoofer",
+   "expect": "movable",
+   "resolved": "subwoofer",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.264,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.064,
+    "max_disturbance": 0,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      -1,
+      0,
+      0
+     ],
+     "index": 1
+    },
+    "attempts_tried": 2
+   }
+  },
+  {
+   "target": "plant",
+   "expect": "movable",
+   "resolved": "plant",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.33,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.002,
+    "max_disturbance": 0,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
+  },
+  {
+   "target": "piano_bench",
+   "expect": "movable",
+   "resolved": "piano",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "speaker_left",
+   "expect": "movable",
+   "resolved": "speaker_left",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.363,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.002,
+    "max_disturbance": 0,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      -1,
+      0,
+      0
+     ],
+     "index": 1
+    },
+    "attempts_tried": 2
+   }
+  },
+  {
+   "target": "speaker_right",
+   "expect": "movable",
+   "resolved": "speaker_right",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.363,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0.001,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.041,
+    "max_disturbance": 0.002,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      -1,
+      0,
+      0
+     ],
+     "index": 1
+    },
+    "attempts_tried": 2
+   }
+  },
+  {
+   "target": "coffee_table",
+   "expect": "rests",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "bowl",
+   "expect": "rests",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "carafe",
+   "expect": "rests",
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
+  },
+  {
+   "target": "wine_glass",
+   "expect": "rests",
+   "resolved": "bowl",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "armchair_cushion",
+   "expect": "rests",
+   "resolved": "armchair",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "plant",
+   "expect": "rests",
+   "resolved": "plant",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
+  },
+  {
+   "target": "piano_bench",
+   "expect": "rests",
+   "resolved": "piano",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  },
+  {
+   "target": "subwoofer",
+   "expect": "rests",
+   "resolved": "subwoofer",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
+  },
+  {
+   "target": "footstool",
+   "expect": "rests",
+   "resolved": "footstool",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.013,
+    "tilt_deg": 1.257,
+    "dropped_m": 0.001
+   }
+  },
+  {
+   "target": "slipper_left",
+   "expect": "rests",
+   "resolved": "rug_dark",
+   "pass": false,
+   "reason": "merged",
+   "detail": null
+  }
+ ]
+}
