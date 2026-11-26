@@ -1,6 +1,7 @@
 {
  "scene": "room",
  "condition": "settled",
+ "match": "id",
  "resolved": {
   "coffee_table": "coffee_table",
   "bowl": "bowl",

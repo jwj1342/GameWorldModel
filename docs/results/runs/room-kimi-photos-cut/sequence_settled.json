@@ -1,29 +1,30 @@
 {
  "scene": "room",
  "condition": "settled",
+ "match": "id",
  "resolved": {
-  "coffee_table": "bowl",
+  "coffee_table": "coffee_table",
   "bowl": "bowl",
-  "carafe": "wine_glass",
-  "wine_glass": "bowl",
-  "rug_dark": "floor",
+  "carafe": "carafe",
+  "wine_glass": "wine_glass",
+  "rug_dark": "rug_dark",
   "armchair": "armchair",
-  "armchair_cushion": "armchair",
+  "armchair_cushion": "armchair_cushion",
   "footstool": "footstool",
   "door": "door",
   "slipper_left": "slipper_left",
   "slipper_right": "slipper_right",
   "subwoofer": "subwoofer",
-  "speaker_left": "desk",
+  "speaker_left": "speaker_left",
   "speaker_right": "speaker_right",
   "plant": "plant",
-  "piano_bench": "walls",
+  "piano_bench": "piano_bench",
   "tv": "tv"
  },
  "summary": {
-  "passed": 15,
+  "passed": 9,
   "total": 24,
-  "pass_rate": 0.625
+  "pass_rate": 0.375
  },
  "steps": [
   {
@@ -32,11 +33,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.59,
-     0.544,
-     -0.058
+     -0.41,
+     0.186,
+     0.009
     ],
-    "tilt_deg": 0.009
+    "tilt_deg": 84.563
    },
    "woken": [],
    "checks": [
@@ -46,21 +47,21 @@
      "pass": true,
      "detail": {
       "moved_m": [
-       0.21,
-       0,
-       0.001
+       0.25,
+       0.186,
+       0.029
       ],
-      "error": 0.159
+      "error": 0.117
      }
     },
     {
      "kind": "on",
      "target": "bowl",
      "expect": "coffee_table",
-     "pass": true,
+     "pass": false,
      "detail": {
-      "under": "coffee_table",
-      "gap_m": -0.001
+      "under": "floor",
+      "gap_m": 0
      }
     },
     {
@@ -69,7 +70,7 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "rug_dark",
+      "under": "tv_stand",
       "gap_m": 0
      }
     },
@@ -77,9 +78,9 @@
      "kind": "on",
      "target": "wine_glass",
      "expect": "coffee_table",
-     "pass": true,
+     "pass": false,
      "detail": {
-      "under": "coffee_table",
+      "under": "rug_dark",
       "gap_m": -0.001
      }
     }
@@ -91,11 +92,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     0.299,
-     0.013,
+     0.3,
+     0.05,
      0.15
     ],
-    "tilt_deg": 0.409
+    "tilt_deg": 89.886
    },
    "woken": [],
    "checks": [
@@ -112,9 +113,9 @@
     {
      "kind": "upright",
      "target": "wine_glass",
-     "pass": true,
+     "pass": false,
      "detail": {
-      "tilt_deg": 0.409
+      "tilt_deg": 89.886
      }
     }
    ]
@@ -152,8 +153,8 @@
      "expect": "armchair",
      "pass": false,
      "detail": {
-      "under": "floor",
-      "gap_m": 0.014
+      "under": "rug_dark",
+      "gap_m": -0.002
      }
     }
    ]
@@ -165,11 +166,11 @@
    "reason": "no_surface_at_target",
    "target_after": {
     "pos": [
-     0.293,
-     0.022,
-     0.153
+     -0.774,
+     0.07,
+     1.318
     ],
-    "tilt_deg": 1.061
+    "tilt_deg": 179.999
    },
    "woken": [],
    "checks": [
@@ -179,16 +180,16 @@
      "expect": "footstool",
      "pass": false,
      "detail": {
-      "under": "rug_dark",
-      "gap_m": -0.003
+      "under": "floor",
+      "gap_m": 0
      }
     },
     {
      "kind": "upright",
      "target": "bowl",
-     "pass": true,
+     "pass": false,
      "detail": {
-      "tilt_deg": 1.061
+      "tilt_deg": 179.999
      }
     }
    ]
@@ -223,11 +224,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     0.05,
-     0.021,
-     0.149
+     -0.724,
+     0.171,
+     0.18
     ],
-    "tilt_deg": 1.084
+    "tilt_deg": 82.055
    },
    "woken": [],
    "checks": [
@@ -237,11 +238,11 @@
      "pass": true,
      "detail": {
       "moved_m": [
-       -0.243,
-       -0.001,
-       -0.003
+       -0.254,
+       -0.016,
+       0.001
       ],
-      "error": 0.031
+      "error": 0.016
      }
     },
     {
@@ -250,8 +251,8 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "rug_dark",
-      "gap_m": -0.001
+      "under": "tv_stand",
+      "gap_m": 0
      }
     },
     {
@@ -261,7 +262,7 @@
      "pass": true,
      "detail": {
       "under": "rug_dark",
-      "gap_m": -0.003
+      "gap_m": -0.001
      }
     },
     {
@@ -270,8 +271,8 @@
      "expect": "footstool",
      "pass": false,
      "detail": {
-      "under": "rug_dark",
-      "gap_m": -0.003
+      "under": "floor",
+      "gap_m": 0
      }
     }
    ]
@@ -284,8 +285,8 @@
    "expect": "armchair",
    "pass": false,
    "detail": {
-    "under": "floor",
-    "gap_m": 0.014
+    "under": "rug_dark",
+    "gap_m": -0.002
    }
   },
   {
@@ -293,7 +294,7 @@
    "target": "slipper_left",
    "pass": false,
    "detail": {
-    "shift_m": 0.031
+    "shift_m": 0.03
    }
   },
   {
@@ -301,7 +302,7 @@
    "target": "slipper_right",
    "pass": false,
    "detail": {
-    "shift_m": 0.038
+    "shift_m": 0.041
    }
   },
   {
@@ -317,15 +318,15 @@
    "target": "speaker_left",
    "pass": true,
    "detail": {
-    "shift_m": 0
+    "shift_m": 0.005
    }
   },
   {
    "kind": "stayed",
    "target": "speaker_right",
-   "pass": true,
+   "pass": false,
    "detail": {
-    "shift_m": 0.004
+    "shift_m": 0.071
    }
   },
   {
@@ -333,7 +334,7 @@
    "target": "plant",
    "pass": true,
    "detail": {
-    "shift_m": 0.004
+    "shift_m": 0.003
    }
   },
   {
@@ -347,9 +348,9 @@
   {
    "kind": "stayed",
    "target": "tv",
-   "pass": true,
+   "pass": false,
    "detail": {
-    "shift_m": 0.001
+    "shift_m": 0.021
    }
   }
  ]

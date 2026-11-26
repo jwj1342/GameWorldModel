@@ -1,12 +1,12 @@
 {
  "scene": "room",
  "summary": {
-  "passed": 18,
+  "passed": 29,
   "total": 30,
-  "pass_rate": 0.6,
+  "pass_rate": 0.967,
   "by_expect": {
    "fixed": {
-    "passed": 3,
+    "passed": 4,
     "total": 4
    },
    "hinge": {
@@ -14,11 +14,11 @@
     "total": 1
    },
    "movable": {
-    "passed": 9,
+    "passed": 14,
     "total": 15
    },
    "rests": {
-    "passed": 5,
+    "passed": 10,
     "total": 10
    }
   }
@@ -185,6 +185,114 @@
    "colliders": 6
   }
  ],
+ "match": "id",
+ "anchors": {
+  "match": "id",
+  "found": 14,
+  "total": 20,
+  "per_label": {
+   "floor": {
+    "id": "floor",
+    "merged": false,
+    "ok": true
+   },
+   "walls": {
+    "id": "walls",
+    "merged": false,
+    "ok": true
+   },
+   "window": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "alcove_shelves": {
+    "id": "alcove_shelves",
+    "merged": false,
+    "ok": true
+   },
+   "door": {
+    "id": "door",
+    "merged": false,
+    "ok": true
+   },
+   "sofa": {
+    "id": "sofa",
+    "merged": false,
+    "ok": true
+   },
+   "armchair": {
+    "id": "armchair",
+    "merged": false,
+    "ok": true
+   },
+   "armchair_cushion": {
+    "id": "armchair_cushion",
+    "merged": false,
+    "ok": true
+   },
+   "footstool": {
+    "id": "footstool",
+    "merged": false,
+    "ok": true
+   },
+   "coffee_table": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "bowl": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "carafe": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "wine_glass": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "slipper_left": {
+    "id": "slipper_left",
+    "merged": false,
+    "ok": true
+   },
+   "slipper_right": {
+    "id": "slipper_right",
+    "merged": false,
+    "ok": true
+   },
+   "subwoofer": {
+    "id": "subwoofer",
+    "merged": false,
+    "ok": true
+   },
+   "plant": {
+    "id": "plant",
+    "merged": false,
+    "ok": true
+   },
+   "piano_bench": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "speaker_left": {
+    "id": "speaker_left",
+    "merged": false,
+    "ok": true
+   },
+   "speaker_right": {
+    "id": "speaker_right",
+    "merged": false,
+    "ok": true
+   }
+  }
+ },
  "items": [
   {
    "target": "floor",
@@ -209,10 +317,12 @@
   {
    "target": "window",
    "expect": "fixed",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "window",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
   },
   {
    "target": "alcove_shelves",
@@ -346,34 +456,130 @@
   {
    "target": "coffee_table",
    "expect": "movable",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "coffee_table",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.48,
+    "penetration": 0.05,
+    "penetrating_with": "sofa",
+    "contacts": 12,
+    "lift_progress": 1.018,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.026,
+    "max_disturbance": 2.382,
+    "disturbed_count": 4,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "bowl",
    "expect": "movable",
    "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.12,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.007,
+    "max_disturbance": 0.037,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "carafe",
    "expect": "movable",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.09,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.003,
+    "max_disturbance": 0.036,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "wine_glass",
    "expect": "movable",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "wine_glass",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.06,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.007,
+    "max_disturbance": 0.037,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "slipper_left",
@@ -506,10 +712,34 @@
   {
    "target": "piano_bench",
    "expect": "movable",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "piano_bench",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.324,
+    "penetration": 0.01,
+    "penetrating_with": "piano_rug",
+    "contacts": 4,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.004,
+    "max_disturbance": 0,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "speaker_left",
@@ -578,34 +808,50 @@
   {
    "target": "coffee_table",
    "expect": "rests",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "coffee_table",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.039,
+    "tilt_deg": 1.661,
+    "dropped_m": -0.006
+   }
   },
   {
    "target": "bowl",
    "expect": "rests",
    "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
   },
   {
    "target": "carafe",
    "expect": "rests",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
   },
   {
    "target": "wine_glass",
    "expect": "rests",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "wine_glass",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
   },
   {
    "target": "armchair_cushion",
@@ -634,10 +880,14 @@
   {
    "target": "piano_bench",
    "expect": "rests",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "piano_bench",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.01,
+    "tilt_deg": 1.472,
+    "dropped_m": -0.004
+   }
   },
   {
    "target": "subwoofer",

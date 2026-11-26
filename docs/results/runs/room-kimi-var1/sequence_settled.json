@@ -1,11 +1,12 @@
 {
  "scene": "room",
  "condition": "settled",
+ "match": "id",
  "resolved": {
-  "coffee_table": "bowl",
+  "coffee_table": "coffee_table",
   "bowl": "bowl",
-  "carafe": "bowl",
-  "wine_glass": "bowl",
+  "carafe": "carafe",
+  "wine_glass": "wine_glass",
   "rug_dark": "rug_dark",
   "armchair": "armchair",
   "armchair_cushion": "armchair_cushion",
@@ -17,13 +18,13 @@
   "speaker_left": "speaker_left",
   "speaker_right": "speaker_right",
   "plant": "plant",
-  "piano_bench": null,
+  "piano_bench": "piano_bench",
   "tv": "tv"
  },
  "summary": {
-  "passed": 12,
+  "passed": 17,
   "total": 24,
-  "pass_rate": 0.5
+  "pass_rate": 0.708
  },
  "steps": [
   {
@@ -32,11 +33,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.3,
-     0.046,
-     -0.109
+     -0.69,
+     0.282,
+     0.056
     ],
-    "tilt_deg": 147.084
+    "tilt_deg": 4.555
    },
    "woken": [],
    "checks": [
@@ -46,21 +47,21 @@
      "pass": false,
      "detail": {
       "moved_m": [
-       0.388,
-       -0.597,
-       0.034
+       -0.009,
+       -0.003,
+       -0.003
       ],
-      "error": 0.57
+      "error": 1.036
      }
     },
     {
      "kind": "on",
      "target": "bowl",
      "expect": "coffee_table",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "floor",
-      "gap_m": 0
+      "under": "coffee_table",
+      "gap_m": -0.011
      }
     },
     {
@@ -69,7 +70,7 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "floor",
+      "under": "rug_dark",
       "gap_m": 0
      }
     },
@@ -79,7 +80,7 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "floor",
+      "under": "sofa",
       "gap_m": 0
      }
     }
@@ -91,11 +92,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     0.301,
-     0.058,
-     0.149
+     0.263,
+     0.054,
+     0.176
     ],
-    "tilt_deg": 147.084
+    "tilt_deg": 90
    },
    "woken": [],
    "checks": [
@@ -114,7 +115,7 @@
      "target": "wine_glass",
      "pass": false,
      "detail": {
-      "tilt_deg": 147.084
+      "tilt_deg": 90
      }
     }
    ]
@@ -164,11 +165,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.467,
-     0.417,
-     -1.158
+     -0.461,
+     0.477,
+     -1.155
     ],
-    "tilt_deg": 151.292
+    "tilt_deg": 0.27
    },
    "woken": [],
    "checks": [
@@ -179,15 +180,15 @@
      "pass": true,
      "detail": {
       "under": "footstool",
-      "gap_m": -0.015
+      "gap_m": -0.001
      }
     },
     {
      "kind": "upright",
      "target": "bowl",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "tilt_deg": 151.292
+      "tilt_deg": 0.27
      }
     }
    ]
@@ -222,11 +223,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.795,
-     0.52,
-     -0.936
+     -0.692,
+     0.283,
+     0.055
     ],
-    "tilt_deg": 90.001
+    "tilt_deg": 6.19
    },
    "woken": [],
    "checks": [
@@ -236,11 +237,11 @@
      "pass": false,
      "detail": {
       "moved_m": [
-       -0.328,
-       0.103,
-       0.221
+       -0.002,
+       0.001,
+       -0.001
       ],
-      "error": 0.939
+      "error": 0.992
      }
     },
     {
@@ -249,7 +250,7 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "sofa",
+      "under": "rug_dark",
       "gap_m": 0
      }
     },
@@ -257,9 +258,9 @@
      "kind": "on",
      "target": "wine_glass",
      "expect": "rug_dark",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "sofa",
+      "under": "rug_dark",
       "gap_m": 0
      }
     },
@@ -267,10 +268,10 @@
      "kind": "on",
      "target": "bowl",
      "expect": "footstool",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "sofa",
-      "gap_m": 0
+      "under": "footstool",
+      "gap_m": -0.001
      }
     }
    ]
@@ -338,9 +339,9 @@
   {
    "kind": "stayed",
    "target": "piano_bench",
-   "pass": false,
+   "pass": true,
    "detail": {
-    "reason": "missing_object"
+    "shift_m": 0
    }
   },
   {

@@ -1,17 +1,18 @@
 {
  "scene": "room",
  "condition": "lazy",
+ "match": "id",
  "resolved": {
   "coffee_table": "coffee_table",
-  "bowl": "coffee_table",
-  "carafe": "coffee_table",
-  "wine_glass": "coffee_table",
-  "rug_dark": "floor",
+  "bowl": "bowl",
+  "carafe": "carafe",
+  "wine_glass": "wine_glass",
+  "rug_dark": "rug_dark",
   "armchair": "armchair",
-  "armchair_cushion": "armchair",
+  "armchair_cushion": "armchair_cushion",
   "footstool": "footstool",
-  "door": null,
-  "slipper_left": "rug_light",
+  "door": "door",
+  "slipper_left": "slipper_left",
   "slipper_right": "slipper_right",
   "subwoofer": "subwoofer",
   "speaker_left": "speaker_left",
@@ -21,9 +22,9 @@
   "tv": "tv"
  },
  "summary": {
-  "passed": 11,
+  "passed": 19,
   "total": 24,
-  "pass_rate": 0.458
+  "pass_rate": 0.792
  },
  "steps": [
   {
@@ -62,10 +63,10 @@
      "kind": "on",
      "target": "bowl",
      "expect": "coffee_table",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "floor",
-      "gap_m": 0.004
+      "under": "coffee_table",
+      "gap_m": -0.006
      }
     },
     {
@@ -75,7 +76,7 @@
      "pass": false,
      "detail": {
       "under": "floor",
-      "gap_m": 0.004
+      "gap_m": 0
      }
     },
     {
@@ -85,7 +86,7 @@
      "pass": false,
      "detail": {
       "under": "floor",
-      "gap_m": 0.004
+      "gap_m": 0
      }
     }
    ]
@@ -96,11 +97,11 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     0.315,
-     0.338,
-     0.141
+     0.3,
+     0.047,
+     0.15
     ],
-    "tilt_deg": 0
+    "tilt_deg": 90.376
    },
    "woken": [],
    "checks": [
@@ -117,9 +118,9 @@
     {
      "kind": "upright",
      "target": "wine_glass",
-     "pass": true,
+     "pass": false,
      "detail": {
-      "tilt_deg": 0
+      "tilt_deg": 90.376
      }
     }
    ]
@@ -159,10 +160,10 @@
      "kind": "on",
      "target": "armchair_cushion",
      "expect": "armchair",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "floor",
-      "gap_m": 0
+      "under": "armchair",
+      "gap_m": 0.016
      }
     }
    ]
@@ -173,30 +174,32 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.398,
-     0.762,
-     -1.185
+     -0.455,
+     0.428,
+     -1.147
     ],
-    "tilt_deg": 28.062
+    "tilt_deg": 0.009
    },
-   "woken": [],
+   "woken": [
+    "footstool"
+   ],
    "checks": [
     {
      "kind": "on",
      "target": "bowl",
      "expect": "footstool",
-     "pass": false,
+     "pass": true,
      "detail": {
       "under": "footstool",
-      "gap_m": -0.041
+      "gap_m": 0
      }
     },
     {
      "kind": "upright",
      "target": "bowl",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "tilt_deg": 28.062
+      "tilt_deg": 0.009
      }
     }
    ]
@@ -204,17 +207,23 @@
   {
    "action": "turn",
    "target": "door",
-   "grabbed": false,
-   "reason": "missing_object",
-   "target_after": null,
+   "grabbed": true,
+   "target_after": {
+    "pos": [
+     -1.021,
+     0.979,
+     2.013
+    ],
+    "tilt_deg": 0.001
+   },
    "woken": [],
    "checks": [
     {
      "kind": "turned",
      "target": "door",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "reason": "missing_object"
+      "turned_deg": 34.377
      }
     }
    ]
@@ -225,27 +234,25 @@
    "grabbed": true,
    "target_after": {
     "pos": [
-     -0.564,
-     0.829,
-     -1.21
+     -0.736,
+     0.352,
+     -0.229
     ],
-    "tilt_deg": 24.058
+    "tilt_deg": 5.631
    },
-   "woken": [
-    "footstool"
-   ],
+   "woken": [],
    "checks": [
     {
      "kind": "followed",
      "target": "coffee_table",
-     "pass": false,
+     "pass": true,
      "detail": {
       "moved_m": [
-       -0.165,
-       0.067,
-       -0.025
+       -0.201,
+       0.009,
+       0.005
       ],
-      "error": 0.352
+      "error": 0.196
      }
     },
     {
@@ -254,28 +261,28 @@
      "expect": "coffee_table",
      "pass": false,
      "detail": {
-      "under": "sofa",
-      "gap_m": -0.158
+      "under": "floor",
+      "gap_m": 0
      }
     },
     {
      "kind": "on",
      "target": "wine_glass",
      "expect": "rug_dark",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "sofa",
-      "gap_m": -0.158
+      "under": "rug_dark",
+      "gap_m": 0
      }
     },
     {
      "kind": "on",
      "target": "bowl",
      "expect": "footstool",
-     "pass": false,
+     "pass": true,
      "detail": {
-      "under": "sofa",
-      "gap_m": -0.158
+      "under": "footstool",
+      "gap_m": 0
      }
     }
    ]
@@ -286,10 +293,10 @@
    "kind": "on",
    "target": "armchair_cushion",
    "expect": "armchair",
-   "pass": false,
+   "pass": true,
    "detail": {
-    "under": "floor",
-    "gap_m": 0
+    "under": "armchair",
+    "gap_m": 0.016
    }
   },
   {
@@ -313,7 +320,7 @@
    "target": "subwoofer",
    "pass": false,
    "detail": {
-    "shift_m": 0.031
+    "shift_m": 0.032
    }
   },
   {

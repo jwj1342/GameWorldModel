@@ -202,12 +202,12 @@
     "lpips": 0.703
    },
    "interact": {
-    "passed": 17,
+    "passed": 30,
     "total": 30,
-    "pass_rate": 0.567,
+    "pass_rate": 1,
     "by_expect": {
      "fixed": {
-      "passed": 2,
+      "passed": 4,
       "total": 4
      },
      "hinge": {
@@ -215,25 +215,25 @@
       "total": 1
      },
      "movable": {
-      "passed": 9,
+      "passed": 15,
       "total": 15
      },
      "rests": {
-      "passed": 5,
+      "passed": 10,
       "total": 10
      }
     }
    },
    "sequence": {
     "lazy": {
-     "passed": 17,
+     "passed": 13,
      "total": 24,
-     "pass_rate": 0.708
+     "pass_rate": 0.542
     },
     "settled": {
-     "passed": 15,
+     "passed": 9,
      "total": 24,
-     "pass_rate": 0.625
+     "pass_rate": 0.375
     }
    }
   }
@@ -245,5 +245,10 @@
   "median_rel": 0.0946
  },
  "texture_model": null,
- "finished": "2026-11-26T09:09:10"
+ "finished": "2026-11-26T09:09:10",
+ "match": "id",
+ "anchors_found": {
+  "found": 10,
+  "total": 20
+ }
 }

@@ -1,24 +1,24 @@
 {
  "scene": "room",
  "summary": {
-  "passed": 14,
+  "passed": 29,
   "total": 30,
-  "pass_rate": 0.467,
+  "pass_rate": 0.967,
   "by_expect": {
    "fixed": {
-    "passed": 3,
+    "passed": 4,
     "total": 4
    },
    "hinge": {
-    "passed": 0,
+    "passed": 1,
     "total": 1
    },
    "movable": {
-    "passed": 7,
+    "passed": 14,
     "total": 15
    },
    "rests": {
-    "passed": 4,
+    "passed": 10,
     "total": 10
    }
   }
@@ -210,6 +210,114 @@
    "colliders": 4
   }
  ],
+ "match": "id",
+ "anchors": {
+  "match": "id",
+  "found": 11,
+  "total": 20,
+  "per_label": {
+   "floor": {
+    "id": "floor",
+    "merged": false,
+    "ok": true
+   },
+   "walls": {
+    "id": "walls",
+    "merged": false,
+    "ok": true
+   },
+   "window": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "alcove_shelves": {
+    "id": "alcove_shelves",
+    "merged": false,
+    "ok": true
+   },
+   "door": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "sofa": {
+    "id": "sofa",
+    "merged": false,
+    "ok": true
+   },
+   "armchair": {
+    "id": "armchair",
+    "merged": true,
+    "ok": false
+   },
+   "armchair_cushion": {
+    "id": "armchair",
+    "merged": true,
+    "ok": false
+   },
+   "footstool": {
+    "id": "footstool",
+    "merged": false,
+    "ok": true
+   },
+   "coffee_table": {
+    "id": "coffee_table",
+    "merged": true,
+    "ok": false
+   },
+   "bowl": {
+    "id": "coffee_table",
+    "merged": true,
+    "ok": false
+   },
+   "carafe": {
+    "id": "coffee_table",
+    "merged": true,
+    "ok": false
+   },
+   "wine_glass": {
+    "id": "coffee_table",
+    "merged": true,
+    "ok": false
+   },
+   "slipper_left": {
+    "id": "rug_light",
+    "merged": false,
+    "ok": false
+   },
+   "slipper_right": {
+    "id": "slipper_right",
+    "merged": false,
+    "ok": true
+   },
+   "subwoofer": {
+    "id": "subwoofer",
+    "merged": false,
+    "ok": true
+   },
+   "plant": {
+    "id": "plant",
+    "merged": false,
+    "ok": true
+   },
+   "piano_bench": {
+    "id": "piano_bench",
+    "merged": false,
+    "ok": true
+   },
+   "speaker_left": {
+    "id": "speaker_left",
+    "merged": false,
+    "ok": true
+   },
+   "speaker_right": {
+    "id": "speaker_right",
+    "merged": false,
+    "ok": true
+   }
+  }
+ },
  "items": [
   {
    "target": "floor",
@@ -234,10 +342,12 @@
   {
    "target": "window",
    "expect": "fixed",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "window",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
   },
   {
    "target": "alcove_shelves",
@@ -252,10 +362,17 @@
   {
    "target": "door",
    "expect": "hinge",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "door",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "hinge",
+    "turned_deg": 85.667,
+    "limit_deg": 91.673,
+    "overshoot_deg": 0,
+    "radius": 0.395,
+    "moves": true
+   }
   },
   {
    "target": "sofa",
@@ -269,17 +386,65 @@
    "target": "armchair",
    "expect": "movable",
    "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.5,
+    "penetration": 0.022,
+    "penetrating_with": "window_south",
+    "contacts": 4,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.306,
+    "max_disturbance": 2.568,
+    "disturbed_count": 2,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      0,
+      0,
+      1
+     ],
+     "index": 2
+    },
+    "attempts_tried": 3
+   }
   },
   {
    "target": "armchair_cushion",
    "expect": "movable",
-   "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "armchair_cushion",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.264,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 0.995,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.159,
+    "max_disturbance": 0.021,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "footstool",
@@ -317,41 +482,161 @@
    "target": "coffee_table",
    "expect": "movable",
    "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.348,
+    "penetration": 0.04,
+    "penetrating_with": "sofa",
+    "contacts": 20,
+    "lift_progress": null,
+    "follow_error": 0.006,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.008,
+    "max_disturbance": 1.587,
+    "disturbed_count": 4,
+    "attempt": {
+     "lift": false,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 4
+    },
+    "attempts_tried": 5
+   }
   },
   {
    "target": "bowl",
    "expect": "movable",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "bowl",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.126,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.007,
+    "max_disturbance": 2.377,
+    "disturbed_count": 3,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "carafe",
    "expect": "movable",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.132,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.721,
+    "max_disturbance": 0.03,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "wine_glass",
    "expect": "movable",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "wine_glass",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.051,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.247,
+    "max_disturbance": 0.03,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "slipper_left",
    "expect": "movable",
-   "resolved": "rug_light",
-   "pass": false,
-   "reason": "declared_static",
-   "detail": null
+   "resolved": "slipper_left",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.173,
+    "penetration": 0.001,
+    "penetrating_with": "slipper_right",
+    "contacts": 4,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.066,
+    "max_disturbance": 0.003,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "slipper_right",
@@ -549,41 +834,61 @@
    "target": "coffee_table",
    "expect": "rests",
    "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.03,
+    "tilt_deg": 5.593,
+    "dropped_m": -0.013
+   }
   },
   {
    "target": "bowl",
    "expect": "rests",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "bowl",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.008,
+    "tilt_deg": 0,
+    "dropped_m": 0.008
+   }
   },
   {
    "target": "carafe",
    "expect": "rests",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.008,
+    "tilt_deg": 0,
+    "dropped_m": 0.008
+   }
   },
   {
    "target": "wine_glass",
    "expect": "rests",
-   "resolved": "coffee_table",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "wine_glass",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.006,
+    "tilt_deg": 0,
+    "dropped_m": 0.006
+   }
   },
   {
    "target": "armchair_cushion",
    "expect": "rests",
-   "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "armchair_cushion",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.007,
+    "tilt_deg": 0,
+    "dropped_m": 0.007
+   }
   },
   {
    "target": "plant",
@@ -636,10 +941,14 @@
   {
    "target": "slipper_left",
    "expect": "rests",
-   "resolved": "rug_light",
-   "pass": false,
-   "reason": "declared_static",
-   "detail": null
+   "resolved": "slipper_left",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.003,
+    "tilt_deg": 0.056,
+    "dropped_m": 0.003
+   }
   }
  ]
 }

@@ -198,6 +198,18 @@
       "total": 10
      }
     }
+   },
+   "sequence": {
+    "lazy": {
+     "passed": 22,
+     "total": 24,
+     "pass_rate": 0.917
+    },
+    "settled": {
+     "passed": 19,
+     "total": 24,
+     "pass_rate": 0.792
+    }
    }
   },
   {
@@ -231,9 +243,26 @@
       "total": 10
      }
     }
+   },
+   "sequence": {
+    "lazy": {
+     "passed": 22,
+     "total": 24,
+     "pass_rate": 0.917
+    },
+    "settled": {
+     "passed": 19,
+     "total": 24,
+     "pass_rate": 0.792
+    }
    }
   }
  ],
  "texture_model": "stabilityai/sd-turbo",
- "finished": "2026-11-25T20:08:40"
+ "finished": "2026-11-25T20:08:40",
+ "match": "id",
+ "anchors_found": {
+  "found": 20,
+  "total": 20
+ }
 }

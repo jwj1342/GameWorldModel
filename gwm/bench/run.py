@@ -3,6 +3,7 @@
     python -m gwm.bench.run pack   --config configs/bench/room.yaml
     python -m gwm.bench.run eval   --config configs/bench/room.yaml --cand DIR --label NAME [--modes flat,textured]
     python -m gwm.bench.run trajectory --config configs/bench/room.yaml --workspace DIR --label NAME
+    python -m gwm.bench.run interact --config configs/bench/room.yaml --cand DIR --match id|anchors   （只重算交互，不渲染）
     python -m gwm.bench.run report --config configs/bench/room.yaml [--runs ID,ID]
 
 pack    把数据集整理成场景包（坐标归一化、训练/留出划分），只需要跑一次。
@@ -73,6 +74,28 @@ def cmd_pack(cfg: dict) -> dict:
                        agent_view_width=d["agent_view_width"], max_points=d["max_points"], seed=d.get("seed", 0))
     print(json.dumps(frame, ensure_ascii=False, indent=1))
     return frame
+
+
+def score_interaction(cfg: dict, cand_dir: Path, out_dir: Path, match: str) -> tuple[dict, dict]:
+    """交互清单和连续交互，写进 out_dir 的 interact.json 和 sequence_*.json。
+
+    match 是 'id' 或 'anchors'。给过物体名单的运行按 id 找物体：锚点取自第一次运行的场景，拿它来判
+    别的运行，等于把「东西摆得离那份场景多近」算进交互分。锚点命中了几个单独记在 interact.json 的
+    anchors 里，只当摆放位置的诊断。没给名单的运行 id 是智能体自己起的，只能按锚点找。"""
+    anchors = ["--anchors", str(REPO / cfg["anchors"])] if cfg.get("anchors") else []
+    interact_file = out_dir / "interact.json"
+    _node("bench_interact.mjs", "--cand", str(cand_dir), "--checklist", str(REPO / cfg["checklist"]),
+          "--out", str(interact_file), "--match", match, *anchors)
+    interact = json.loads(interact_file.read_text(encoding="utf-8"))
+    # 连续交互：同一个世界里按顺序做一串动作。两种条件都跑，见 harness/bench_sequence.mjs
+    sequence = {}
+    if cfg.get("sequence"):
+        for condition, flags in (("lazy", []), ("settled", ["--settle"])):
+            out = out_dir / f"sequence_{condition}.json"
+            _node("bench_sequence.mjs", "--cand", str(cand_dir), "--sequence", str(REPO / cfg["sequence"]),
+                  "--out", str(out), "--match", match, *anchors, *flags)
+            sequence[condition] = json.loads(out.read_text(encoding="utf-8"))["summary"]
+    return interact, sequence
 
 
 def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips: bool = False) -> Path:
@@ -149,19 +172,8 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
     geo = geometry.evaluate(pack / "eval" / "observed.json", depth_dir, views)
     (run_dir / "geometry.json").write_text(json.dumps(geo, indent=1), encoding="utf-8")
 
-    interact_file = run_dir / "interact.json"
-    anchors = ["--anchors", str(REPO / cfg["anchors"])] if cfg.get("anchors") else []
-    _node("bench_interact.mjs", "--cand", str(cand_dir), "--checklist", str(REPO / cfg["checklist"]),
-          "--out", str(interact_file), *anchors)
-    interact = json.loads(interact_file.read_text(encoding="utf-8"))
-    # 连续交互：同一个世界里按顺序做一串动作。两种条件都跑，见 harness/bench_sequence.mjs
-    sequence = {}
-    if cfg.get("sequence"):
-        for condition, flags in (("lazy", []), ("settled", ["--settle"])):
-            out = run_dir / f"sequence_{condition}.json"
-            _node("bench_sequence.mjs", "--cand", str(cand_dir), "--sequence", str(REPO / cfg["sequence"]),
-                  "--out", str(out), *anchors, *flags)
-            sequence[condition] = json.loads(out.read_text(encoding="utf-8"))["summary"]
+    match = "id" if (cand / "inputs" / "manifest.json").is_file() else "anchors"
+    interact, sequence = score_interaction(cfg, cand_dir, run_dir, match)
     for point in points:
         point["interact"] = interact["summary"]
         point["sequence"] = sequence
@@ -170,6 +182,7 @@ def cmd_eval(cfg: dict, cand: Path, label: str, modes: list[str], *, skip_lpips:
         "held_out_views": len(views), "image_dir": cfg["data"]["image_dir"],
         "code_size": code_size(cand_dir / "scene.js"), "materials": len(materials),
         "objects": interact["objects"], "points": points, "geometry": geo["mean"],
+        "match": match, "anchors_found": interact["anchors"] and {k: interact["anchors"][k] for k in ("found", "total")},
         "texture_model": (texture_log or {}).get("model"),
         "finished": _dt.datetime.now().isoformat(timespec="seconds"),
     }
@@ -251,9 +264,12 @@ def cmd_report(cfg: dict, run_ids: list[str] | None) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("pack", "eval", "trajectory", "report"):
+    for name in ("pack", "eval", "trajectory", "interact", "report"):
         p = sub.add_parser(name)
         p.add_argument("--config", required=True)
+        if name == "interact":
+            p.add_argument("--cand", required=True, help="目录里要有 scene.js（和 materials.json）；结果写回这个目录")
+            p.add_argument("--match", choices=("id", "anchors"), required=True)
         if name == "trajectory":
             p.add_argument("--workspace", required=True)
             p.add_argument("--label", required=True)
@@ -270,6 +286,12 @@ def main(argv: list[str] | None = None) -> int:
         cmd_pack(cfg)
     elif args.command == "eval":
         cmd_eval(cfg, Path(args.cand), args.label, args.modes.split(","), skip_lpips=args.skip_lpips)
+    elif args.command == "interact":
+        interact, sequence = score_interaction(cfg, Path(args.cand), Path(args.cand), args.match)
+        a = interact["anchors"]
+        print(f"interact ({args.match}) {interact['summary']['passed']}/{interact['summary']['total']}"
+              + "".join(f" sequence_{k}={v['passed']}/{v['total']}" for k, v in sequence.items())
+              + (f" anchors_found={a['found']}/{a['total']}" if a else ""))
     elif args.command == "trajectory":
         cmd_trajectory(cfg, Path(args.workspace), args.label)
     else:

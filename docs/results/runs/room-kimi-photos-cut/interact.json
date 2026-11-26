@@ -1,12 +1,12 @@
 {
  "scene": "room",
  "summary": {
-  "passed": 17,
+  "passed": 30,
   "total": 30,
-  "pass_rate": 0.567,
+  "pass_rate": 1,
   "by_expect": {
    "fixed": {
-    "passed": 2,
+    "passed": 4,
     "total": 4
    },
    "hinge": {
@@ -14,11 +14,11 @@
     "total": 1
    },
    "movable": {
-    "passed": 9,
+    "passed": 15,
     "total": 15
    },
    "rests": {
-    "passed": 5,
+    "passed": 10,
     "total": 10
    }
   }
@@ -205,6 +205,114 @@
    "colliders": 1
   }
  ],
+ "match": "id",
+ "anchors": {
+  "match": "id",
+  "found": 10,
+  "total": 20,
+  "per_label": {
+   "floor": {
+    "id": "floor",
+    "merged": false,
+    "ok": true
+   },
+   "walls": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "window": {
+    "id": null,
+    "merged": false,
+    "ok": false
+   },
+   "alcove_shelves": {
+    "id": "alcove_shelves",
+    "merged": false,
+    "ok": true
+   },
+   "door": {
+    "id": "door",
+    "merged": false,
+    "ok": true
+   },
+   "sofa": {
+    "id": "sofa",
+    "merged": false,
+    "ok": true
+   },
+   "armchair": {
+    "id": "armchair",
+    "merged": true,
+    "ok": false
+   },
+   "armchair_cushion": {
+    "id": "armchair",
+    "merged": true,
+    "ok": false
+   },
+   "footstool": {
+    "id": "footstool",
+    "merged": false,
+    "ok": true
+   },
+   "coffee_table": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "bowl": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "carafe": {
+    "id": "wine_glass",
+    "merged": false,
+    "ok": false
+   },
+   "wine_glass": {
+    "id": "bowl",
+    "merged": true,
+    "ok": false
+   },
+   "slipper_left": {
+    "id": "slipper_left",
+    "merged": false,
+    "ok": true
+   },
+   "slipper_right": {
+    "id": "slipper_right",
+    "merged": false,
+    "ok": true
+   },
+   "subwoofer": {
+    "id": "subwoofer",
+    "merged": false,
+    "ok": true
+   },
+   "plant": {
+    "id": "plant",
+    "merged": false,
+    "ok": true
+   },
+   "piano_bench": {
+    "id": "walls",
+    "merged": false,
+    "ok": false
+   },
+   "speaker_left": {
+    "id": "desk",
+    "merged": false,
+    "ok": false
+   },
+   "speaker_right": {
+    "id": "speaker_right",
+    "merged": false,
+    "ok": true
+   }
+  }
+ },
  "items": [
   {
    "target": "floor",
@@ -219,18 +327,22 @@
   {
    "target": "walls",
    "expect": "fixed",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "walls",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
   },
   {
    "target": "window",
    "expect": "fixed",
-   "resolved": null,
-   "pass": false,
-   "reason": "missing_object",
-   "detail": null
+   "resolved": "window",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "body": "fixed"
+   }
   },
   {
    "target": "alcove_shelves",
@@ -293,17 +405,65 @@
    "target": "armchair",
    "expect": "movable",
    "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.5,
+    "penetration": 0.064,
+    "penetrating_with": "window_armchair",
+    "contacts": 40,
+    "lift_progress": null,
+    "follow_error": 0.186,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.002,
+    "max_disturbance": 1.676,
+    "disturbed_count": 4,
+    "attempt": {
+     "lift": false,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 4
+    },
+    "attempts_tried": 5
+   }
   },
   {
    "target": "armchair_cushion",
    "expect": "movable",
-   "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "armchair_cushion",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.252,
+    "penetration": 0.025,
+    "penetrating_with": "armchair",
+    "contacts": 4,
+    "lift_progress": 0.986,
+    "follow_error": 0.004,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.125,
+    "max_disturbance": 0.026,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "footstool",
@@ -340,21 +500,101 @@
   {
    "target": "coffee_table",
    "expect": "movable",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "coffee_table",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.306,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1.944,
+    "follow_error": 0.009,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.232,
+    "max_disturbance": 0.644,
+    "disturbed_count": 3,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "bowl",
    "expect": "movable",
    "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.132,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.003,
+    "max_disturbance": 0.68,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
   },
   {
    "target": "carafe",
+   "expect": "movable",
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.132,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1,
+    "follow_error": 0,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": 0.002,
+    "max_disturbance": 0.002,
+    "disturbed_count": 0,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
+   }
+  },
+  {
+   "target": "wine_glass",
    "expect": "movable",
    "resolved": "wine_glass",
    "pass": true,
@@ -384,14 +624,6 @@
     },
     "attempts_tried": 1
    }
-  },
-  {
-   "target": "wine_glass",
-   "expect": "movable",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
   },
   {
    "target": "slipper_left",
@@ -524,41 +756,65 @@
   {
    "target": "piano_bench",
    "expect": "movable",
-   "resolved": "walls",
-   "pass": false,
-   "reason": "declared_static",
-   "detail": null
-  },
-  {
-   "target": "speaker_left",
-   "expect": "movable",
-   "resolved": "desk",
+   "resolved": "piano_bench",
    "pass": true,
    "reason": null,
    "detail": {
     "mode": "free",
-    "reach": 0.414,
+    "reach": 0.276,
     "penetration": 0,
     "penetrating_with": null,
     "contacts": 0,
     "lift_progress": 1,
-    "follow_error": 0,
+    "follow_error": 0.15,
     "rest_speed": 0,
     "fell_through": false,
     "finite": true,
-    "rest_drop": -0.349,
-    "max_disturbance": 0,
+    "rest_drop": 0.007,
+    "max_disturbance": 0.005,
     "disturbed_count": 0,
     "attempt": {
      "lift": true,
      "direction": [
+      1,
       0,
-      0,
-      1
+      0
      ],
-     "index": 2
+     "index": 0
     },
-    "attempts_tried": 3
+    "attempts_tried": 1
+   }
+  },
+  {
+   "target": "speaker_left",
+   "expect": "movable",
+   "resolved": "speaker_left",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "mode": "free",
+    "reach": 0.288,
+    "penetration": 0,
+    "penetrating_with": null,
+    "contacts": 0,
+    "lift_progress": 1.001,
+    "follow_error": 0.225,
+    "rest_speed": 0,
+    "fell_through": false,
+    "finite": true,
+    "rest_drop": -0.356,
+    "max_disturbance": 0.069,
+    "disturbed_count": 1,
+    "attempt": {
+     "lift": true,
+     "direction": [
+      1,
+      0,
+      0
+     ],
+     "index": 0
+    },
+    "attempts_tried": 1
    }
   },
   {
@@ -596,21 +852,41 @@
   {
    "target": "coffee_table",
    "expect": "rests",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "coffee_table",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0,
+    "tilt_deg": 0,
+    "dropped_m": 0
+   }
   },
   {
    "target": "bowl",
    "expect": "rests",
    "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
   },
   {
    "target": "carafe",
+   "expect": "rests",
+   "resolved": "carafe",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.002,
+    "tilt_deg": 0,
+    "dropped_m": 0.002
+   }
+  },
+  {
+   "target": "wine_glass",
    "expect": "rests",
    "resolved": "wine_glass",
    "pass": true,
@@ -622,20 +898,16 @@
    }
   },
   {
-   "target": "wine_glass",
-   "expect": "rests",
-   "resolved": "bowl",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
-  },
-  {
    "target": "armchair_cushion",
    "expect": "rests",
-   "resolved": "armchair",
-   "pass": false,
-   "reason": "merged",
-   "detail": null
+   "resolved": "armchair_cushion",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.025,
+    "tilt_deg": 0.02,
+    "dropped_m": -0.025
+   }
   },
   {
    "target": "plant",
@@ -652,10 +924,14 @@
   {
    "target": "piano_bench",
    "expect": "rests",
-   "resolved": "walls",
-   "pass": false,
-   "reason": "declared_static",
-   "detail": null
+   "resolved": "piano_bench",
+   "pass": true,
+   "reason": null,
+   "detail": {
+    "shift_m": 0.007,
+    "tilt_deg": 2.605,
+    "dropped_m": 0.006
+   }
   },
   {
    "target": "subwoofer",

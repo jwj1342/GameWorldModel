@@ -180,10 +180,119 @@
    "colliders": 6
   }
  ],
+ "match": "id",
+ "anchors": {
+  "match": "id",
+  "found": 20,
+  "total": 20,
+  "per_label": {
+   "floor": {
+    "id": "floor",
+    "merged": false,
+    "ok": true
+   },
+   "walls": {
+    "id": "walls",
+    "merged": false,
+    "ok": true
+   },
+   "window": {
+    "id": "window",
+    "merged": false,
+    "ok": true
+   },
+   "alcove_shelves": {
+    "id": "alcove_shelves",
+    "merged": false,
+    "ok": true
+   },
+   "door": {
+    "id": "door",
+    "merged": false,
+    "ok": true
+   },
+   "sofa": {
+    "id": "sofa",
+    "merged": false,
+    "ok": true
+   },
+   "armchair": {
+    "id": "armchair",
+    "merged": false,
+    "ok": true
+   },
+   "armchair_cushion": {
+    "id": "armchair_cushion",
+    "merged": false,
+    "ok": true
+   },
+   "footstool": {
+    "id": "footstool",
+    "merged": false,
+    "ok": true
+   },
+   "coffee_table": {
+    "id": "coffee_table",
+    "merged": false,
+    "ok": true
+   },
+   "bowl": {
+    "id": "bowl",
+    "merged": false,
+    "ok": true
+   },
+   "carafe": {
+    "id": "carafe",
+    "merged": false,
+    "ok": true
+   },
+   "wine_glass": {
+    "id": "wine_glass",
+    "merged": false,
+    "ok": true
+   },
+   "slipper_left": {
+    "id": "slipper_left",
+    "merged": false,
+    "ok": true
+   },
+   "slipper_right": {
+    "id": "slipper_right",
+    "merged": false,
+    "ok": true
+   },
+   "subwoofer": {
+    "id": "subwoofer",
+    "merged": false,
+    "ok": true
+   },
+   "plant": {
+    "id": "plant",
+    "merged": false,
+    "ok": true
+   },
+   "piano_bench": {
+    "id": "piano_bench",
+    "merged": false,
+    "ok": true
+   },
+   "speaker_left": {
+    "id": "speaker_left",
+    "merged": false,
+    "ok": true
+   },
+   "speaker_right": {
+    "id": "speaker_right",
+    "merged": false,
+    "ok": true
+   }
+  }
+ },
  "items": [
   {
    "target": "floor",
    "expect": "fixed",
+   "resolved": "floor",
    "pass": true,
    "reason": null,
    "detail": {
@@ -193,6 +302,7 @@
   {
    "target": "walls",
    "expect": "fixed",
+   "resolved": "walls",
    "pass": true,
    "reason": null,
    "detail": {
@@ -202,6 +312,7 @@
   {
    "target": "window",
    "expect": "fixed",
+   "resolved": "window",
    "pass": true,
    "reason": null,
    "detail": {
@@ -211,6 +322,7 @@
   {
    "target": "alcove_shelves",
    "expect": "fixed",
+   "resolved": "alcove_shelves",
    "pass": true,
    "reason": null,
    "detail": {
@@ -220,6 +332,7 @@
   {
    "target": "door",
    "expect": "hinge",
+   "resolved": "door",
    "pass": true,
    "reason": null,
    "detail": {
@@ -234,6 +347,7 @@
   {
    "target": "sofa",
    "expect": "movable",
+   "resolved": "sofa",
    "pass": false,
    "reason": "declared_static",
    "detail": null
@@ -241,6 +355,7 @@
   {
    "target": "armchair",
    "expect": "movable",
+   "resolved": "armchair",
    "pass": true,
    "reason": null,
    "detail": {
@@ -272,6 +387,7 @@
   {
    "target": "armchair_cushion",
    "expect": "movable",
+   "resolved": "armchair_cushion",
    "pass": true,
    "reason": null,
    "detail": {
@@ -303,6 +419,7 @@
   {
    "target": "footstool",
    "expect": "movable",
+   "resolved": "footstool",
    "pass": true,
    "reason": null,
    "detail": {
@@ -334,6 +451,7 @@
   {
    "target": "coffee_table",
    "expect": "movable",
+   "resolved": "coffee_table",
    "pass": true,
    "reason": null,
    "detail": {
@@ -365,6 +483,7 @@
   {
    "target": "bowl",
    "expect": "movable",
+   "resolved": "bowl",
    "pass": true,
    "reason": null,
    "detail": {
@@ -396,6 +515,7 @@
   {
    "target": "carafe",
    "expect": "movable",
+   "resolved": "carafe",
    "pass": true,
    "reason": null,
    "detail": {
@@ -427,6 +547,7 @@
   {
    "target": "wine_glass",
    "expect": "movable",
+   "resolved": "wine_glass",
    "pass": true,
    "reason": null,
    "detail": {
@@ -458,6 +579,7 @@
   {
    "target": "slipper_left",
    "expect": "movable",
+   "resolved": "slipper_left",
    "pass": true,
    "reason": null,
    "detail": {
@@ -489,6 +611,7 @@
   {
    "target": "slipper_right",
    "expect": "movable",
+   "resolved": "slipper_right",
    "pass": true,
    "reason": null,
    "detail": {
@@ -520,6 +643,7 @@
   {
    "target": "subwoofer",
    "expect": "movable",
+   "resolved": "subwoofer",
    "pass": true,
    "reason": null,
    "detail": {
@@ -551,6 +675,7 @@
   {
    "target": "plant",
    "expect": "movable",
+   "resolved": "plant",
    "pass": true,
    "reason": null,
    "detail": {
@@ -582,6 +707,7 @@
   {
    "target": "piano_bench",
    "expect": "movable",
+   "resolved": "piano_bench",
    "pass": true,
    "reason": null,
    "detail": {
@@ -613,6 +739,7 @@
   {
    "target": "speaker_left",
    "expect": "movable",
+   "resolved": "speaker_left",
    "pass": true,
    "reason": null,
    "detail": {
@@ -644,6 +771,7 @@
   {
    "target": "speaker_right",
    "expect": "movable",
+   "resolved": "speaker_right",
    "pass": true,
    "reason": null,
    "detail": {
@@ -675,6 +803,7 @@
   {
    "target": "coffee_table",
    "expect": "rests",
+   "resolved": "coffee_table",
    "pass": true,
    "reason": null,
    "detail": {
@@ -686,6 +815,7 @@
   {
    "target": "bowl",
    "expect": "rests",
+   "resolved": "bowl",
    "pass": true,
    "reason": null,
    "detail": {
@@ -697,6 +827,7 @@
   {
    "target": "carafe",
    "expect": "rests",
+   "resolved": "carafe",
    "pass": true,
    "reason": null,
    "detail": {
@@ -708,6 +839,7 @@
   {
    "target": "wine_glass",
    "expect": "rests",
+   "resolved": "wine_glass",
    "pass": true,
    "reason": null,
    "detail": {
@@ -719,6 +851,7 @@
   {
    "target": "armchair_cushion",
    "expect": "rests",
+   "resolved": "armchair_cushion",
    "pass": true,
    "reason": null,
    "detail": {
@@ -730,6 +863,7 @@
   {
    "target": "plant",
    "expect": "rests",
+   "resolved": "plant",
    "pass": true,
    "reason": null,
    "detail": {
@@ -741,6 +875,7 @@
   {
    "target": "piano_bench",
    "expect": "rests",
+   "resolved": "piano_bench",
    "pass": true,
    "reason": null,
    "detail": {
@@ -752,6 +887,7 @@
   {
    "target": "subwoofer",
    "expect": "rests",
+   "resolved": "subwoofer",
    "pass": true,
    "reason": null,
    "detail": {
@@ -763,6 +899,7 @@
   {
    "target": "footstool",
    "expect": "rests",
+   "resolved": "footstool",
    "pass": true,
    "reason": null,
    "detail": {
@@ -774,6 +911,7 @@
   {
    "target": "slipper_left",
    "expect": "rests",
+   "resolved": "slipper_left",
    "pass": true,
    "reason": null,
    "detail": {

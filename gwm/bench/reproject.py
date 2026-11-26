@@ -71,16 +71,17 @@ def reproject_view(held: dict, depth: np.ndarray, fallback: np.ndarray, neighbou
     colours = out[valid]
     colours[got] = acc[got] / wsum[got][:, None]
     out[valid] = colours
-    return np.clip(out, 0, 255).astype(np.uint8), float(got.sum() / (height * width))
+    # fidelity.load_rgb 读出来是 0 到 1 的浮点
+    return (np.clip(out, 0, 1) * 255).round().astype(np.uint8), float(got.sum() / (height * width))
 
 
 def colour_corrected(render: np.ndarray, photo: np.ndarray) -> np.ndarray:
-    """按通道拟合 photo ≈ a * render + b，看整体亮度和色调能补回多少。"""
+    """按通道拟合 photo ≈ a * render + b，看整体亮度和色调能补回多少。输入是 0 到 1 的浮点。"""
     out = np.empty_like(render, dtype=np.float64)
     for c in range(3):
         a, b = np.polyfit(render[..., c].ravel().astype(np.float64), photo[..., c].ravel().astype(np.float64), 1)
         out[..., c] = a * render[..., c] + b
-    return np.clip(out, 0, 255).astype(np.uint8)
+    return (np.clip(out, 0, 1) * 255).round().astype(np.uint8)
 
 
 def main(argv: list[str] | None = None) -> int:

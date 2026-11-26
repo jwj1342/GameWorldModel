@@ -4,7 +4,7 @@
 // 这里量的是动作之间的后果：推边几的时候上面的碗跟不跟着走，搬走的杯子后面还在不在原处，
 // 没碰过的东西有没有被带乱。这份清单同样不给智能体看。
 //
-//   node harness/bench_sequence.mjs --cand DIR --sequence FILE --out FILE [--settle] [--anchors FILE]
+//   node harness/bench_sequence.mjs --cand DIR --sequence FILE --out FILE [--settle] [--anchors FILE] [--match id|anchors]
 //
 // 物体按标签指，给了 --anchors 时按位置对到场景里的物体上，规则和 bench_interact.mjs 的 resolveTargets 一样。
 //
@@ -187,9 +187,9 @@ function judge(world, check, ctx) {
   throw new Error(`不认识的检查 ${JSON.stringify(check)}`);
 }
 
-export function runSequence(candidate, sequence, { settle = false, anchors = null } = {}) {
+export function runSequence(candidate, sequence, { settle = false, anchors = null, match = anchors ? 'anchors' : 'id' } = {}) {
   const world = buildWorld(candidate);
-  world.labels = resolveTargets(world.registry, labelsOf(sequence), anchors);
+  world.labels = resolveTargets(world.registry, labelsOf(sequence), match === 'anchors' ? anchors : null);
   if (settle) {
     for (const e of world.registry.filter(e => e.kind === 'object')) {
       world.physics.makeDynamic(e);
@@ -218,6 +218,7 @@ export function runSequence(candidate, sequence, { settle = false, anchors = nul
   return {
     scene: sequence.scene ?? null,
     condition: settle ? 'settled' : 'lazy',
+    match,
     resolved: Object.fromEntries([...world.labels].map(([label, r]) => [label, r.id])),
     summary: { passed, total: all.length, pass_rate: round(passed / all.length) },
     steps, final,
@@ -231,7 +232,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const candidate = await loadCandidate(args.cand);
   const sequence = JSON.parse(fs.readFileSync(args.sequence, 'utf8'));
   const anchors = args.anchors ? JSON.parse(fs.readFileSync(args.anchors, 'utf8')).anchors : null;
-  const report = runSequence(candidate, sequence, { settle: args.settle === 'true', anchors });
+  const report = runSequence(candidate, sequence, { settle: args.settle === 'true', anchors, match: args.match ?? (anchors ? 'anchors' : 'id') });
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, JSON.stringify(report, null, 1));
   const s = report.summary;
