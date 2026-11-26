@@ -1,0 +1,51 @@
+workspace out/bench/room/workspaces/20261126-021043-kimi-var1
+/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-021043-kimi-var1
+done in 2091.0 s, cost $12.383730200000006, turns 185
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/run.py", line 281, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/run.py", line 272, in main
+    cmd_eval(cfg, Path(args.cand), args.label, args.modes.split(","), skip_lpips=args.skip_lpips)
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/run.py", line 162, in cmd_eval
+    _node("bench_sequence.mjs", "--cand", str(cand_dir), "--sequence", str(REPO / cfg["sequence"]),
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/run.py", line 57, in _node
+    raise RuntimeError(f"{script} 失败：\n{(done.stderr or done.stdout)[-2000:]}")
+RuntimeError: bench_sequence.mjs 失败：
+file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:43
+  if (!entry) throw new Error(`场景里找不到 ${label}`);
+                    ^
+
+Error: 场景里找不到 piano_bench
+    at entryOf (file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:43:21)
+    at file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:175:21
+    at Array.map (<anonymous>)
+    at judge (file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:174:25)
+    at file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:207:45
+    at Array.flatMap (<anonymous>)
+    at runSequence (file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:207:32)
+    at file:///Users/jwj/Code/GameWorldModel/harness/bench_sequence.mjs:226:18
+
+Node.js v22.23.5
+
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-024534-kimi-var1/renders/flat in 935 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-024534-kimi-var1/renders/depth in 611 ms
+interaction checklist: 18/30 passed (0.6)
+  FAIL window expect=fixed reason=missing_object
+  FAIL sofa expect=movable reason=declared_static
+  FAIL coffee_table expect=movable reason=merged
+  FAIL bowl expect=movable reason=merged
+  FAIL carafe expect=movable reason=merged
+  FAIL wine_glass expect=movable reason=merged
+  FAIL piano_bench expect=movable reason=missing_object
+  FAIL coffee_table expect=rests reason=merged
+  FAIL bowl expect=rests reason=merged
+  FAIL carafe expect=rests reason=merged
+  FAIL wine_glass expect=rests reason=merged
+  FAIL piano_bench expect=rests reason=missing_object

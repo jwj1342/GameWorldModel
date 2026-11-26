@@ -1,0 +1,105 @@
+workspace out/bench/room/workspaces/20261126-033013-kimi-var3
+/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-033013-kimi-var3
+done in 1986.7 s, cost $9.772976399999997, turns 181
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-040320-kimi-var3/renders/flat in 974 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-040320-kimi-var3/renders/depth in 580 ms
+interaction checklist: 14/30 passed (0.467)
+  FAIL window expect=fixed reason=missing_object
+  FAIL door expect=hinge reason=missing_object
+  FAIL sofa expect=movable reason=declared_static
+  FAIL armchair expect=movable reason=merged
+  FAIL armchair_cushion expect=movable reason=merged
+  FAIL coffee_table expect=movable reason=merged
+  FAIL bowl expect=movable reason=merged
+  FAIL carafe expect=movable reason=merged
+  FAIL wine_glass expect=movable reason=merged
+  FAIL slipper_left expect=movable reason=declared_static
+  FAIL coffee_table expect=rests reason=merged
+  FAIL bowl expect=rests reason=merged
+  FAIL carafe expect=rests reason=merged
+  FAIL wine_glass expect=rests reason=merged
+  FAIL armchair_cushion expect=rests reason=merged
+  FAIL slipper_left expect=rests reason=declared_static
+sequence (lazy): 11/24 passed (0.458)
+  step 1 push coffee_table  woken=[carafe,bottle,wine_glass,bowl]
+    FAIL on bowl {"under":"floor","gap_m":0.004}
+    FAIL on carafe {"under":"floor","gap_m":0.004}
+    FAIL on wine_glass {"under":"floor","gap_m":0.004}
+  step 2 carry wine_glass  woken=[]
+  step 3 push armchair  woken=[armchair_cushion,keyboard,subwoofer]
+    FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  step 4 carry bowl  woken=[]
+    FAIL on bowl {"under":"footstool","gap_m":-0.041}
+    FAIL upright bowl {"tilt_deg":28.062}
+  step 5 turn door  woken=[]
+    FAIL turned door {"reason":"missing_object"}
+  step 6 push coffee_table  woken=[footstool]
+    FAIL followed coffee_table {"moved_m":[-0.165,0.067,-0.025],"error":0.352}
+    FAIL on carafe {"under":"sofa","gap_m":-0.158}
+    FAIL on wine_glass {"under":"sofa","gap_m":-0.158}
+    FAIL on bowl {"under":"sofa","gap_m":-0.158}
+  FINAL FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  FINAL FAIL stayed subwoofer {"shift_m":0.031}
+sequence (settled): 12/24 passed (0.5)
+  step 1 push coffee_table  woken=[]
+    FAIL on bowl {"under":"floor","gap_m":0.015}
+    FAIL on carafe {"under":"floor","gap_m":0.015}
+    FAIL on wine_glass {"under":"floor","gap_m":0.015}
+  step 2 carry wine_glass  woken=[]
+  step 3 push armchair  woken=[]
+    FAIL followed armchair {"moved_m":[0.015,0,0.082],"error":0.593}
+    FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  step 4 carry bowl  woken=[]
+    FAIL on bowl {"under":"rug_dark","gap_m":-0.005}
+    FAIL upright bowl {"tilt_deg":178.323}
+  step 5 turn door  woken=[]
+    FAIL turned door {"reason":"missing_object"}
+  step 6 push coffee_table  woken=[]
+    FAIL on carafe {"under":"rug_dark","gap_m":0}
+    FAIL on bowl {"under":"rug_dark","gap_m":0}
+  FINAL FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  FINAL FAIL stayed slipper_right {"shift_m":0.043}
+kimi-var3-flat: fidelity={'psnr': 13.0506, 'ssim': 0.4388, 'lpips': 0.6983} geometry={'coverage': 0.999, 'median_abs_m': 0.1654, 'within_10cm': 0.4418, 'median_rel': 0.0638} interact=14/30 sequence_lazy=11/24 sequence_settled=12/24
+run dir: /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-040320-kimi-var3
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/000/held_flat in 919 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/000/held_depth in 577 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/000/train_flat in 687 ms
+{"snapshot": "000", "code": {"lines": 326, "bytes": 20349}, "held_out": {"psnr": 12.7026, "ssim": 0.435, "lpips": 0.7041}, "train": {"psnr": 12.6163, "ssim": 0.4204, "lpips": 0.6823}, "geometry": {"coverage": 0.9997, "median_abs_m": 0.1603, "within_10cm": 0.4723, "median_rel": 0.059}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/001/held_flat in 945 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/001/held_depth in 586 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/001/train_flat in 712 ms
+{"snapshot": "001", "code": {"lines": 328, "bytes": 20412}, "held_out": {"psnr": 12.8089, "ssim": 0.4388, "lpips": 0.7013}, "train": {"psnr": 12.6076, "ssim": 0.4198, "lpips": 0.6814}, "geometry": {"coverage": 0.9994, "median_abs_m": 0.1616, "within_10cm": 0.4635, "median_rel": 0.0589}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/002/held_flat in 960 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/002/held_depth in 589 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/002/train_flat in 723 ms
+{"snapshot": "002", "code": {"lines": 331, "bytes": 20519}, "held_out": {"psnr": 13.0776, "ssim": 0.4417, "lpips": 0.6975}, "train": {"psnr": 12.9097, "ssim": 0.4237, "lpips": 0.6761}, "geometry": {"coverage": 0.9994, "median_abs_m": 0.1639, "within_10cm": 0.4571, "median_rel": 0.0644}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/003/held_flat in 955 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/003/held_depth in 589 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/003/train_flat in 721 ms
+{"snapshot": "003", "code": {"lines": 344, "bytes": 21674}, "held_out": {"psnr": 13.0365, "ssim": 0.439, "lpips": 0.6983}, "train": {"psnr": 12.8484, "ssim": 0.4201, "lpips": 0.6779}, "geometry": {"coverage": 0.999, "median_abs_m": 0.1677, "within_10cm": 0.4381, "median_rel": 0.0666}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/004/held_flat in 992 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/004/held_depth in 596 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/004/train_flat in 737 ms
+{"snapshot": "004", "code": {"lines": 346, "bytes": 21772}, "held_out": {"psnr": 12.9596, "ssim": 0.4366, "lpips": 0.6992}, "train": {"psnr": 12.7687, "ssim": 0.4177, "lpips": 0.6786}, "geometry": {"coverage": 0.999, "median_abs_m": 0.166, "within_10cm": 0.4398, "median_rel": 0.0647}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/005/held_flat in 993 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/005/held_depth in 596 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/005/train_flat in 739 ms
+{"snapshot": "005", "code": {"lines": 346, "bytes": 21775}, "held_out": {"psnr": 13.0318, "ssim": 0.4387, "lpips": 0.6983}, "train": {"psnr": 12.8345, "ssim": 0.42, "lpips": 0.6775}, "geometry": {"coverage": 0.999, "median_abs_m": 0.1655, "within_10cm": 0.4418, "median_rel": 0.0638}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/006/held_flat in 1017 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/006/held_depth in 600 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/006/train_flat in 745 ms
+{"snapshot": "006", "code": {"lines": 353, "bytes": 22286}, "held_out": {"psnr": 13.0506, "ssim": 0.4388, "lpips": 0.6983}, "train": {"psnr": 12.8608, "ssim": 0.4202, "lpips": 0.6776}, "geometry": {"coverage": 0.999, "median_abs_m": 0.1654, "within_10cm": 0.4418, "median_rel": 0.0638}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/final/held_flat in 994 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/final/held_depth in 608 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3/renders/final/train_flat in 741 ms
+{"snapshot": "final", "code": {"lines": 353, "bytes": 22286}, "held_out": {"psnr": 13.0506, "ssim": 0.4388, "lpips": 0.6983}, "train": {"psnr": 12.8608, "ssim": 0.4202, "lpips": 0.6776}, "geometry": {"coverage": 0.999, "median_abs_m": 0.1654, "within_10cm": 0.4418, "median_rel": 0.0638}}
+trajectory: /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-040331-kimi-var3
+DONE kimi-var3 -> docs/results/runs/room-kimi-var3

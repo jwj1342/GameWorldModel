@@ -1,0 +1,16 @@
+workspace out/bench/room/workspaces/20261126-082833-kimi-photos
+/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-082833-kimi-photos
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/agent.py", line 271, in <module>
+    if __name__ == "__main__":
+                 ^^^^^^
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/agent.py", line 264, in main
+    else:
+          
+  File "/Users/jwj/Code/GameWorldModel/gwm/bench/agent.py", line 231, in run
+    if done.returncode != 0:
+        ^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: claude -p 退出码 1：[claude-code:unrecognized_model] {"model":"kimi-for-coding","query_source":"sdk"}
+

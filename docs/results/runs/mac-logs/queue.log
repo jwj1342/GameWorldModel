@@ -1,0 +1,15 @@
+11-26 03:30:13 GATE OK kimi-var2
+11-26 03:30:13 START kimi-var3
+11-26 04:05:24 DONE kimi-var3
+11-26 04:05:24 START kimi-dense
+11-26 04:12:23 FAILED kimi-dense（见 out/bench/logs/kimi-dense.log）
+11-26 04:12:23 START kimi-photos
+11-26 04:12:52 STOPPED BY HAND Kimi 5 小时额度用完（429），kimi-photos 已中止
+11-26 04:19:10 WAIT 额度未恢复，每 15 分钟探一次
+11-26 08:03:54 QUOTA OK
+11-26 08:03:54 START kimi-dense（第 1 次）
+11-26 08:28:30 DONE kimi-dense
+11-26 08:28:33 START kimi-photos（第 1 次）
+11-26 09:07:52 QUOTA kimi-photos 中途撞上额度上限，等恢复后重跑
+11-26 09:23:55 WAIT 额度未恢复，每 15 分钟探一次
+11-26 10:31:59 STOPPED BY HAND 按用户指示停掉剩余队列（score、nomanifest、counter、dense2、photos 重跑），等隔离做好再跑
