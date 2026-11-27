@@ -4,12 +4,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=03:00:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 建 Python 环境并下载权重，可重复运行。默认只建感知环境 venv；加参数 --with-vllm 再建自托管 vLLM 用的 venv-vllm。
 # 依赖优先来自集群 wheelhouse（--no-index），缺的经代理从 PyPI 装。
 set -u
 REPO=/scratch/jwj/research/GameWorldModel
-mkdir -p /scratch/jwj/gwm/logs
+mkdir -p /scratch/jwj/research/GameWorldModel/work/logs
 source $REPO/scripts/setup_env.sh --no-venv
 echo "=== $(date) on $(hostname) ==="
 

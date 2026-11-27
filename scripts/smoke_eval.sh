@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=00:40:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 评测入口的端到端验证：给一批运行目录，出一张表
 set -u
 REPO=/scratch/jwj/research/GameWorldModel

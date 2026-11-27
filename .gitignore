@@ -24,3 +24,7 @@ venv
 
 # API keys (never commit)
 .secrets/
+
+# 作业产物与作业脚本（只在 Vulcan 上用，不进 git）
+/work/
+/jobs/

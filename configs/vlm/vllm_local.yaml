@@ -3,7 +3,7 @@ vlm:
   provider: openai_compat
   provider_kind: vllm
   endpoint: null
-  endpoint_file: ${SCRATCH}/gwm/vlm_endpoint.txt
+  endpoint_file: ${SCRATCH}/research/GameWorldModel/work/vlm_endpoint.txt
   api_key: EMPTY
   model: qwen3.5-27b-fp8
   temperature: 0.7

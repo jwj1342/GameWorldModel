@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:30:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # issue #4 的敏感性检查：把正确程序改坏，确认真值指标确实能测到
 set -u
 REPO=/scratch/jwj/research/GameWorldModel

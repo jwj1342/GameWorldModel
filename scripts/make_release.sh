@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=01:00:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 把跑出来的游戏和视频打包成可以发给别人的 zip。
 # 用法: sbatch scripts/make_release.sh  （在 scripts/release_runs.txt 里写「片段名 运行目录」，一行一个）
 set -eu

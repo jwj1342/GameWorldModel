@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:40:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 阶段「手写程序跑通」的冒烟：编译手写程序 → 三 pass 渲染 → 自动试玩 → 录制合成片段
 set -u
 REPO=/scratch/jwj/research/GameWorldModel
