@@ -1,0 +1,13 @@
+{
+  "scene": "bench_smoke",
+  "items": [
+    { "target": "floor", "expect": "fixed" },
+    { "target": "wall", "expect": "fixed" },
+    { "target": "table", "expect": "movable" },
+    { "target": "mug", "expect": "movable" },
+    { "target": "mug", "expect": "rests" },
+    { "target": "floating_box", "expect": "rests" },
+    { "target": "sofa", "expect": "movable" },
+    { "target": "lamp", "expect": "movable" }
+  ]
+}

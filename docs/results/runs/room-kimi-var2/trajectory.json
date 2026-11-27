@@ -1,0 +1,237 @@
+{
+ "label": "kimi-var2",
+ "workspace": "/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-025043-kimi-var2",
+ "scene": "room",
+ "rows": [
+  {
+   "snapshot": "000",
+   "code": {
+    "lines": 413,
+    "bytes": 23506
+   },
+   "held_out": {
+    "psnr": 12.3934,
+    "ssim": 0.4139,
+    "lpips": 0.7002
+   },
+   "train": {
+    "psnr": 12.3396,
+    "ssim": 0.4087,
+    "lpips": 0.6741
+   },
+   "geometry": {
+    "coverage": 0.9999,
+    "median_abs_m": 0.2025,
+    "within_10cm": 0.3745,
+    "median_rel": 0.0809
+   }
+  },
+  {
+   "snapshot": "001",
+   "code": {
+    "lines": 431,
+    "bytes": 24587
+   },
+   "held_out": {
+    "psnr": 12.4268,
+    "ssim": 0.4171,
+    "lpips": 0.6976
+   },
+   "train": {
+    "psnr": 12.3479,
+    "ssim": 0.4114,
+    "lpips": 0.6715
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2324,
+    "within_10cm": 0.3623,
+    "median_rel": 0.0888
+   }
+  },
+  {
+   "snapshot": "002",
+   "code": {
+    "lines": 431,
+    "bytes": 24587
+   },
+   "held_out": {
+    "psnr": 12.4268,
+    "ssim": 0.4171,
+    "lpips": 0.6976
+   },
+   "train": {
+    "psnr": 12.3479,
+    "ssim": 0.4114,
+    "lpips": 0.6715
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2324,
+    "within_10cm": 0.3623,
+    "median_rel": 0.0888
+   }
+  },
+  {
+   "snapshot": "003",
+   "code": {
+    "lines": 436,
+    "bytes": 24862
+   },
+   "held_out": {
+    "psnr": 12.2874,
+    "ssim": 0.4103,
+    "lpips": 0.7065
+   },
+   "train": {
+    "psnr": 12.2278,
+    "ssim": 0.4052,
+    "lpips": 0.68
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2769,
+    "within_10cm": 0.3224,
+    "median_rel": 0.1054
+   }
+  },
+  {
+   "snapshot": "004",
+   "code": {
+    "lines": 426,
+    "bytes": 24374
+   },
+   "held_out": {
+    "psnr": 12.3251,
+    "ssim": 0.4135,
+    "lpips": 0.7048
+   },
+   "train": {
+    "psnr": 12.2766,
+    "ssim": 0.4082,
+    "lpips": 0.6788
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2755,
+    "within_10cm": 0.3258,
+    "median_rel": 0.1048
+   }
+  },
+  {
+   "snapshot": "005",
+   "code": {
+    "lines": 426,
+    "bytes": 24374
+   },
+   "held_out": {
+    "psnr": 12.2949,
+    "ssim": 0.4135,
+    "lpips": 0.7045
+   },
+   "train": {
+    "psnr": 12.2644,
+    "ssim": 0.4095,
+    "lpips": 0.6787
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.259,
+    "within_10cm": 0.3328,
+    "median_rel": 0.1002
+   }
+  },
+  {
+   "snapshot": "006",
+   "code": {
+    "lines": 426,
+    "bytes": 24401
+   },
+   "held_out": {
+    "psnr": 12.2642,
+    "ssim": 0.4107,
+    "lpips": 0.706
+   },
+   "train": {
+    "psnr": 12.235,
+    "ssim": 0.4068,
+    "lpips": 0.6804
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2794,
+    "within_10cm": 0.3114,
+    "median_rel": 0.1061
+   }
+  },
+  {
+   "snapshot": "007",
+   "code": {
+    "lines": 427,
+    "bytes": 24493
+   },
+   "held_out": {
+    "psnr": 12.2634,
+    "ssim": 0.4106,
+    "lpips": 0.7059
+   },
+   "train": {
+    "psnr": 12.2317,
+    "ssim": 0.4065,
+    "lpips": 0.6803
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2806,
+    "within_10cm": 0.3125,
+    "median_rel": 0.1064
+   }
+  },
+  {
+   "snapshot": "008",
+   "code": {
+    "lines": 427,
+    "bytes": 24494
+   },
+   "held_out": {
+    "psnr": 12.2625,
+    "ssim": 0.4106,
+    "lpips": 0.7057
+   },
+   "train": {
+    "psnr": 12.2353,
+    "ssim": 0.4067,
+    "lpips": 0.68
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2795,
+    "within_10cm": 0.3121,
+    "median_rel": 0.1062
+   }
+  },
+  {
+   "snapshot": "final",
+   "code": {
+    "lines": 427,
+    "bytes": 24494
+   },
+   "held_out": {
+    "psnr": 12.2625,
+    "ssim": 0.4106,
+    "lpips": 0.7057
+   },
+   "train": {
+    "psnr": 12.2353,
+    "ssim": 0.4067,
+    "lpips": 0.68
+   },
+   "geometry": {
+    "coverage": 0.9998,
+    "median_abs_m": 0.2795,
+    "within_10cm": 0.3121,
+    "median_rel": 0.1062
+   }
+  }
+ ]
+}

@@ -1,0 +1,168 @@
+{
+ "label": "kimi-photos-cut",
+ "workspace": "/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-082833-kimi-photos",
+ "scene": "room",
+ "rows": [
+  {
+   "snapshot": "000",
+   "code": {
+    "lines": 359,
+    "bytes": 25123
+   },
+   "held_out": {
+    "psnr": 12.2938,
+    "ssim": 0.4124,
+    "lpips": 0.7298
+   },
+   "train": {
+    "psnr": 12.3455,
+    "ssim": 0.4043,
+    "lpips": 0.7031
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.3989,
+    "within_10cm": 0.3211,
+    "median_rel": 0.1549
+   }
+  },
+  {
+   "snapshot": "001",
+   "code": {
+    "lines": 363,
+    "bytes": 23934
+   },
+   "held_out": {
+    "psnr": 12.4155,
+    "ssim": 0.4175,
+    "lpips": 0.7308
+   },
+   "train": {
+    "psnr": 12.4595,
+    "ssim": 0.4064,
+    "lpips": 0.7034
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.3889,
+    "within_10cm": 0.322,
+    "median_rel": 0.1386
+   }
+  },
+  {
+   "snapshot": "002",
+   "code": {
+    "lines": 362,
+    "bytes": 23861
+   },
+   "held_out": {
+    "psnr": 12.6202,
+    "ssim": 0.4241,
+    "lpips": 0.7282
+   },
+   "train": {
+    "psnr": 12.635,
+    "ssim": 0.414,
+    "lpips": 0.7014
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.3438,
+    "within_10cm": 0.3332,
+    "median_rel": 0.1216
+   }
+  },
+  {
+   "snapshot": "003",
+   "code": {
+    "lines": 362,
+    "bytes": 23716
+   },
+   "held_out": {
+    "psnr": 12.7653,
+    "ssim": 0.43,
+    "lpips": 0.7056
+   },
+   "train": {
+    "psnr": 12.7915,
+    "ssim": 0.421,
+    "lpips": 0.6834
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.2634,
+    "within_10cm": 0.4227,
+    "median_rel": 0.0956
+   }
+  },
+  {
+   "snapshot": "004",
+   "code": {
+    "lines": 362,
+    "bytes": 23678
+   },
+   "held_out": {
+    "psnr": 13.0347,
+    "ssim": 0.4345,
+    "lpips": 0.7015
+   },
+   "train": {
+    "psnr": 13.0615,
+    "ssim": 0.4257,
+    "lpips": 0.6798
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.2609,
+    "within_10cm": 0.4275,
+    "median_rel": 0.0951
+   }
+  },
+  {
+   "snapshot": "005",
+   "code": {
+    "lines": 362,
+    "bytes": 23679
+   },
+   "held_out": {
+    "psnr": 13.0772,
+    "ssim": 0.4354,
+    "lpips": 0.7031
+   },
+   "train": {
+    "psnr": 13.1402,
+    "ssim": 0.427,
+    "lpips": 0.682
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.2622,
+    "within_10cm": 0.4244,
+    "median_rel": 0.0946
+   }
+  },
+  {
+   "snapshot": "final",
+   "code": {
+    "lines": 362,
+    "bytes": 23679
+   },
+   "held_out": {
+    "psnr": 13.0832,
+    "ssim": 0.4353,
+    "lpips": 0.703
+   },
+   "train": {
+    "psnr": 13.144,
+    "ssim": 0.4269,
+    "lpips": 0.6819
+   },
+   "geometry": {
+    "coverage": 1.0,
+    "median_abs_m": 0.2622,
+    "within_10cm": 0.4244,
+    "median_rel": 0.0946
+   }
+  }
+ ]
+}

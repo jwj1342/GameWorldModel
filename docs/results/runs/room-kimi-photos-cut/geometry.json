@@ -1,0 +1,323 @@
+{
+ "views": 39,
+ "mean": {
+  "coverage": 1.0,
+  "median_abs_m": 0.2622,
+  "within_10cm": 0.4244,
+  "median_rel": 0.0946
+ },
+ "per_view": [
+  {
+   "name": "DSCF4667.JPG",
+   "points": 3427,
+   "coverage": 1.0,
+   "median_abs_m": 0.1076,
+   "within_10cm": 0.4876,
+   "median_rel": 0.0456
+  },
+  {
+   "name": "DSCF4675.JPG",
+   "points": 5879,
+   "coverage": 1.0,
+   "median_abs_m": 0.0963,
+   "within_10cm": 0.5082,
+   "median_rel": 0.0414
+  },
+  {
+   "name": "DSCF4683.JPG",
+   "points": 4846,
+   "coverage": 1.0,
+   "median_abs_m": 0.1705,
+   "within_10cm": 0.4094,
+   "median_rel": 0.0614
+  },
+  {
+   "name": "DSCF4691.JPG",
+   "points": 4919,
+   "coverage": 1.0,
+   "median_abs_m": 0.0525,
+   "within_10cm": 0.6044,
+   "median_rel": 0.0238
+  },
+  {
+   "name": "DSCF4699.JPG",
+   "points": 3742,
+   "coverage": 1.0,
+   "median_abs_m": 0.6705,
+   "within_10cm": 0.2368,
+   "median_rel": 0.1588
+  },
+  {
+   "name": "DSCF4707.JPG",
+   "points": 3545,
+   "coverage": 1.0,
+   "median_abs_m": 0.7567,
+   "within_10cm": 0.3173,
+   "median_rel": 0.1923
+  },
+  {
+   "name": "DSCF4715.JPG",
+   "points": 6141,
+   "coverage": 1.0,
+   "median_abs_m": 0.0883,
+   "within_10cm": 0.5261,
+   "median_rel": 0.0357
+  },
+  {
+   "name": "DSCF4723.JPG",
+   "points": 4221,
+   "coverage": 1.0,
+   "median_abs_m": 0.6578,
+   "within_10cm": 0.2286,
+   "median_rel": 0.1581
+  },
+  {
+   "name": "DSCF4731.JPG",
+   "points": 2698,
+   "coverage": 1.0,
+   "median_abs_m": 0.4627,
+   "within_10cm": 0.3032,
+   "median_rel": 0.1079
+  },
+  {
+   "name": "DSCF4739.JPG",
+   "points": 3935,
+   "coverage": 1.0,
+   "median_abs_m": 0.2551,
+   "within_10cm": 0.3121,
+   "median_rel": 0.0905
+  },
+  {
+   "name": "DSCF4747.JPG",
+   "points": 5250,
+   "coverage": 1.0,
+   "median_abs_m": 0.109,
+   "within_10cm": 0.4853,
+   "median_rel": 0.0405
+  },
+  {
+   "name": "DSCF4755.JPG",
+   "points": 4043,
+   "coverage": 1.0,
+   "median_abs_m": 0.0641,
+   "within_10cm": 0.6102,
+   "median_rel": 0.025
+  },
+  {
+   "name": "DSCF4763.JPG",
+   "points": 3978,
+   "coverage": 1.0,
+   "median_abs_m": 0.1546,
+   "within_10cm": 0.4382,
+   "median_rel": 0.0501
+  },
+  {
+   "name": "DSCF4771.JPG",
+   "points": 3983,
+   "coverage": 1.0,
+   "median_abs_m": 0.2887,
+   "within_10cm": 0.3184,
+   "median_rel": 0.0799
+  },
+  {
+   "name": "DSCF4779.JPG",
+   "points": 4207,
+   "coverage": 1.0,
+   "median_abs_m": 0.348,
+   "within_10cm": 0.2966,
+   "median_rel": 0.0852
+  },
+  {
+   "name": "DSCF4787.JPG",
+   "points": 4823,
+   "coverage": 1.0,
+   "median_abs_m": 0.1066,
+   "within_10cm": 0.4891,
+   "median_rel": 0.038
+  },
+  {
+   "name": "DSCF4795.JPG",
+   "points": 3874,
+   "coverage": 1.0,
+   "median_abs_m": 0.2533,
+   "within_10cm": 0.3451,
+   "median_rel": 0.0804
+  },
+  {
+   "name": "DSCF4803.JPG",
+   "points": 2334,
+   "coverage": 1.0,
+   "median_abs_m": 0.1221,
+   "within_10cm": 0.4593,
+   "median_rel": 0.0384
+  },
+  {
+   "name": "DSCF4811.JPG",
+   "points": 3469,
+   "coverage": 1.0,
+   "median_abs_m": 0.2019,
+   "within_10cm": 0.3229,
+   "median_rel": 0.071
+  },
+  {
+   "name": "DSCF4819.JPG",
+   "points": 3021,
+   "coverage": 1.0,
+   "median_abs_m": 0.2116,
+   "within_10cm": 0.3568,
+   "median_rel": 0.0633
+  },
+  {
+   "name": "DSCF4827.JPG",
+   "points": 3975,
+   "coverage": 1.0,
+   "median_abs_m": 2.0499,
+   "within_10cm": 0.0048,
+   "median_rel": 0.9228
+  },
+  {
+   "name": "DSCF4835.JPG",
+   "points": 1111,
+   "coverage": 1.0,
+   "median_abs_m": 0.2051,
+   "within_10cm": 0.3546,
+   "median_rel": 0.0648
+  },
+  {
+   "name": "DSCF4843.JPG",
+   "points": 4914,
+   "coverage": 1.0,
+   "median_abs_m": 0.0934,
+   "within_10cm": 0.5059,
+   "median_rel": 0.0341
+  },
+  {
+   "name": "DSCF4851.JPG",
+   "points": 3616,
+   "coverage": 1.0,
+   "median_abs_m": 0.2903,
+   "within_10cm": 0.3982,
+   "median_rel": 0.0771
+  },
+  {
+   "name": "DSCF4859.JPG",
+   "points": 2092,
+   "coverage": 1.0,
+   "median_abs_m": 0.0442,
+   "within_10cm": 0.7677,
+   "median_rel": 0.0195
+  },
+  {
+   "name": "DSCF4867.JPG",
+   "points": 3491,
+   "coverage": 1.0,
+   "median_abs_m": 0.2036,
+   "within_10cm": 0.3334,
+   "median_rel": 0.0732
+  },
+  {
+   "name": "DSCF4875.JPG",
+   "points": 1171,
+   "coverage": 1.0,
+   "median_abs_m": 0.1248,
+   "within_10cm": 0.4108,
+   "median_rel": 0.0433
+  },
+  {
+   "name": "DSCF4883.JPG",
+   "points": 1499,
+   "coverage": 1.0,
+   "median_abs_m": 0.1032,
+   "within_10cm": 0.4937,
+   "median_rel": 0.0474
+  },
+  {
+   "name": "DSCF4891.JPG",
+   "points": 1158,
+   "coverage": 1.0,
+   "median_abs_m": 0.1745,
+   "within_10cm": 0.3325,
+   "median_rel": 0.1003
+  },
+  {
+   "name": "DSCF4899.JPG",
+   "points": 1111,
+   "coverage": 1.0,
+   "median_abs_m": 0.2252,
+   "within_10cm": 0.1908,
+   "median_rel": 0.1158
+  },
+  {
+   "name": "DSCF4907.JPG",
+   "points": 678,
+   "coverage": 1.0,
+   "median_abs_m": 0.1345,
+   "within_10cm": 0.4558,
+   "median_rel": 0.0699
+  },
+  {
+   "name": "DSCF4915.JPG",
+   "points": 2999,
+   "coverage": 1.0,
+   "median_abs_m": 0.0366,
+   "within_10cm": 0.9146,
+   "median_rel": 0.0217
+  },
+  {
+   "name": "DSCF4923.JPG",
+   "points": 3508,
+   "coverage": 1.0,
+   "median_abs_m": 0.4479,
+   "within_10cm": 0.2135,
+   "median_rel": 0.1239
+  },
+  {
+   "name": "DSCF4931.JPG",
+   "points": 899,
+   "coverage": 1.0,
+   "median_abs_m": 0.1102,
+   "within_10cm": 0.4739,
+   "median_rel": 0.0567
+  },
+  {
+   "name": "DSCF4939.JPG",
+   "points": 1161,
+   "coverage": 1.0,
+   "median_abs_m": 0.05,
+   "within_10cm": 0.8725,
+   "median_rel": 0.0271
+  },
+  {
+   "name": "DSCF4947.JPG",
+   "points": 1919,
+   "coverage": 1.0,
+   "median_abs_m": 0.0649,
+   "within_10cm": 0.6107,
+   "median_rel": 0.0257
+  },
+  {
+   "name": "DSCF4955.JPG",
+   "points": 563,
+   "coverage": 1.0,
+   "median_abs_m": 0.3748,
+   "within_10cm": 0.4352,
+   "median_rel": 0.2549
+  },
+  {
+   "name": "DSCF4963.JPG",
+   "points": 1122,
+   "coverage": 1.0,
+   "median_abs_m": 0.1885,
+   "within_10cm": 0.2932,
+   "median_rel": 0.0656
+  },
+  {
+   "name": "DSCF4971.JPG",
+   "points": 1338,
+   "coverage": 1.0,
+   "median_abs_m": 0.1253,
+   "within_10cm": 0.4357,
+   "median_rel": 0.0591
+  }
+ ]
+}
