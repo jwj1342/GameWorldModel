@@ -1,0 +1,258 @@
+﻿name,title,year,arxiv,cited_in,readme_section,bibkey,match,pdf,url
+3D-GPT,3D-GPT: Procedural 3D Modeling with Large Language Models,2023,2310.12945,readme,1 以程序为场景表征,,名字自动匹配（待核）,2310.12945-3d-gpt.pdf,https://arxiv.org/abs/2310.12945
+Holodeck,Holodeck: Language Guided Generation of 3D Embodied AI Environments,2023,2312.09067,readme;survey,1 以程序为场景表征,,原有编号,2312.09067-holodeck.pdf,https://arxiv.org/abs/2312.09067
+IG-LLM,,2024,,readme,1 以程序为场景表征,,未找到,,
+LayoutGPT,LayoutGPT: Compositional Visual Planning and Generation with Large Language Models,2023,2305.15393,readme,1 以程序为场景表征,,名字自动匹配（待核）,2305.15393-layoutgpt.pdf,https://arxiv.org/abs/2305.15393
+Learning to Infer and Execute 3D Shape Programs,Learning to Infer and Execute 3D Shape Programs,2019,1901.02875,readme,1 以程序为场景表征,,名字自动匹配（待核）,1901.02875-learning-to-infer-and-execute-3d-shape-p.pdf,https://arxiv.org/abs/1901.02875
+SceneCode,SceneCode: Executable World Programs for Editable Indoor Scenes with Articulated Objects,2026,2605.19587,readme,1 以程序为场景表征,,名字自动匹配（待核）,2605.19587-scenecode.pdf,https://arxiv.org/abs/2605.19587
+SceneCraft,,2024,,readme,1 以程序为场景表征,,多个候选,,
+SceneScript,SceneScript: Reconstructing Scenes With An Autoregressive Structured Language Model,2024,2403.13064,paper;readme,1 以程序为场景表征,avetisyan2024scenescript,标题精确匹配,2403.13064-scenescript.pdf,https://arxiv.org/abs/2403.13064
+Scenix,Scenix: Sparse-View 3D Scene Reconstruction via Executable Scene Programs,2026,2608.07012,readme;survey,1 以程序为场景表征,,原有编号,2608.07012-scenix.pdf,https://arxiv.org/abs/2608.07012
+SEIG / Thinking in Blender,Thinking in Blender: Staged Executable Inverse Graphics with Vision-Language Models,2026,2606.02580,agent-survey;readme;slides;survey,1 以程序为场景表征,,原有编号,2606.02580-seig-thinking-in-blender.pdf,https://arxiv.org/abs/2606.02580
+ShapeAssembly,ShapeAssembly: Learning to Generate Programs for 3D Shape Structure Synthesis,2020,2009.08026,readme,1 以程序为场景表征,,名字自动匹配（待核）,2009.08026-shapeassembly.pdf,https://arxiv.org/abs/2009.08026
+SimWorlds,SimWorlds: A Multi-Agent System for Dynamic 3D Scene Creation,2026,2607.01766,readme,1 以程序为场景表征,,名字自动匹配（待核）,2607.01766-simworlds.pdf,https://arxiv.org/abs/2607.01766
+SpatialGrammar,SpatialGrammar: A Domain-Specific Language for LLM-Based 3D Indoor Scene Generation,2026,2604.27555,readme;survey,1 以程序为场景表征,,原有编号,2604.27555-spatialgrammar.pdf,https://arxiv.org/abs/2604.27555
+The Scene Language,"The Scene Language: Representing Scenes with Programs, Words, and Embeddings",2024,2410.16770,paper;readme;slides,1 以程序为场景表征,zhang2025scenelanguage,原有编号,2410.16770-the-scene-language.pdf,https://arxiv.org/abs/2410.16770
+ChronoAgentic,ChronoAgentic: A Code-based Multi-Agent World Simulator for Physically Grounded Simulation Construction,2026,2605.14398,readme;storyline;survey,2 代码式世界模型与程序合成,,原有编号,2605.14398-chronoagentic.pdf,https://arxiv.org/abs/2605.14398
+Code World Model,Code World Model: Coding Agent as World Brain,2026,2608.25927,paper;readme;slides;storyline,2 代码式世界模型与程序合成,codeworldmodel,原有编号,2608.25927-code-world-model.pdf,https://arxiv.org/abs/2608.25927
+Code World Models for General Game Playing,Code World Models for General Game Playing,2025,2510.04542,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2510.04542-code-world-models-for-general-game-playi.pdf,https://arxiv.org/abs/2510.04542
+FAE,,2025,,readme,2 代码式世界模型与程序合成,,未找到,,
+From Pixels to States,From Pixels to States: Rethinking Interactive World Models as Game Engines,2026,2607.14076,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2607.14076-from-pixels-to-states.pdf,https://arxiv.org/abs/2607.14076
+Game Engine Learning from Video,,2017,,readme,2 代码式世界模型与程序合成,,未找到,,
+GAVEL,GAVEL: Generating Games Via Evolution and Language Models,2024,2407.09388,readme;survey,2 代码式世界模型与程序合成,,原有编号,2407.09388-gavel.pdf,https://arxiv.org/abs/2407.09388
+MarioGPT,MarioGPT: Open-Ended Text2Level Generation through Large Language Models,2023,2302.05981,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2302.05981-mariogpt.pdf,https://arxiv.org/abs/2302.05981
+Mechanic Maker,Mechanic Maker: Accessible Game Development Via Symbolic Learning Program Synthesis,2024,2410.01096,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2410.01096-mechanic-maker.pdf,https://arxiv.org/abs/2410.01096
+PoE-World,PoE-World: Compositional World Modeling with Products of Programmatic Experts,2025,2505.10819,readme;survey,2 代码式世界模型与程序合成,,原有编号,2505.10819-poe-world.pdf,https://arxiv.org/abs/2505.10819
+SimuScene,SimuScene: Simulation-Ready Compositional 3D Scene Reconstruction from a Single Image,2026,2606.03994,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2606.03994-simuscene.pdf,https://arxiv.org/abs/2606.03994
+VDAWorld,VDAWorld: World Modelling via VLM-Directed Abstraction and Simulation,2025,2512.11061,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2512.11061-vdaworld.pdf,https://arxiv.org/abs/2512.11061
+Word2World,Word2World: Generating Stories and Worlds through Large Language Models,2024,2405.06686,readme,2 代码式世界模型与程序合成,,名字自动匹配（待核）,2405.06686-word2world.pdf,https://arxiv.org/abs/2405.06686
+WorldCoder,,2024,,readme,2 代码式世界模型与程序合成,,未找到,,
+Game2World Engine,Game2World Engine: Unlocking In-the-Wild Gameplay Videos for World Model Training,2026,2608.24680,readme;survey,3 视频到可执行或可仿真,,原有编号,2608.24680-game2world-engine.pdf,https://arxiv.org/abs/2608.24680
+HoloScene,HoloScene: Simulation-Ready Interactive 3D Worlds from a Single Video,2025,2510.05560,readme;survey,3 视频到可执行或可仿真,,原有编号,2510.05560-holoscene.pdf,https://arxiv.org/abs/2510.05560
+PhysGen,,2024,,readme,3 视频到可执行或可仿真,,多个候选,,
+Vid2Sim,,2025,,readme,3 视频到可执行或可仿真,,多个候选,,
+Video2Game,"Video2Game: Real-time, Interactive, Realistic and Browser-Compatible Environment from a Single Video",2024,2404.09833,readme;survey,3 视频到可执行或可仿真,,原有编号,2404.09833-video2game.pdf,https://arxiv.org/abs/2404.09833
+GameFactory,GameFactory: Creating New Games with Generative Interactive Videos,2025,2501.08325,readme,4 视频式世界模型,,名字自动匹配（待核）,2501.08325-gamefactory.pdf,https://arxiv.org/abs/2501.08325
+GameGen-X,GameGen-X: Interactive Open-world Game Video Generation,2024,2411.00769,readme,4 视频式世界模型,,名字自动匹配（待核）,2411.00769-gamegen-x.pdf,https://arxiv.org/abs/2411.00769
+GameNGen,Diffusion Models Are Real-Time Game Engines,2024,2408.14837,paper;readme,4 视频式世界模型,valevski2024gamengen,标题精确匹配,2408.14837-gamengen.pdf,https://arxiv.org/abs/2408.14837
+Genie 2 / Genie 3 / Project Genie,,2025,,readme,4 视频式世界模型,,产品或网页,,
+Hunyuan-GameCraft,Hunyuan-GameCraft: High-dynamic Interactive Game Video Generation with Hybrid History Condition,2025,2506.17201,readme,4 视频式世界模型,,名字自动匹配（待核）,2506.17201-hunyuan-gamecraft.pdf,https://arxiv.org/abs/2506.17201
+Hunyuan-GameCraft-2,Hunyuan-GameCraft-2: Instruction-following Interactive Game World Model,2025,2511.23429,readme,4 视频式世界模型,,名字自动匹配（待核）,2511.23429-hunyuan-gamecraft-2.pdf,https://arxiv.org/abs/2511.23429
+HY-WorldPlay,,2025,,readme,4 视频式世界模型,,未找到,,
+Matrix-Game 2.0,"Matrix-game 2.0: An open-source, real-time, and streaming interactive world model",2025,2508.13009,readme,4 视频式世界模型,,名字自动匹配（待核）,2508.13009-matrix-game-2-0.pdf,https://arxiv.org/abs/2508.13009
+Matrix-Game 3.0,Matrix-Game 3.0: Real-Time and Streaming Interactive World Model with Long-Horizon Memory,2026,2604.08995,readme;storyline,4 视频式世界模型,,原有编号,2604.08995-matrix-game-3-0.pdf,https://arxiv.org/abs/2604.08995
+Oasis,,2024,,readme,4 视频式世界模型,,产品或网页,,
+Odyssey,,,,readme,4 视频式世界模型,,产品或网页,,
+PlayGen,,2024,,readme,4 视频式世界模型,,未找到,,
+Runway GWM-1,,,,readme,4 视频式世界模型,,产品或网页,,
+WHAM / Muse,"",2025,"",readme,4 视频式世界模型,,"未找到（自动匹配认错了缩写，已清掉）","",""
+Yan,Yan: Foundational Interactive Video Generation,2025,2508.08601,readme,4 视频式世界模型,,名字自动匹配（待核）,2508.08601-yan.pdf,https://arxiv.org/abs/2508.08601
+HunyuanWorld 1.0,"HunyuanWorld 1.0: Generating Immersive, Explorable, and Interactive 3D Worlds from Words or Pixels",2025,2507.21809,readme,5 显式三维世界生成,,名字自动匹配（待核）,2507.21809-hunyuanworld-1-0.pdf,https://arxiv.org/abs/2507.21809
+HunyuanWorld-Voyager / Voyager,,2025,,readme,5 显式三维世界生成,,未找到,,
+HY-World 2.0,"HY-World 2.0: A Multi-Modal World Model for Reconstructing, Generating, and Simulating 3D Worlds",2026,2604.14268,readme,5 显式三维世界生成,,名字自动匹配（待核）,2604.14268-hy-world-2-0.pdf,https://arxiv.org/abs/2604.14268
+Marble / Spark,,,,readme,5 显式三维世界生成,,产品或网页,,
+WorldGen,WorldGen: From Text to Traversable and Interactive 3D Worlds,2025,2511.16825,readme;survey,5 显式三维世界生成,,原有编号,2511.16825-worldgen.pdf,https://arxiv.org/abs/2511.16825
+AutoUE,AutoUE: Automated Generation of 3D Games in Unreal Engine via Multi-Agent Systems,2026,2603.07106,readme,6 智能体做游戏与基准,,名字自动匹配（待核）,2603.07106-autoue.pdf,https://arxiv.org/abs/2603.07106
+AVR-Agent,,2025,,readme,6 智能体做游戏与基准,,未找到,,
+ChatDev,ChatDev: Communicative Agents for Software Development,2023,2307.07924,readme,6 智能体做游戏与基准,,名字自动匹配（待核）,2307.07924-chatdev.pdf,https://arxiv.org/abs/2307.07924
+GameCraft-Bench,GameCraft-Bench: Can Agents Build Playable Games End-to-End in a Real Game Engine?,2026,2606.17861,readme;survey,6 智能体做游戏与基准,,原有编号,2606.17861-gamecraft-bench.pdf,https://arxiv.org/abs/2606.17861
+GameDevBench,GameDevBench: Evaluating Agentic Capabilities Through Game Development,2026,2602.11103,readme;survey,6 智能体做游戏与基准,,原有编号,2602.11103-gamedevbench.pdf,https://arxiv.org/abs/2602.11103
+GameGPT,GameGPT: Multi-agent Collaborative Framework for Game Development,2023,2310.08067,readme,6 智能体做游戏与基准,,名字自动匹配（待核）,2310.08067-gamegpt.pdf,https://arxiv.org/abs/2310.08067
+GameXpert-Bench,GameXpert-Bench: How Far Are Coding Agents from Expert Game Development?,2026,2608.21833,readme;storyline;survey,6 智能体做游戏与基准,,原有编号,2608.21833-gamexpert-bench.pdf,https://arxiv.org/abs/2608.21833
+Knowledge-Conditioned Single-Pass Unity,,2026,,readme,6 智能体做游戏与基准,,未找到,,
+Mage,,2026,,readme,6 智能体做游戏与基准,,多个候选,,
+MetaGPT,,2023,,readme,6 智能体做游戏与基准,,多个候选,,
+OpenGame / GameCoder,OpenGame: Open Agentic Coding for Games,2026,2604.18394,readme;survey,6 智能体做游戏与基准,,原有编号,2604.18394-opengame-gamecoder.pdf,https://arxiv.org/abs/2604.18394
+OpenGame-Bench,,2026,,readme,6 智能体做游戏与基准,,未找到,,
+Play2Code,,2026,,readme,6 智能体做游戏与基准,,未找到,,
+PlayCoder,PlayCoder: Making LLM-Generated GUI Code Playable,2026,2604.19742,readme;survey,6 智能体做游戏与基准,,原有编号,2604.19742-playcoder.pdf,https://arxiv.org/abs/2604.19742
+Sketch2Scene,Sketch2Scene: Automatic Generation of Interactive 3D Game Scenes from User's Casual Sketches,2024,2408.04567,readme;survey,6 智能体做游戏与基准,,原有编号,2408.04567-sketch2scene.pdf,https://arxiv.org/abs/2408.04567
+SPRITE,SPRITE: From Static Mockups to Engine-Ready Game UI,2026,2604.18591,readme,6 智能体做游戏与基准,,名字自动匹配（待核）,2604.18591-sprite.pdf,https://arxiv.org/abs/2604.18591
+WorldCoder-Bench,WorldCoder-Bench: Benchmarking Physically Grounded 3D World Synthesis,2026,2606.01869,readme,6 智能体做游戏与基准,,名字自动匹配（待核）,2606.01869-worldcoder-bench.pdf,https://arxiv.org/abs/2606.01869
+AgentCoder,AgentCoder: Multi-Agent-based Code Generation with Iterative Testing and Optimisation,2023,2312.13010,readme;survey,7 多智能体有效性,,原有编号,2312.13010-agentcoder.pdf,https://arxiv.org/abs/2312.13010
+Anthropic 多智能体研究系统博文,,,,readme,7 多智能体有效性,,产品或网页,,
+How Generation Architecture Shapes Code Complexity,,2026,,readme,7 多智能体有效性,,未找到,,
+SceneConductor,SceneConductor: 3D Scene Generation from a Single Image with Multi-Agent Orchestration,2026,2606.08402,readme;survey,7 多智能体有效性,,原有编号,2606.08402-sceneconductor.pdf,https://arxiv.org/abs/2606.08402
+VULCAN,,2025,,readme,7 多智能体有效性,,多个候选,,
+Why Do Multi-Agent LLM Systems Fail,Why Do Multi-Agent LLM Systems Fail?,2025,2503.13657,readme;survey,7 多智能体有效性,,原有编号,2503.13657-why-do-multi-agent-llm-systems-fail.pdf,https://arxiv.org/abs/2503.13657
+3DCodeBench,3DCodeBench: Benchmarking Agentic Procedural 3D Modeling Via Code,2026,2606.01057,readme;slides;survey,8 视觉反馈与渲染奖励,,原有编号,2606.01057-3dcodebench.pdf,https://arxiv.org/abs/2606.01057
+Agentic 3D Scene Generation with Spatially Contextualized VLMs,Agentic 3D Scene Generation with Spatially Contextualized VLMs,2025,2505.20129,readme;survey,8 视觉反馈与渲染奖励,,原有编号,2505.20129-agentic-3d-scene-generation-with-spatial.pdf,https://arxiv.org/abs/2505.20129
+BlenderAlchemy,BlenderAlchemy: Editing 3D Graphics with Vision-Language Models,2024,2404.17672,readme;survey,8 视觉反馈与渲染奖励,,原有编号,2404.17672-blenderalchemy.pdf,https://arxiv.org/abs/2404.17672
+BlenderGym,BlenderGym: Benchmarking Foundational Model Systems for Graphics Editing,2025,2504.01786,readme;survey,8 视觉反馈与渲染奖励,,原有编号,2504.01786-blendergym.pdf,https://arxiv.org/abs/2504.01786
+CAD-RL,,2025,,readme,8 视觉反馈与渲染奖励,,未找到,,
+cadrille,cadrille: Multi-modal CAD Reconstruction with Reinforcement Learning,2025,2505.22914,readme,8 视觉反馈与渲染奖励,,名字自动匹配（待核）,2505.22914-cadrille.pdf,https://arxiv.org/abs/2505.22914
+ChartMimic,ChartMimic: Evaluating LMM's Cross-Modal Reasoning Capability via Chart-to-Code Generation,2024,2406.09961,readme,8 视觉反馈与渲染奖励,,名字自动匹配（待核）,2406.09961-chartmimic.pdf,https://arxiv.org/abs/2406.09961
+Design2Code,Design2Code: Benchmarking Multimodal Code Generation for Automated Front-End Engineering,2024,2403.03163,readme,8 视觉反馈与渲染奖励,,名字自动匹配（待核）,2403.03163-design2code.pdf,https://arxiv.org/abs/2403.03163
+RLRF,"","2025","",readme,8 视觉反馈与渲染奖励,,"未找到（自动匹配认错了缩写，已清掉）","",""
+SceneAssistant,SceneAssistant: A Visual Feedback Agent for Open-Vocabulary 3D Scene Generation,2026,2603.12238,readme,8 视觉反馈与渲染奖励,,名字自动匹配（待核）,2603.12238-sceneassistant.pdf,https://arxiv.org/abs/2603.12238
+SceneWeaver,SceneWeaver: All-in-One 3D Scene Synthesis with an Extensible and Self-Reflective Agent,2025,2509.20414,readme,8 视觉反馈与渲染奖励,,名字自动匹配（待核）,2509.20414-sceneweaver.pdf,https://arxiv.org/abs/2509.20414
+UI2Code,,2025,,readme,8 视觉反馈与渲染奖励,,未找到,,
+VF-Coder,,2026,,readme,8 视觉反馈与渲染奖励,,未找到,,
+Visual-SDPO,,2026,,readme,8 视觉反馈与渲染奖励,,未找到,,
+4D Gaussian Splatting for Real-Time Dynamic Scene Rendering,4D Gaussian Splatting for Real-Time Dynamic Scene Rendering,2023,2310.08528,readme,9 感知与重建,,名字自动匹配（待核）,2310.08528-4d-gaussian-splatting-for-real-time-dyna.pdf,https://arxiv.org/abs/2310.08528
+ArtGS,,2025,,readme,9 感知与重建,,多个候选,,
+Articulate-Anything,Articulate-Anything: Automatic Modeling of Articulated Objects via a Vision-Language Foundation Model,2024,2410.13882,paper;readme,9 感知与重建,le2025articulate,标题精确匹配,2410.13882-articulate-anything.pdf,https://arxiv.org/abs/2410.13882
+Articulation in Prime,Articulation in Prime: Primitive-Based Articulated Object Understanding from a Single Casual Video,2026,2605.18645,readme,9 感知与重建,,名字自动匹配（待核）,2605.18645-articulation-in-prime.pdf,https://arxiv.org/abs/2605.18645
+ArtLLM,ArtLLM: Generating Articulated Assets via 3D LLM,2026,2603.01142,readme,9 感知与重建,,名字自动匹配（待核）,2603.01142-artllm.pdf,https://arxiv.org/abs/2603.01142
+BootsTAPIR,,2024,,readme,9 感知与重建,,未找到,,
+CoTracker3,CoTracker3: Simpler and Better Point Tracking by Pseudo-Labelling Real Videos,2024,2410.11831,readme,9 感知与重建,,名字自动匹配（待核）,2410.11831-cotracker3.pdf,https://arxiv.org/abs/2410.11831
+CUT3R,,2025,,readme,9 感知与重建,,未找到,,
+Cutie,,2023,,readme,9 感知与重建,,未找到,,
+Depth Anything 3,Depth Anything 3: Recovering the Visual Space from Any Views,2025,2511.10647,readme,9 感知与重建,,名字自动匹配（待核）,2511.10647-depth-anything-3.pdf,https://arxiv.org/abs/2511.10647
+DEVA,,2023,,readme,9 感知与重建,,未找到,,
+Dynamic 3D Gaussians,Dynamic 3D Gaussians: Tracking by Persistent Dynamic View Synthesis,2023,2308.09713,readme,9 感知与重建,,名字自动匹配（待核）,2308.09713-dynamic-3d-gaussians.pdf,https://arxiv.org/abs/2308.09713
+Easi3R,Easi3R: Estimating Disentangled Motion from DUSt3R Without Training,2025,2503.24391,readme,9 感知与重建,,名字自动匹配（待核）,2503.24391-easi3r.pdf,https://arxiv.org/abs/2503.24391
+Florence-2,Florence-2: Advancing a Unified Representation for a Variety of Vision Tasks,2023,2311.06242,readme,9 感知与重建,,名字自动匹配（待核）,2311.06242-florence-2.pdf,https://arxiv.org/abs/2311.06242
+Free4D,Free4D: Tuning-free 4D Scene Generation with Spatial-Temporal Consistency,2025,2503.20785,readme,9 感知与重建,,名字自动匹配（待核）,2503.20785-free4d.pdf,https://arxiv.org/abs/2503.20785
+GEN3C,GEN3C: 3D-Informed World-Consistent Video Generation with Precise Camera Control,2025,2503.03751,readme,9 感知与重建,,名字自动匹配（待核）,2503.03751-gen3c.pdf,https://arxiv.org/abs/2503.03751
+Geo4D,Geo4D: Leveraging Video Generators for Geometric 4D Scene Reconstruction,2025,2504.07961,readme,9 感知与重建,,名字自动匹配（待核）,2504.07961-geo4d.pdf,https://arxiv.org/abs/2504.07961
+Grounded-SAM-2,,,,readme,9 感知与重建,,产品或网页,,
+Grounding DINO 1.5,"Grounding DINO 1.5: Advance the ""Edge"" of Open-Set Object Detection",2024,2405.10300,readme,9 感知与重建,,名字自动匹配（待核）,2405.10300-grounding-dino-1-5.pdf,https://arxiv.org/abs/2405.10300
+MapAnything,,2025,,readme,9 感知与重建,,多个候选,,
+MegaSaM,"MegaSaM: Accurate, Fast, and Robust Structure and Motion from Casual Dynamic Videos",2024,2412.04463,readme,9 感知与重建,,名字自动匹配（待核）,2412.04463-megasam.pdf,https://arxiv.org/abs/2412.04463
+Mesh4D,Mesh4D: 4D Mesh Reconstruction and Tracking from Monocular Video,2026,2601.05251,readme;survey,9 感知与重建,,原有编号,2601.05251-mesh4d.pdf,https://arxiv.org/abs/2601.05251
+MonoArt,MonoArt: Progressive Structural Reasoning for Monocular Articulated 3D Reconstruction,2026,2603.19231,readme,9 感知与重建,,名字自动匹配（待核）,2603.19231-monoart.pdf,https://arxiv.org/abs/2603.19231
+MonST3R,MonST3R: A Simple Approach for Estimating Geometry in the Presence of Motion,2024,2410.03825,readme,9 感知与重建,,名字自动匹配（待核）,2410.03825-monst3r.pdf,https://arxiv.org/abs/2410.03825
+MoRe,,2026,,readme,9 感知与重建,,未找到,,
+MoSca,MoSca: Dynamic Gaussian Fusion from Casual Videos via 4D Motion Scaffolds,2024,2405.17421,readme,9 感知与重建,,名字自动匹配（待核）,2405.17421-mosca.pdf,https://arxiv.org/abs/2405.17421
+OWLv2,,2023,,readme,9 感知与重建,,未找到,,
+PAct,,,,readme,9 感知与重建,,多个候选,,
+Particulate,Particulate: Feed-Forward 3D Object Articulation,2025,2512.11798,readme;survey,9 感知与重建,,原有编号,2512.11798-particulate.pdf,https://arxiv.org/abs/2512.11798
+Pi3 / π^3,,2025,,readme,9 感知与重建,,未找到,,
+REACTO,REACTO: Reconstructing Articulated Objects from a Single Video,2024,2404.11151,readme,9 感知与重建,,名字自动匹配（待核）,2404.11151-reacto.pdf,https://arxiv.org/abs/2404.11151
+Real2Code,Real2Code: Reconstruct Articulated Objects via Code Generation,2024,2406.08474,paper;readme,9 感知与重建,mandi2025real2code,标题精确匹配,2406.08474-real2code.pdf,https://arxiv.org/abs/2406.08474
+SAM 2,SAM 2: Segment Anything in Images and Videos,2024,2408.00714,readme,9 感知与重建,,名字自动匹配（待核）,2408.00714-sam-2.pdf,https://arxiv.org/abs/2408.00714
+SAM 3,SAM 3: Segment Anything with Concepts,2025,2511.16719,readme,9 感知与重建,,名字自动匹配（待核）,2511.16719-sam-3.pdf,https://arxiv.org/abs/2511.16719
+SAM 3.1,,2026,,readme,9 感知与重建,,未找到,,
+Shape of Motion,Shape of Motion: 4D Reconstruction from a Single Video,2024,2407.13764,readme,9 感知与重建,,名字自动匹配（待核）,2407.13764-shape-of-motion.pdf,https://arxiv.org/abs/2407.13764
+SpatialTrackerV2,SpatialTrackerV2: 3D Point Tracking Made Easy,2025,2507.12462,readme,9 感知与重建,,名字自动匹配（待核）,2507.12462-spatialtrackerv2.pdf,https://arxiv.org/abs/2507.12462
+STream3R,STream3R: Scalable Sequential 3D Reconstruction with Causal Transformer,2025,2508.10893,readme,9 感知与重建,,名字自动匹配（待核）,2508.10893-stream3r.pdf,https://arxiv.org/abs/2508.10893
+TAPIR,,2023,,readme,9 感知与重建,,多个候选,,
+Track Articulate Act,,2026,,readme,9 感知与重建,,未找到,,
+Track-On2,Track-On2: Enhancing Online Point Tracking with Memory,2025,2509.19115,readme,9 感知与重建,,名字自动匹配（待核）,2509.19115-track-on2.pdf,https://arxiv.org/abs/2509.19115
+Uni4D,,2025,,readme,9 感知与重建,,多个候选,,
+URDF-Anything+,URDF-Anything+: End-to-End Generation for Simulation-Ready Articulated Assets,2026,2603.14010,readme,9 感知与重建,,名字自动匹配（待核）,2603.14010-urdf-anything.pdf,https://arxiv.org/abs/2603.14010
+URDFormer,URDFormer: A Pipeline for Constructing Articulated Simulation Environments from Real-World Images,2024,2405.11656,readme,9 感知与重建,,名字自动匹配（待核）,2405.11656-urdformer.pdf,https://arxiv.org/abs/2405.11656
+VGGT,VGGT: Visual Geometry Grounded Transformer,2025,2503.11651,readme,9 感知与重建,,名字自动匹配（待核）,2503.11651-vggt.pdf,https://arxiv.org/abs/2503.11651
+VGGT-Long,"VGGT-Long: Chunk it, Loop it, Align it -- Pushing VGGT's Limits on Kilometer-scale Long RGB Sequences",2025,2507.16443,readme,9 感知与重建,,名字自动匹配（待核）,2507.16443-vggt-long.pdf,https://arxiv.org/abs/2507.16443
+VGGT-Omega,,2026,,readme,9 感知与重建,,未找到,,
+VGGT4D,VGGT4D: Mining Motion Cues in Visual Geometry Transformers for 4D Scene Reconstruction,2025,2511.19971,readme,9 感知与重建,,名字自动匹配（待核）,2511.19971-vggt4d.pdf,https://arxiv.org/abs/2511.19971
+Video Depth Anything,Video Depth Anything: Consistent Depth Estimation for Super-Long Videos,2025,2501.12375,readme,9 感知与重建,,名字自动匹配（待核）,2501.12375-video-depth-anything.pdf,https://arxiv.org/abs/2501.12375
+VideoArtGS,VideoArtGS: Building Digital Twins of Articulated Objects from Monocular Video,2025,2509.17647,readme,9 感知与重建,,名字自动匹配（待核）,2509.17647-videoartgs.pdf,https://arxiv.org/abs/2509.17647
+ViPE,ViPE: Video Pose Engine for 3D Geometric Perception,2025,2508.10934,readme,9 感知与重建,,名字自动匹配（待核）,2508.10934-vipe.pdf,https://arxiv.org/abs/2508.10934
+AssetGen,AssetGen: Deployable 3D Asset Generation at Interactive Speed,2026,2605.26137,readme,10 资产,,名字自动匹配（待核）,2605.26137-assetgen.pdf,https://arxiv.org/abs/2605.26137
+Direct3D-S2,Direct3D-S2: Gigascale 3D Generation Made Easy with Spatial Sparse Attention,2025,2505.17412,readme,10 资产,,名字自动匹配（待核）,2505.17412-direct3d-s2.pdf,https://arxiv.org/abs/2505.17412
+Hunyuan3D 2.0,Hunyuan3D 2.0: Scaling Diffusion Models for High Resolution Textured 3D Assets Generation,2025,2501.12202,readme,10 资产,,名字自动匹配（待核）,2501.12202-hunyuan3d-2-0.pdf,https://arxiv.org/abs/2501.12202
+Hunyuan3D-Omni,Hunyuan3D-Omni: A Unified Framework for Controllable Generation of 3D Assets,2025,2509.21245,readme,10 资产,,名字自动匹配（待核）,2509.21245-hunyuan3d-omni.pdf,https://arxiv.org/abs/2509.21245
+Hunyuan3D-Part,,2025,,readme,10 资产,,未找到,,
+Objaverse,Objaverse: A Universe of Annotated 3D Objects,2022,2212.08051,readme,10 资产,,名字自动匹配（待核）,2212.08051-objaverse.pdf,https://arxiv.org/abs/2212.08051
+Objaverse++,Objaverse++: Curated 3D Object Dataset with Quality Annotations,2025,2504.07334,readme,10 资产,,名字自动匹配（待核）,2504.07334-objaverse.pdf,https://arxiv.org/abs/2504.07334
+Objaverse-XL,Objaverse-XL: A Universe of 10M+ 3D Objects,2023,2307.05663,readme,10 资产,,名字自动匹配（待核）,2307.05663-objaverse-xl.pdf,https://arxiv.org/abs/2307.05663
+OpenShape,OpenShape: Scaling Up 3D Shape Representation Towards Open-World Understanding,2023,2305.10764,readme,10 资产,,名字自动匹配（待核）,2305.10764-openshape.pdf,https://arxiv.org/abs/2305.10764
+PartCrafter,PartCrafter: Structured 3D Mesh Generation via Compositional Latent Diffusion Transformers,2025,2506.05573,readme,10 资产,,名字自动匹配（待核）,2506.05573-partcrafter.pdf,https://arxiv.org/abs/2506.05573
+SAM 3D Objects / SAM 3D,SAM 3D: 3Dfy Anything in Images,2025,2511.16624,readme,10 资产,,名字自动匹配（待核）,2511.16624-sam-3d-objects-sam-3d.pdf,https://arxiv.org/abs/2511.16624
+Step1X-3D,Step1X-3D: Towards High-Fidelity and Controllable Generation of Textured 3D Assets,2025,2505.07747,readme,10 资产,,名字自动匹配（待核）,2505.07747-step1x-3d.pdf,https://arxiv.org/abs/2505.07747
+TRELLIS / Structured 3D Latents,,2024,,readme,10 资产,,未找到,,
+TRELLIS.2,,2025,,readme,10 资产,,未找到,,
+TripoSG,TripoSG: High-Fidelity 3D Shape Synthesis using Large-Scale Rectified Flow Models,2025,2502.06608,readme,10 资产,,名字自动匹配（待核）,2502.06608-triposg.pdf,https://arxiv.org/abs/2502.06608
+Uni3D,,2023,,readme,10 资产,,多个候选,,
+Astrocade,,,,readme,11 产品与内核,,产品或网页,,
+Bezi,,,,readme,11 产品与内核,,产品或网页,,
+Bitmagic,,,,readme,11 产品与内核,,产品或网页,,
+fly.pieter.com,,,,readme,11 产品与内核,,产品或网页,,
+Godot MCP 插件,,,,readme,11 产品与内核,,产品或网页,,
+Roblox Cube 3D / Cube,,2025,,readme,11 产品与内核,,未找到,,
+Rosebud AI / Roseblox,,,,readme,11 产品与内核,,产品或网页,,
+Unity AI,,,,readme,11 产品与内核,,产品或网页,,
+VibeGame,,,,readme,11 产品与内核,,产品或网页,,
+$M^3-Verse$,"$M^3-Verse$: A ""Spot the Difference"" Challenge for Large Multimodal Models",2025,2512.18735,survey,,,原有编号,2512.18735-m-3-verse.pdf,https://arxiv.org/abs/2512.18735
+3D Scene Graphs,3D Scene Graphs: Open Challenges and Future Directions,2026,2606.19383,issue99,,,原有编号,2606.19383-3d-scene-graphs.pdf,https://arxiv.org/abs/2606.19383
+3DCodeEdit,3DCodeEdit: Benchmarking Instruction-Guided 3D Program Editing,2026,2610.38231,slides,,,原有编号,2610.38231-3dcodeedit.pdf,https://arxiv.org/abs/2610.38231
+3DCodeVerse,3DCodeVerse: Exploring 3D Worlds as Code,2026,2610.22341,paper;storyline,,codeverse3d,原有编号,2610.22341-3dcodeverse.pdf,https://arxiv.org/abs/2610.22341
+3DHarnessBench,3DHarnessBench: Probing Agentic 3D-to-Code Capabilities of Frontier Vision-Language Models,2026,2609.06535,storyline,,,原有编号,2609.06535-3dharnessbench.pdf,https://arxiv.org/abs/2609.06535
+Agentic Artifact Creation,"Agentic Artifact Creation: Systems, Evaluation, Principles, and Opportunities",2026,2608.28122,storyline,,,原有编号,2608.28122-agentic-artifact-creation.pdf,https://arxiv.org/abs/2608.28122
+Agentic Real2Sim,Agentic Real2Sim: Physics-based World Modeling with Vision-Language Agents,2026,2607.19190,agent-survey,,,原有编号,2607.19190-agentic-real2sim.pdf,https://arxiv.org/abs/2607.19190
+Agentic RSR,Agentic RSR: Real-to-Sim-to-Real through Scene Reconstruction and Execution-Grounded Robot Policies,2026,2610.10479,agent-survey,,,原有编号,2610.10479-agentic-rsr.pdf,https://arxiv.org/abs/2610.10479
+Artificial Analysis AA-3D 评测,Artificial Analysis AA-3D 评测,,,storyline,,,网页,,https://artificialanalysis.ai/evaluations/aa-3d
+BVB,BVB: Benchmarking Agentic Video Understanding via Programmatic Reconstruction in Blender,2026,2609.15478,agent-survey,,,原有编号,2609.15478-bvb.pdf,https://arxiv.org/abs/2609.15478
+Causal-JEPA,Causal-JEPA: Learning World Models through Object-Level Latent Masking,2026,2602.11389,storyline,,,原有编号,2602.11389-causal-jepa.pdf,https://arxiv.org/abs/2602.11389
+CineRecon,CineRecon: Benchmarking Frontier Models for Agentic Cinematic Reconstruction,2026,2610.16577,agent-survey,,,原有编号,2610.16577-cinerecon.pdf,https://arxiv.org/abs/2610.16577
+Code as Policies,Code as Policies: Language Model Programs for Embodied Control,2022,2209.07753,slides,,,原有编号,2209.07753-code-as-policies.pdf,https://arxiv.org/abs/2209.07753
+"Code Plans, Diffusion Renders","Code Plans, Diffusion Renders: Open-Ended Generative World Modeling",2026,2609.26458,storyline,,,原有编号,2609.26458-code-plans-diffusion-renders.pdf,https://arxiv.org/abs/2609.26458
+Code-as-Room,Code-as-Room: Generating 3D Rooms from Top-Down View Images via Agentic Code Synthesis,2026,2605.18451,agent-survey,,,原有编号,2605.18451-code-as-room.pdf,https://arxiv.org/abs/2605.18451
+Code2Worlds,Code2Worlds: Empowering Coding LLMs for 4D World Generation,2026,2602.11757,storyline,,,原有编号,2602.11757-code2worlds.pdf,https://arxiv.org/abs/2602.11757
+Code2Worlds-2,Code2Worlds-2: Physically Plausible Agent Harness for Embodied World Simulation,2026,2610.17651,storyline,,,原有编号,2610.17651-code2worlds-2.pdf,https://arxiv.org/abs/2610.17651
+Code4Scene,Code4Scene: Benchmarking Coding Agents for Constructing and Editing 3D Scenes,2026,2609.36777,slides,,,原有编号,2609.36777-code4scene.pdf,https://arxiv.org/abs/2609.36777
+CodeRL,CodeRL: Mastering Code Generation through Pretrained Models and Deep Reinforcement Learning,2022,2207.01780,paper,,le2022coderl,标题精确匹配,2207.01780-coderl.pdf,https://arxiv.org/abs/2207.01780
+CoDimRecon,"CoDimRecon: Agentic Reconstruction of Sim-Ready 3D Scenes with Deformable Curves, Surfaces, and Volumes",2026,2609.36024,slides,,,原有编号,2609.36024-codimrecon.pdf,https://arxiv.org/abs/2609.36024
+Cosmos 3,Cosmos 3: Omnimodal World Models for Physical AI,2026,2606.02800,storyline,,,原有编号,2606.02800-cosmos-3.pdf,https://arxiv.org/abs/2606.02800
+Current World Models Lack a Persistent State Core,Current World Models Lack a Persistent State Core,2026,2606.20545,issue99,,,原有编号,2606.20545-current-world-models-lack-a-persistent-s.pdf,https://arxiv.org/abs/2606.20545
+D-World,D-World: An Explicit World-Language-Action Model with Recursive Self-Improvement under Dual Control,2026,2610.17114,slides,,,原有编号,2610.17114-d-world.pdf,https://arxiv.org/abs/2610.17114
+Debugging code world models,Debugging code world models,2026,2602.07672,issue99,,,原有编号,2602.07672-debugging-code-world-models.pdf,https://arxiv.org/abs/2602.07672
+Direct Preference Optimization,Direct Preference Optimization: Your Language Model is Secretly a Reward Model,2023,2305.18290,paper,,rafailov2023dpo,标题精确匹配,2305.18290-direct-preference-optimization.pdf,https://arxiv.org/abs/2305.18290
+Ditto,Ditto: Building Digital Twins of Articulated Objects from Interaction,2022,2202.08227,paper,,jiang2022ditto,标题精确匹配,2202.08227-ditto.pdf,https://arxiv.org/abs/2202.08227
+Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs Beyond the Base Model?,Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs Beyond the Base Model?,2025,2504.13837,storyline,,,原有编号,2504.13837-does-reinforcement-learning-really-incen.pdf,https://arxiv.org/abs/2504.13837
+DRAWER,DRAWER: Digital Reconstruction and Articulation With Environment Realism,2025,2504.15278,slides,,,原有编号,2504.15278-drawer.pdf,https://arxiv.org/abs/2504.15278
+ExeWorldBench,ExeWorldBench: Benchmarking Code-Based Executable 3D World Modeling,2026,2610.15166,storyline,,,原有编号,2610.15166-exeworldbench.pdf,https://arxiv.org/abs/2610.15166
+Fable 5 做游戏（TechCrunch）,Fable 5 做游戏（TechCrunch）,2026,,storyline,,,网页,,https://techcrunch.com/2026/06/09/anthropics-fable-5-can-make-weirdly-fun-video-games-with-the-click-of-a-button/
+Fable 5.2 一次成型做游戏的成本（CellCog）,Fable 5.2 一次成型做游戏的成本（CellCog）,2026,,storyline,,,网页,,https://cellcog.ai/blog/fable-5-2-one-shot-game-cost/
+fable-arcade,fable-arcade,,,storyline,,,网页,,https://github.com/sorrycc/fable-arcade
+fable5-world-demo,fable5-world-demo,,,storyline,,,网页,,https://github.com/Braffolk/fable5-world-demo
+Finite Automata Extraction,Finite Automata Extraction: Low-data World Model Learning as Programs from Gameplay Video,2025,2508.11836,survey,,,原有编号,2508.11836-finite-automata-extraction.pdf,https://arxiv.org/abs/2508.11836
+Genie,Genie: Generative Interactive Environments,2024,2402.15391,paper,,bruce2024genie,标题精确匹配,2402.15391-genie.pdf,https://arxiv.org/abs/2402.15391
+Genie 3,Genie 3,2025,,storyline,,,网页,,https://deepmind.google/discover/blog/genie-3-a-new-frontier-for-world-models/
+Genie 4,Genie 4,2026,,storyline,,,网页,,https://blog.google/innovation-and-ai/models-and-research/google-deepmind/introducing-genie-4/
+GUI Agents for Continual Game Generation,GUI Agents for Continual Game Generation,2026,2605.28258,survey,,,原有编号,2605.28258-gui-agents-for-continual-game-generation.pdf,https://arxiv.org/abs/2605.28258
+img2threejs,img2threejs,,,storyline,,,网页,,https://github.com/img2threejs/img2threejs
+Integrating Meshes and 3D Gaussians for Indoor Scene Reconstruction with SAM Mask Guidance,Integrating Meshes and 3D Gaussians for Indoor Scene Reconstruction with SAM Mask Guidance,2024,2407.16173,agent-survey,,,原有编号,2407.16173-integrating-meshes-and-3d-gaussians-for-.pdf,https://arxiv.org/abs/2407.16173
+IR3D-Bench,IR3D-Bench: Evaluating Vision-Language Model Scene Understanding as Agentic Inverse Rendering,2025,2506.23329,slides,,,原有编号,2506.23329-ir3d-bench.pdf,https://arxiv.org/abs/2506.23329
+Is Forward Prediction Enough? Physical State Grounding for JEPA World Models,Is Forward Prediction Enough? Physical State Grounding for JEPA World Models,2026,2608.06799,storyline,,,原有编号,2608.06799-is-forward-prediction-enough-physical-st.pdf,https://arxiv.org/abs/2608.06799
+LEGO-Anything,LEGO-Anything: Coding Agents for 3D Scene Reconstruction,2026,2609.36380,agent-survey,,,原有编号,2609.36380-lego-anything.pdf,https://arxiv.org/abs/2609.36380
+LeJEPA,LeJEPA: Provable and Scalable Self-Supervised Learning Without the Heuristics,2025,2511.08544,storyline,,,原有编号,2511.08544-lejepa.pdf,https://arxiv.org/abs/2511.08544
+LiteReality-Agent,LiteReality-Agent: An Agentic System for Interactable 3D Indoor Scene Reconstruction,2026,2610.01863,slides,,,原有编号,2610.01863-litereality-agent.pdf,https://arxiv.org/abs/2610.01863
+LoRA,LoRA: Low-Rank Adaptation of Large Language Models,2021,2106.09685,paper,,hu2022lora,标题精确匹配,2106.09685-lora.pdf,https://arxiv.org/abs/2106.09685
+Mage,Mage: Multi-Axis Evaluation of LLM-Generated Executable Game Scenes Beyond Compile-Pass Rate,2026,2605.07342,survey,,,原有编号,2605.07342-mage.pdf,https://arxiv.org/abs/2605.07342
+Mallea,"Mallea: Building, Steering, and Memorizing Worlds with Coding Agent",2026,2610.21283,storyline,,,原有编号,2610.21283-mallea.pdf,https://arxiv.org/abs/2610.21283
+Mastering the Game of Go without Human Knowledge,Mastering the Game of Go without Human Knowledge,2017,,paper,,silver2017alphagozero,未找到,,
+MeshCoder,MeshCoder: LLM-Powered Structured Mesh Code Generation from Point Clouds,2025,2508.14879,paper,,meshcoder,原有编号,2508.14879-meshcoder.pdf,https://arxiv.org/abs/2508.14879
+Multi-Agent Game Generation and Evaluation via Audio-Visual Recordings,Multi-Agent Game Generation and Evaluation via Audio-Visual Recordings,2025,2508.00632,survey,,,原有编号,2508.00632-multi-agent-game-generation-and-evaluati.pdf,https://arxiv.org/abs/2508.00632
+NeoWorld-3,NeoWorld-3: From Pixels to Code-Defined Physical Worlds,2026,2610.27690,agent-survey;slides;storyline,,,原有编号,2610.27690-neoworld-3.pdf,https://arxiv.org/abs/2610.27690
+NeoWorld-Pro,NeoWorld-Pro: Programming Interactive Scenes from Monocular Images for Embodied Simulation,2026,2608.24212,agent-survey;storyline,,,原有编号,2608.24212-neoworld-pro.pdf,https://arxiv.org/abs/2608.24212
+Neural Implicit Representation for Building Digital Twins of Unknown Articulated Objects,Neural Implicit Representation for Building Digital Twins of Unknown Articulated Objects,2024,2404.01440,paper,,weng2024digitaltwinart,标题精确匹配,2404.01440-neural-implicit-representation-for-build.pdf,https://arxiv.org/abs/2404.01440
+OpenRUA,OpenRUA: Robot-Use Agents Are Zero-Shot Visuomotor Policies,2026,2610.02459,slides,,,原有编号,2610.02459-openrua.pdf,https://arxiv.org/abs/2610.02459
+PARIS,PARIS: Part-level Reconstruction and Motion Analysis for Articulated Objects,2023,2308.07391,paper,,liu2023paris,标题精确匹配,2308.07391-paris.pdf,https://arxiv.org/abs/2308.07391
+PhysTwin,PhysTwin: Physics-Informed Reconstruction and Simulation of Deformable Objects from Videos,2025,2503.17973,slides,,,原有编号,2503.17973-phystwin.pdf,https://arxiv.org/abs/2503.17973
+Picture: A Probabilistic Programming Language for Scene Perception,Picture: A Probabilistic Programming Language for Scene Perception,2015,,paper,,kulkarni2015picture,未找到,,
+Programmable World Model,Programmable World Model,2026,2609.10540,storyline,,,原有编号,2609.10540-programmable-world-model.pdf,https://arxiv.org/abs/2609.10540
+Qwen3-VL Technical Report,Qwen3-VL Technical Report,2025,2511.21631,paper;survey,,qwen3vl,原有编号,2511.21631-qwen3-vl-technical-report.pdf,https://arxiv.org/abs/2511.21631
+Recursive Code World Models,Recursive Code World Models: Building Complex Worlds through Recursive Scene Programs,2026,2609.11499,storyline,,,原有编号,2609.11499-recursive-code-world-models.pdf,https://arxiv.org/abs/2609.11499
+Rendering-Aware Reinforcement Learning for Vector Graphics Generation,Rendering-Aware Reinforcement Learning for Vector Graphics Generation,2025,2505.20793,survey,,,原有编号,2505.20793-rendering-aware-reinforcement-learning-f.pdf,https://arxiv.org/abs/2505.20793
+RoboEXP,RoboEXP: Action-Conditioned Scene Graph via Interactive Exploration for Robotic Manipulation,2024,2402.15487,slides,,,原有编号,2402.15487-roboexp.pdf,https://arxiv.org/abs/2402.15487
+Saltline：Fable 5.2 八小时做的 FPS（TweakTown）,Saltline：Fable 5.2 八小时做的 FPS（TweakTown）,2026,,storyline,,,网页,,https://www.tweaktown.com/news/114611/saltline-is-a-playable-fps-created-by-anthropics-fable-5-2-in-8-hours/index.html
+SAPIEN,SAPIEN: A SimulAted Part-based Interactive ENvironment,2020,2003.08515,paper,,xiang2020sapien,标题精确匹配,2003.08515-sapien.pdf,https://arxiv.org/abs/2003.08515
+Scene-Level Heterogeneous Physics Simulation with 3D Gaussian Splats,Scene-Level Heterogeneous Physics Simulation with 3D Gaussian Splats,2026,2606.21753,agent-survey,,,原有编号,2606.21753-scene-level-heterogeneous-physics-simula.pdf,https://arxiv.org/abs/2606.21753
+SceneCraft,SceneCraft: An LLM Agent for Synthesizing 3D Scene as Blender Code,2024,2403.01248,agent-survey;survey,,,原有编号,2403.01248-scenecraft.pdf,https://arxiv.org/abs/2403.01248
+SEAR,SEAR: Self-Evolving Agentic Robotics,2026,2610.18792,slides,,,原有编号,2610.18792-sear.pdf,https://arxiv.org/abs/2610.18792
+Self-Distillation Policy Optimization via Visual Feedback: Bridging Code and Visual Artifacts,Self-Distillation Policy Optimization via Visual Feedback: Bridging Code and Visual Artifacts,2026,2606.10334,survey,,,原有编号,2606.10334-self-distillation-policy-optimization-vi.pdf,https://arxiv.org/abs/2606.10334
+Self-Improving Language Models for Evolutionary Program Synthesis: A Case Study on ARC-AGI,Self-Improving Language Models for Evolutionary Program Synthesis: A Case Study on ARC-AGI,2025,2507.14172,storyline,,,原有编号,2507.14172-self-improving-language-models-for-evolu.pdf,https://arxiv.org/abs/2507.14172
+Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture,Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture,2023,2301.08243,storyline,,,原有编号,2301.08243-self-supervised-learning-from-images-wit.pdf,https://arxiv.org/abs/2301.08243
+ShapeCoder,ShapeCoder: Discovering Abstractions for Visual Programs from Unstructured Primitives,2023,2305.05661,agent-survey,,,原有编号,2305.05661-shapecoder.pdf,https://arxiv.org/abs/2305.05661
+ShapeLib,ShapeLib: Designing a library of programmatic 3D shape abstractions with Large Language Models,2025,2502.08884,agent-survey,,,原有编号,2502.08884-shapelib.pdf,https://arxiv.org/abs/2502.08884
+ShapeMOD,ShapeMOD: Macro Operation Discovery for 3D Shape Programs,2021,2104.06392,agent-survey,,,原有编号,2104.06392-shapemod.pdf,https://arxiv.org/abs/2104.06392
+SimWorld Studio,SimWorld Studio: Automatic Environment Generation with Evolving Coding Agent for Embodied Agent Learning,2026,2605.09423,storyline,,,原有编号,2605.09423-simworld-studio.pdf,https://arxiv.org/abs/2605.09423
+SR-JEPA,SR-JEPA: Learning Predictive Latent State in 3D Scenes,2026,2608.05774,storyline,,,原有编号,2608.05774-sr-jepa.pdf,https://arxiv.org/abs/2608.05774
+STaR,STaR: Bootstrapping Reasoning With Reasoning,2022,2203.14465,paper,,zelikman2022star,标题精确匹配,2203.14465-star.pdf,https://arxiv.org/abs/2203.14465
+Thinking Fast and Slow with Deep Learning and Tree Search,Thinking Fast and Slow with Deep Learning and Tree Search,2017,1705.08439,paper,,anthony2017expertiteration,标题精确匹配,1705.08439-thinking-fast-and-slow-with-deep-learnin.pdf,https://arxiv.org/abs/1705.08439
+Towards Interactive Video World Modeling,"Towards Interactive Video World Modeling: Frontiers, Challenges, Benchmarks, and Future Trends",2026,2606.01164,survey,,,原有编号,2606.01164-towards-interactive-video-world-modeling.pdf,https://arxiv.org/abs/2606.01164
+URDF-Anything,URDF-Anything: Constructing Articulated Objects with 3D Multimodal Language Model,2025,2511.00940,paper,,urdfanything,原有编号,2511.00940-urdf-anything.pdf,https://arxiv.org/abs/2511.00940
+V-JEPA 2,"V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and Planning",2025,2506.09985,storyline,,,原有编号,2506.09985-v-jepa-2.pdf,https://arxiv.org/abs/2506.09985
+Video2World,Video2World: Benchmarking Coding Agents for Interactive World Modeling from Embodied Videos,2026,2610.04432,agent-survey;paper;storyline,,video2world,原有编号,2610.04432-video2world.pdf,https://arxiv.org/abs/2610.04432
+Vision-as-Inverse-Graphics Agent via Interleaved Multimodal Reasoning,Vision-as-Inverse-Graphics Agent via Interleaved Multimodal Reasoning,2026,2601.11109,agent-survey;slides,,,原有编号,2601.11109-vision-as-inverse-graphics-agent-via-int.pdf,https://arxiv.org/abs/2601.11109
+VULCAN,VULCAN: Tool-Augmented Multi Agents for Iterative 3D Object Arrangement,2025,2512.22351,survey,,,原有编号,2512.22351-vulcan.pdf,https://arxiv.org/abs/2512.22351
+Wan,Wan: Open and Advanced Large-Scale Video Generative Models,2025,2503.20314,storyline,,,原有编号,2503.20314-wan.pdf,https://arxiv.org/abs/2503.20314
+Wan3 视频模型（The Next Web）,Wan3 视频模型（The Next Web）,2026,,storyline,,,网页,,https://thenextweb.com/news/alibaba-wan3-video-model-after-share-sale
+WorldAgent,WorldAgent: Verification-Guided Agentic Physical World Construction,2026,2609.33208,storyline,,,原有编号,2609.33208-worldagent.pdf,https://arxiv.org/abs/2609.33208
+WorldBench,WorldBench: Evaluating LLMs on Three.js Voxel World Generation,2026,2610.10622,storyline,,,原有编号,2610.10622-worldbench.pdf,https://arxiv.org/abs/2610.10622
+"WorldCoder, a Model-Based LLM Agent","WorldCoder, a Model-Based LLM Agent: Building World Models by Writing Code and Interacting with the Environment",2024,2402.12275,survey,,,原有编号,2402.12275-worldcoder-a-model-based-llm-agent.pdf,https://arxiv.org/abs/2402.12275
+WorldMirror,WorldMirror: Agentic Real-to-Sim Generation of Interactive Worlds from In-the-Wild Robot Demonstrations,2026,2610.31834,slides,,,原有编号,2610.31834-worldmirror.pdf,https://arxiv.org/abs/2610.31834
+WorldStream,WorldStream: Streaming Interactive 3D Worlds with Hierarchical Planning and Persistent State,2026,2610.28827,storyline,,,原有编号,2610.28827-worldstream.pdf,https://arxiv.org/abs/2610.28827
