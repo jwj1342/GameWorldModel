@@ -1,0 +1,23 @@
+{
+ "label": "kimi-var3",
+ "workspace": "20261126-033013-kimi-var3",
+ "source": "Mac 上嵌套 claude 的会话记录（~/.claude/projects），事后扫描",
+ "tool_calls": {
+  "Read": 71,
+  "Bash": 66,
+  "Write": 12,
+  "Edit": 83,
+  "Grep": 1
+ },
+ "denied_tool_calls": 5,
+ "preview_tool": {
+  "calls": 8,
+  "ok": 7,
+  "first_call_failed": true
+ },
+ "outside_workspace_paths": {
+  "harness/bench_interact.mjs": 4,
+  "venv/bin/python": 2
+ },
+ "flagged": []
+}

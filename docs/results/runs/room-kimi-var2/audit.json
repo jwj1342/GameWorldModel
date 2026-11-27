@@ -1,0 +1,34 @@
+{
+ "label": "kimi-var2",
+ "workspace": "20261126-025043-kimi-var2",
+ "source": "Mac 上嵌套 claude 的会话记录（~/.claude/projects），事后扫描",
+ "tool_calls": {
+  "Read": 93,
+  "Bash": 67,
+  "Write": 11,
+  "Grep": 3,
+  "Edit": 42
+ },
+ "denied_tool_calls": 6,
+ "preview_tool": {
+  "calls": 11,
+  "ok": 9,
+  "first_call_failed": true
+ },
+ "outside_workspace_paths": {
+  "harness/bench_render.mjs": 6,
+  "kernel/physics.js": 5,
+  "kernel/bench_scene.js": 4,
+  "harness/interaction_probe.mjs": 4,
+  "venv/bin/python": 3,
+  "kernel/manipulate.js": 3,
+  "node_modules/three/build/three.module.js": 3,
+  "out/bench/room/tools/20261126-025043-kimi-var2": 2,
+  "harness/bench_interact.mjs": 2,
+  "harness/": 2,
+  "gwm/bench/agent.py": 2,
+  "kernel/bench_view.html": 1,
+  "kernel/bench_view.js": 1
+ },
+ "flagged": []
+}

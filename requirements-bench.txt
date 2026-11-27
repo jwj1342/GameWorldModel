@@ -1,0 +1,31 @@
+# 两轴评测 demo（gwm/bench）的 Python 依赖。Python 3.10 以上。
+#
+#   pip install -r requirements-bench.txt
+#
+# 和 requirements.txt 分开放：这一组不需要感知模型（VGGT、SAM），
+# 只需要编译与校验那一组，再加上保真度指标和本机贴图生成。
+
+# 场景程序的校验与编译（与 requirements.txt 的第一组相同）
+jsonschema>=4.20
+jsonpatch>=1.33
+jsonpointer>=3.0
+pyyaml>=6.0
+numpy>=1.26
+scipy>=1.13.1
+pillow>=10.0
+
+# 保真度指标：PSNR / SSIM / LPIPS
+torch>=2.4
+torchvision>=0.19
+lpips>=0.1.4
+scikit-image>=0.24
+
+# 本机贴图生成（开源扩散模型）
+diffusers>=0.30
+transformers>=4.44
+accelerate>=1.0
+safetensors>=0.4
+huggingface-hub>=0.26
+
+# 测试
+pytest>=8.0

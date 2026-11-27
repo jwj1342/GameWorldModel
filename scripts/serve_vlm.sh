@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
 #SBATCH --time=02:59:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # vLLM 服务：Qwen3.5-27B-FP8 单卡；把端点写到 $GWM_SCRATCH/vlm_endpoint.txt；作业内先做一次单图 + JSON 约束冒烟
 set -u
 REPO=/scratch/jwj/research/GameWorldModel

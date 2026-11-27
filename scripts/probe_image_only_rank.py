@@ -223,7 +223,7 @@ def main(argv: list[str]) -> int:
                     help="查询侧也转灰度；必须和 --index 指的那个索引同口径，否则量的是噪声")
     ap.add_argument("--silhouette", action="store_true",
                     help="再加一条腿：观测轮廓的 Hu 矩在全库里排序（绕开压扁那个根因）")
-    ap.add_argument("--shapes", default="/scratch/jwj/gwm/asset_shapes.json",
+    ap.add_argument("--shapes", default="/scratch/jwj/research/GameWorldModel/work/asset_shapes.json",
                     help="资产边长比例缓存；加上它就同时量形状这条腿和两条腿的并集")
     a = ap.parse_args(argv)
 

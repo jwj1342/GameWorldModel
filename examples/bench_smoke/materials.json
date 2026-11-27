@@ -1,0 +1,5 @@
+{
+  "oak_floor": { "prompt": "light oak wood floor planks", "seed": 7, "base_color": "#b08a5a", "roughness": 0.6 },
+  "white_plaster": { "prompt": "white painted plaster wall", "seed": 11, "base_color": "#e6e3dc", "roughness": 0.9 },
+  "grey_fabric": { "prompt": "grey woven sofa fabric", "seed": 3, "base_color": "#7d8087", "roughness": 0.95 }
+}

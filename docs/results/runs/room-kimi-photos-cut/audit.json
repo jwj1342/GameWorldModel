@@ -1,0 +1,43 @@
+{
+ "label": "kimi-photos",
+ "workspace": "20261126-082833-kimi-photos",
+ "source": "Mac 上嵌套 claude 的会话记录（~/.claude/projects），事后扫描",
+ "tool_calls": {
+  "Read": 87,
+  "Bash": 71,
+  "Write": 9,
+  "Edit": 145,
+  "Grep": 2
+ },
+ "denied_tool_calls": 4,
+ "preview_tool": {
+  "calls": 8,
+  "ok": 8,
+  "first_call_failed": false
+ },
+ "outside_workspace_paths": {
+  "kernel/physics.js": 6,
+  "kernel/bench_scene.js": 4,
+  "harness/interaction_probe.mjs": 3,
+  "venv/bin/python": 3,
+  "out/bench/room/workspaces/": 2,
+  "harness/bench_interact.mjs": 2,
+  "docs/results/runs/room-kimi-dense/": 1,
+  "harness/bench_render.mjs": 1,
+  "kernel/manipulate.js": 1
+ },
+ "flagged": [
+  {
+   "kind": "prior_answer",
+   "tool": "Bash",
+   "input": "{\"command\": \"ls /Users/jwj/Code/GameWorldModel/docs/results/runs/room-kimi-dense/ 2>/dev/null && ls /Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/ 2>/dev/null\", \"description\": \"Check prior run artifacts and other workspaces\"}",
+   "time": "2026-11-26T00:28:51.660Z"
+  },
+  {
+   "kind": "other_runs",
+   "tool": "Bash",
+   "input": "{\"command\": \"ls /Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/\", \"description\": \"List other workspaces\"}",
+   "time": "2026-11-26T00:28:53.930Z"
+  }
+ ]
+}

@@ -34,9 +34,12 @@ RIGID_STRUCTURE_CLASSES = {"wall", "floor", "ground", "terrain", "rail", "track"
 
 
 def is_rigid_structure(name: str) -> bool:
-    """类名是不是「建筑的一部分」。按词匹配，和 is_static_class 一致。"""
-    tokens = {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t}
-    return any(w in tokens for w in RIGID_STRUCTURE_CLASSES)
+    """仅完整类别匹配才允许忽略二元 moves；复合类名保留运动证据。
+
+    这条强规则不能沿用 is_static_class 的分词匹配，否则 floor lamp、
+    road sign、wall clock 都会仅因带一个结构词而失去 moves=True 的保护。
+    """
+    return (name or "").strip().lower() in RIGID_STRUCTURE_CLASSES
 
 
 

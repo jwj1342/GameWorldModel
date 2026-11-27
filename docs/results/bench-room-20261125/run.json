@@ -1,0 +1,66 @@
+{
+ "run_id": "20261125-200727-agent",
+ "label": "agent",
+ "scene": "room",
+ "modes": [
+  "flat",
+  "textured"
+ ],
+ "source_candidate": "/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/subagent-001",
+ "git_commit": "1615ffc3c66fba65069d332f805b8a6bfc4f099b+dirty",
+ "started": "2026-11-25T20:07:27",
+ "config": {
+  "scene": "room",
+  "data": {
+   "root": "data/mipnerf360/room",
+   "image_dir": "images_4",
+   "camera_height_m": 1.4,
+   "agent_views": 24,
+   "agent_view_width": 1024,
+   "max_points": 20000,
+   "seed": 0
+  },
+  "paths": {
+   "out": "out/bench",
+   "weights": "models"
+  },
+  "fidelity": {
+   "lpips_net": "vgg"
+  },
+  "texture": {
+   "model": null,
+   "size": 512,
+   "bind_base_color": true,
+   "detail_strength": 0.7
+  },
+  "agent": {
+   "model": "claude-fable-5-2",
+   "max_budget_usd": 25,
+   "preview_views": 6
+  },
+  "checklist": "configs/bench/room.checklist.json",
+  "manifest": "configs/bench/room.manifest.json",
+  "references": [
+   {
+    "name": "3DGS（论文值）",
+    "fidelity": {
+     "psnr": 30.632,
+     "ssim": 0.914,
+     "lpips": 0.22
+    },
+    "interact_pass_rate": 0.0,
+    "note": "三维高斯原论文附录里 room 场景 30K 迭代的数，不是在这台机器上算的；论文在室内场景用的是 images_2，这里的评测用 images_4，分辨率不同，只能看量级。交互记 0：高斯重建没有物体这一层， 清单里的目标一个都不存在，这是按定义得出的，不是执行出来的。",
+    "source": "https://arxiv.org/abs/2308.04079"
+   }
+  ]
+ },
+ "agent": {
+  "runner": "in-session subagent (Claude Code Agent tool), not `claude -p`",
+  "model": "claude-fable-5-2 (in-session subagent; the claude CLI was not logged in)",
+  "command": null,
+  "seconds": 2227,
+  "num_turns": 162,
+  "note": "Same TASK.md, inputs and tools as the headless CLI run would get. 162 is the number of tool calls, 423,754 subagent tokens, 12 preview iterations. The movable judgement in the self-check tool changed during this run (single +x drag -> any of 4 directions, lift or slide), so the agent saw two different verdicts for the same scene; it lowered some masses and shortened the side table's floor rails in response to the earlier verdict.",
+  "result": {}
+ }
+}

@@ -1,0 +1,283 @@
+{
+ "oak_floor": {
+  "prompt": "light honey-coloured pine floorboards, long narrow planks with visible knots and grain running lengthwise",
+  "seed": 11,
+  "base_color": "#b8894e",
+  "roughness": 0.55
+ },
+ "wall_cream": {
+  "prompt": "warm cream matte emulsion painted plaster wall, smooth with very subtle roller texture",
+  "seed": 12,
+  "base_color": "#d3c8a9",
+  "roughness": 0.92
+ },
+ "ceiling_white": {
+  "prompt": "plain white matte painted ceiling plaster, smooth",
+  "seed": 13,
+  "base_color": "#e9e5da",
+  "roughness": 0.95
+ },
+ "hallway_dark": {
+  "prompt": "very dark unlit interior surface, near black matte paint",
+  "seed": 14,
+  "base_color": "#141210",
+  "roughness": 0.95
+ },
+ "rug_dark_green": {
+  "prompt": "deep forest green short-pile wool rug, dense even pile, slightly mottled",
+  "seed": 15,
+  "base_color": "#2c463c",
+  "roughness": 1.0
+ },
+ "rug_light_grey": {
+  "prompt": "pale blue-grey low pile rug, soft even texture with slight mottling",
+  "seed": 16,
+  "base_color": "#aeb8ba",
+  "roughness": 1.0
+ },
+ "rug_piano_pattern": {
+  "prompt": "ivory oriental rug with dense small black and grey floral pattern, thin pile",
+  "seed": 17,
+  "base_color": "#c6bfae",
+  "roughness": 1.0
+ },
+ "sofa_grey": {
+  "prompt": "mid grey woven upholstery fabric, fine even weave, soft matte",
+  "seed": 18,
+  "base_color": "#767468",
+  "roughness": 1.0
+ },
+ "armchair_navy": {
+  "prompt": "dark navy blue brushed cotton upholstery fabric, soft matte",
+  "seed": 19,
+  "base_color": "#3a4a5e",
+  "roughness": 1.0
+ },
+ "cushion_cow": {
+  "prompt": "soft plush cushion fabric with large brown and white cowhide patches",
+  "seed": 20,
+  "base_color": "#8a6c50",
+  "roughness": 1.0
+ },
+ "footstool_blue": {
+  "prompt": "slate blue-grey woven upholstery fabric, fine weave, matte",
+  "seed": 21,
+  "base_color": "#4c5c68",
+  "roughness": 1.0
+ },
+ "bentwood": {
+  "prompt": "light beech bentwood, smooth laminated wood with fine lengthwise grain",
+  "seed": 22,
+  "base_color": "#c9a26a",
+  "roughness": 0.45
+ },
+ "walnut_top": {
+  "prompt": "dark walnut wood tabletop, straight grain, satin finish",
+  "seed": 23,
+  "base_color": "#5f4127",
+  "roughness": 0.4
+ },
+ "black_metal": {
+  "prompt": "matte black powder-coated metal, smooth",
+  "seed": 24,
+  "base_color": "#1d1d1d",
+  "roughness": 0.5,
+  "metalness": 0.55
+ },
+ "chrome": {
+  "prompt": "polished chrome metal, smooth reflective",
+  "seed": 25,
+  "base_color": "#9fa4a8",
+  "roughness": 0.2,
+  "metalness": 0.9
+ },
+ "steel_bowl": {
+  "prompt": "brushed stainless steel, fine circular brushing marks",
+  "seed": 26,
+  "base_color": "#b2b6b8",
+  "roughness": 0.28,
+  "metalness": 0.9
+ },
+ "glass_clear": {
+  "prompt": "clear colourless glass, smooth and transparent",
+  "seed": 27,
+  "base_color": "#c8d2d4",
+  "roughness": 0.06,
+  "metalness": 0.0
+ },
+ "glass_shelf": {
+  "prompt": "clear tempered glass shelf with slightly green edge tint",
+  "seed": 28,
+  "base_color": "#b9c8c4",
+  "roughness": 0.08,
+  "metalness": 0.0
+ },
+ "piano_black": {
+  "prompt": "glossy black piano lacquer, mirror smooth",
+  "seed": 29,
+  "base_color": "#0b0b0d",
+  "roughness": 0.12
+ },
+ "keys_white": {
+  "prompt": "piano key ivory white with fine narrow key separations running across",
+  "seed": 30,
+  "base_color": "#efe9da",
+  "roughness": 0.35
+ },
+ "bench_black": {
+  "prompt": "black vinyl leatherette, fine grain, slight sheen",
+  "seed": 31,
+  "base_color": "#17171a",
+  "roughness": 0.4
+ },
+ "door_white": {
+  "prompt": "white satin painted wood panel door surface, smooth",
+  "seed": 32,
+  "base_color": "#e4e1d6",
+  "roughness": 0.65
+ },
+ "shelf_white": {
+  "prompt": "white matte painted wooden shelf board, smooth",
+  "seed": 33,
+  "base_color": "#e7e4da",
+  "roughness": 0.8
+ },
+ "pine_bookcase": {
+  "prompt": "light pine wood bookcase board, warm yellowish straight grain",
+  "seed": 34,
+  "base_color": "#c49a62",
+  "roughness": 0.6
+ },
+ "book_spines": {
+  "prompt": "dense rows of assorted book spines on a shelf, muted reds greens blues and tans, vertical stripes",
+  "seed": 35,
+  "base_color": "#6d5343",
+  "roughness": 0.9
+ },
+ "game_boxes": {
+  "prompt": "stack of colourful board game boxes, red yellow and blue printed card",
+  "seed": 36,
+  "base_color": "#a8503c",
+  "roughness": 0.8
+ },
+ "terracotta": {
+  "prompt": "terracotta clay plant pot, warm orange brown, slightly rough matte",
+  "seed": 37,
+  "base_color": "#9c5a38",
+  "roughness": 0.85
+ },
+ "plant_green": {
+  "prompt": "yucca plant leaves, deep green with lighter centre stripe, long sword shaped blades",
+  "seed": 38,
+  "base_color": "#3c5c2c",
+  "roughness": 0.85
+ },
+ "speaker_black": {
+  "prompt": "black ash veneer speaker cabinet, fine dark wood texture, matte",
+  "seed": 39,
+  "base_color": "#171614",
+  "roughness": 0.55
+ },
+ "cone_white": {
+  "prompt": "off-white woven speaker driver cone, fine radial texture",
+  "seed": 40,
+  "base_color": "#d8d4c8",
+  "roughness": 0.7
+ },
+ "tv_screen": {
+  "prompt": "dark glossy switched-off television screen, near black with faint sheen",
+  "seed": 41,
+  "base_color": "#101216",
+  "roughness": 0.15
+ },
+ "curtain_olive": {
+  "prompt": "olive khaki heavy curtain fabric with soft vertical drape folds",
+  "seed": 42,
+  "base_color": "#847a5c",
+  "roughness": 1.0
+ },
+ "sheer_white": {
+  "prompt": "white translucent voile curtain fabric, very fine weave",
+  "seed": 43,
+  "base_color": "#dcdcd4",
+  "roughness": 1.0
+ },
+ "window_bright": {
+  "prompt": "bright overcast daylight seen through window glass, pale blue white glow",
+  "seed": 44,
+  "base_color": "#d9e2e4",
+  "roughness": 0.1
+ },
+ "blind_grey": {
+  "prompt": "grey fabric roman blind, horizontal soft folds",
+  "seed": 45,
+  "base_color": "#8f8b80",
+  "roughness": 1.0
+ },
+ "radiator_white": {
+  "prompt": "white painted steel radiator with vertical panel ridges",
+  "seed": 46,
+  "base_color": "#e2dfd6",
+  "roughness": 0.55
+ },
+ "slipper_tan": {
+  "prompt": "tan suede slipper upper with cream fleece lining, soft matte",
+  "seed": 47,
+  "base_color": "#a37f56",
+  "roughness": 0.95
+ },
+ "pillow_red": {
+  "prompt": "deep red velvet cushion fabric, soft sheen",
+  "seed": 48,
+  "base_color": "#9c2f26",
+  "roughness": 1.0
+ },
+ "pillow_paisley": {
+  "prompt": "paisley patterned cushion fabric, navy red and cream small motif",
+  "seed": 49,
+  "base_color": "#5e4450",
+  "roughness": 1.0
+ },
+ "blanket_dark": {
+  "prompt": "dark charcoal grey knitted throw blanket, chunky soft texture",
+  "seed": 50,
+  "base_color": "#3c4046",
+  "roughness": 1.0
+ },
+ "paper_white": {
+  "prompt": "white sheet music paper with faint printed staves",
+  "seed": 51,
+  "base_color": "#f0ecdd",
+  "roughness": 0.9
+ },
+ "globe_tan": {
+  "prompt": "vintage world globe, tan oceans with muted coloured continents and fine map lines",
+  "seed": 52,
+  "base_color": "#c2ab7e",
+  "roughness": 0.65
+ },
+ "flower_pink": {
+  "prompt": "cluster of small pink hyacinth flowers, dense petals",
+  "seed": 53,
+  "base_color": "#cf8aa4",
+  "roughness": 0.9
+ },
+ "photo_frame": {
+  "prompt": "white picture frame with a black and white photograph inside",
+  "seed": 54,
+  "base_color": "#d5d2c9",
+  "roughness": 0.7
+ },
+ "clock_face": {
+  "prompt": "round wall clock face, warm orange copper dial with thin dark hands",
+  "seed": 55,
+  "base_color": "#c07a3e",
+  "roughness": 0.5
+ },
+ "purifier_white": {
+  "prompt": "white plastic air purifier cylinder with fine perforations near the top",
+  "seed": 56,
+  "base_color": "#dcdad2",
+  "roughness": 0.6
+ }
+}
