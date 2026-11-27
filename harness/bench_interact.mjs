@@ -14,7 +14,7 @@
 // 没有画面、不开浏览器，所以外观换成什么都不影响这里的结果。
 //
 // 用法:
-//   node harness/bench_interact.mjs --cand DIR --checklist FILE --out FILE [--anchors FILE]
+//   node harness/bench_interact.mjs --cand DIR --checklist FILE --out FILE [--anchors FILE] [--match id|anchors]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -168,8 +168,22 @@ export function selfChecklist(candidate) {
   return { scene: 'selfcheck', items };
 }
 
-export function runChecklist(candidate, checklist, anchors = null) {
-  const resolved = resolveTargets(freshWorld(candidate).registry, [...new Set(checklist.items.map(i => i.target))], anchors);
+/** 锚点单列的那一个数：每个标签的锚点处是不是对的物体。按 id 判的运行（给过物体名单），对的意思是
+ *  锚点处的物体就是智能体用这个 id 命名的那个；按锚点判的运行（没给名单），对的意思是锚点找到了物体、
+ *  而且没和别的标签落到同一个物体上。锚点取自第一次运行的场景，所以这个数量的是「摆得离那份场景多近」，
+ *  只当摆放位置的诊断看，不并进交互分。 */
+export function anchorReport(registry, labels, anchors, match) {
+  const at = resolveTargets(registry, labels, anchors);
+  const ok = (label) => { const r = at.get(label); return match === 'id' ? r.id === label && !r.merged : r.id != null && !r.merged; };
+  return { match, found: labels.filter(ok).length, total: labels.length,
+           per_label: Object.fromEntries(labels.map(l => [l, { ...at.get(l), ok: ok(l) }])) };
+}
+
+/** match 是 'id'（给过物体名单的运行，按 id 找物体）或 'anchors'（没给名单，只能按位置找）。 */
+export function runChecklist(candidate, checklist, anchors = null, match = anchors ? 'anchors' : 'id') {
+  const labels = [...new Set(checklist.items.map(i => i.target))];
+  const registry = freshWorld(candidate).registry;
+  const resolved = resolveTargets(registry, labels, match === 'anchors' ? anchors : null);
   const items = checklist.items.map(item => {
     const target = resolved.get(item.target);
     return { ...item, resolved: target.id, ...judgeItem(candidate, item, target) };
@@ -185,6 +199,8 @@ export function runChecklist(candidate, checklist, anchors = null) {
     scene: checklist.scene ?? null,
     summary: { passed, total: items.length, pass_rate: items.length ? round(passed / items.length) : null, by_expect: byExpect },
     objects: probe.registry.map(e => ({ id: e.id, kind: e.kind === 'static' ? 'static' : 'movable', colliders: e.colliders.length })),
+    match,
+    anchors: anchors ? anchorReport(registry, labels, anchors, match) : null,
     items,
   };
 }
@@ -200,10 +216,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // 但看不到真正的清单里期望哪些物体能动。
   const checklist = selfcheck ? selfChecklist(candidate) : JSON.parse(fs.readFileSync(args.checklist, 'utf8'));
   const anchors = args.anchors ? JSON.parse(fs.readFileSync(args.anchors, 'utf8')).anchors : null;
-  const report = runChecklist(candidate, checklist, anchors);
+  const report = runChecklist(candidate, checklist, anchors, args.match ?? (anchors ? 'anchors' : 'id'));
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, JSON.stringify(report, null, 1));
   const s = report.summary;
-  console.log(`interaction checklist: ${s.passed}/${s.total} passed (${s.pass_rate})`);
+  console.log(`interaction checklist (${report.match}): ${s.passed}/${s.total} passed (${s.pass_rate})`
+              + (report.anchors ? `; anchors found ${report.anchors.found}/${report.anchors.total}` : ''));
   for (const item of report.items.filter(i => !i.pass)) console.log(`  FAIL ${item.target} expect=${item.expect} reason=${item.reason}`);
 }

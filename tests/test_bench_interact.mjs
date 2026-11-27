@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import { initRapier } from '../kernel/physics.js';
 import { loadCandidate, runChecklist, selfChecklist } from '../harness/bench_interact.mjs';
+import { runSequence } from '../harness/bench_sequence.mjs';
 
 await initRapier();
 const candidate = await loadCandidate('examples/bench_smoke');
@@ -83,4 +84,28 @@ test('按位置找目标：两个标签落到同一个物体上，要动的那�
   assert.equal(by.floor.resolved, 'floor'); assert.equal(by.floor.pass, true);
   assert.equal(by.table.resolved, 'table'); assert.equal(by.mug.resolved, 'table');
   assert.equal(by.table.reason, 'merged'); assert.equal(by.mug.reason, 'merged');
+});
+
+test('连续交互：标签对不上场景里的物体时记成失败，不让整次评测崩掉', () => {
+  // 冒烟场景里没有 piano_bench；真实运行里出现过琴凳摆偏了、锚点对不上的情况，当时整个 eval 崩了
+  const sequence = {
+    steps: [
+      { action: 'push', target: 'piano_bench', by: [0.3, 0], expect: [{ followed: 'piano_bench' }, { upright: 'piano_bench' }] },
+      { action: 'carry', target: 'mug', onto: 'piano_bench', at: [0, 0], expect: [{ on: ['mug', 'piano_bench'] }] },
+      // 桌子在场景里，但 (30, 30) 处没有桌面：支撑物不在清单说的位置上
+      { action: 'carry', target: 'mug', onto: 'table', at: [30, 30], expect: [{ on: ['mug', 'floor'] }] },
+      { action: 'push', target: 'table', by: [0.2, 0], expect: [{ followed: 'table' }] },
+    ],
+    final: [{ stayed: ['floor', 'piano_bench'] }],
+  };
+  const out = runSequence(candidate, sequence);
+  assert.equal(out.steps[0].grabbed, false); assert.equal(out.steps[0].reason, 'missing_object');
+  assert.equal(out.steps[0].target_after, null);
+  assert.equal(out.steps[1].grabbed, false, '落点对不上时这个动作也不做');
+  assert.equal(out.steps[2].grabbed, false); assert.equal(out.steps[2].reason, 'no_surface_at_target');
+  assert.equal(out.steps[3].grabbed, true, '后面对得上的动作照常执行');
+  const failed = [...out.steps.flatMap(s => s.checks), ...out.final].filter(c => c.detail.reason === 'missing_object');
+  assert.deepEqual(failed.map(c => `${c.kind} ${c.target}`), ['followed piano_bench', 'upright piano_bench', 'stayed piano_bench']);
+  assert.ok(failed.every(c => c.pass === false));
+  assert.equal(out.final.find(c => c.target === 'floor').pass, true);
 });

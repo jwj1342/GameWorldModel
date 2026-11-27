@@ -1,0 +1,71 @@
+workspace out/bench/room/workspaces/20261126-080354-kimi-dense
+/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-080354-kimi-dense
+done in 1434.4 s, cost $7.407834999999997, turns 158
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-082748-kimi-dense/renders/flat in 987 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-082748-kimi-dense/renders/depth in 611 ms
+interaction checklist: 13/30 passed (0.433)
+  FAIL window expect=fixed reason=missing_object
+  FAIL door expect=hinge reason=merged
+  FAIL sofa expect=movable reason=declared_static
+  FAIL armchair expect=movable reason=merged
+  FAIL armchair_cushion expect=movable reason=merged
+  FAIL coffee_table expect=movable reason=merged
+  FAIL bowl expect=movable reason=merged
+  FAIL wine_glass expect=movable reason=merged
+  FAIL slipper_left expect=movable reason=merged
+  FAIL slipper_right expect=movable reason=merged
+  FAIL piano_bench expect=movable reason=merged
+  FAIL coffee_table expect=rests reason=merged
+  FAIL bowl expect=rests reason=merged
+  FAIL wine_glass expect=rests reason=merged
+  FAIL armchair_cushion expect=rests reason=merged
+  FAIL piano_bench expect=rests reason=merged
+  FAIL slipper_left expect=rests reason=merged
+sequence (lazy): 17/24 passed (0.708)
+  step 1 push coffee_table  woken=[coffee_table]
+  step 2 carry wine_glass  woken=[rug_dark]
+  step 3 push armchair  woken=[armchair_cushion,rug_light]
+    FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  step 4 carry bowl  woken=[]
+    FAIL on bowl {"under":"rug_dark","gap_m":-0.001}
+  step 5 turn door  woken=[]
+    FAIL turned door {"turned_deg":0}
+  step 6 push coffee_table  woken=[]
+    FAIL on bowl {"under":"rug_dark","gap_m":0}
+  FINAL FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  FINAL FAIL stayed slipper_left {"shift_m":0.092}
+  FINAL FAIL stayed slipper_right {"shift_m":0.092}
+sequence (settled): 17/24 passed (0.708)
+  step 1 push coffee_table  woken=[]
+  step 2 carry wine_glass  woken=[]
+  step 3 push armchair  woken=[]
+    FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  step 4 carry bowl  woken=[]
+    FAIL on bowl {"under":"rug_dark","gap_m":0}
+  step 5 turn door  woken=[]
+    FAIL turned door {"turned_deg":0}
+  step 6 push coffee_table  woken=[]
+    FAIL on bowl {"under":"rug_dark","gap_m":0}
+  FINAL FAIL on armchair_cushion {"under":"floor","gap_m":0}
+  FINAL FAIL stayed slipper_left {"shift_m":0.077}
+  FINAL FAIL stayed slipper_right {"shift_m":0.077}
+kimi-dense-flat: fidelity={'psnr': 13.1834, 'ssim': 0.4328, 'lpips': 0.6807} geometry={'coverage': 0.9935, 'median_abs_m': 0.1211, 'within_10cm': 0.4814, 'median_rel': 0.0483} interact=13/30 sequence_lazy=17/24 sequence_settled=17/24
+run dir: /Users/jwj/Code/GameWorldModel/out/bench/room/runs/20261126-082748-kimi-dense
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/Users/jwj/Code/GameWorldModel/venv/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=VGG16_Weights.IMAGENET1K_V1`. You can also use `weights=VGG16_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/000/held_flat in 1008 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/000/held_depth in 588 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/000/train_flat in 762 ms
+{"snapshot": "000", "code": {"lines": 424, "bytes": 22069}, "held_out": {"psnr": 13.1834, "ssim": 0.4328, "lpips": 0.6807}, "train": {"psnr": 13.299, "ssim": 0.4276, "lpips": 0.6552}, "geometry": {"coverage": 0.9935, "median_abs_m": 0.1211, "within_10cm": 0.4814, "median_rel": 0.0483}}
+rendered 39 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/final/held_flat in 1004 ms
+rendered 39 views (depth, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/final/held_depth in 591 ms
+rendered 24 views (flat, 779x519) to /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense/renders/final/train_flat in 765 ms
+{"snapshot": "final", "code": {"lines": 424, "bytes": 22069}, "held_out": {"psnr": 13.1834, "ssim": 0.4328, "lpips": 0.6807}, "train": {"psnr": 13.299, "ssim": 0.4276, "lpips": 0.6552}, "geometry": {"coverage": 0.9935, "median_abs_m": 0.1211, "within_10cm": 0.4814, "median_rel": 0.0483}}
+trajectory: /Users/jwj/Code/GameWorldModel/out/bench/room/trajectories/20261126-082800-kimi-dense
+DONE kimi-dense -> docs/results/runs/room-kimi-dense

@@ -1,0 +1,24 @@
+{
+ "code_reprojected": {
+  "psnr": 24.5095,
+  "ssim": 0.8478,
+  "lpips": 0.2304,
+  "coverage": 0.9596
+ },
+ "3dgs_reprojected": {
+  "psnr": 31.5919,
+  "ssim": 0.9309,
+  "lpips": 0.1593,
+  "coverage": 0.9159
+ },
+ "code_colour_corrected": {
+  "psnr": 16.4043,
+  "ssim": 0.5136,
+  "lpips": 0.5929
+ },
+ "code_flat": {
+  "psnr": 13.8859,
+  "ssim": 0.4876,
+  "lpips": 0.6128
+ }
+}

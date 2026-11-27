@@ -1,0 +1,53 @@
+{
+ "label": "kimi-dense",
+ "workspace": "/Users/jwj/Code/GameWorldModel/out/bench/room/workspaces/20261126-080354-kimi-dense",
+ "scene": "room",
+ "rows": [
+  {
+   "snapshot": "000",
+   "code": {
+    "lines": 424,
+    "bytes": 22069
+   },
+   "held_out": {
+    "psnr": 13.1834,
+    "ssim": 0.4328,
+    "lpips": 0.6807
+   },
+   "train": {
+    "psnr": 13.299,
+    "ssim": 0.4276,
+    "lpips": 0.6552
+   },
+   "geometry": {
+    "coverage": 0.9935,
+    "median_abs_m": 0.1211,
+    "within_10cm": 0.4814,
+    "median_rel": 0.0483
+   }
+  },
+  {
+   "snapshot": "final",
+   "code": {
+    "lines": 424,
+    "bytes": 22069
+   },
+   "held_out": {
+    "psnr": 13.1834,
+    "ssim": 0.4328,
+    "lpips": 0.6807
+   },
+   "train": {
+    "psnr": 13.299,
+    "ssim": 0.4276,
+    "lpips": 0.6552
+   },
+   "geometry": {
+    "coverage": 0.9935,
+    "median_abs_m": 0.1211,
+    "within_10cm": 0.4814,
+    "median_rel": 0.0483
+   }
+  }
+ ]
+}

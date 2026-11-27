@@ -1,0 +1,392 @@
+{
+  "pine_floor": {
+    "prompt": "old stripped pine floorboards, warm honey-orange colour, wide planks running horizontally, visible dark knots, nail heads and thin dark gaps between boards, satin varnish",
+    "seed": 11,
+    "base_color": "#b98645",
+    "roughness": 0.55
+  },
+  "wall_cream": {
+    "prompt": "smooth matt painted plaster wall, warm cream magnolia colour, very faint roller texture, no pattern",
+    "seed": 12,
+    "base_color": "#c6b78c",
+    "roughness": 0.95
+  },
+  "ceiling_white": {
+    "prompt": "smooth matt white painted plaster ceiling, plain, no pattern",
+    "seed": 13,
+    "base_color": "#d6cfb6",
+    "roughness": 0.95
+  },
+  "trim_white": {
+    "prompt": "white gloss painted wood trim, smooth, faint brush marks",
+    "seed": 14,
+    "base_color": "#d9d3bf",
+    "roughness": 0.4
+  },
+  "door_white": {
+    "prompt": "white satin painted wooden door surface, smooth, faint vertical brush strokes",
+    "seed": 15,
+    "base_color": "#d6cfb8",
+    "roughness": 0.45
+  },
+  "door_panel": {
+    "prompt": "white satin painted recessed wooden door panel, smooth, slightly shadowed",
+    "seed": 16,
+    "base_color": "#c9c2aa",
+    "roughness": 0.45
+  },
+  "hall_dark": {
+    "prompt": "dim unlit interior wall in shadow, very dark warm grey-brown, plain",
+    "seed": 17,
+    "base_color": "#2b2620",
+    "roughness": 0.9
+  },
+  "hall_tile": {
+    "prompt": "Victorian encaustic hallway floor tiles, small black and white checkerboard squares set diagonally, matt",
+    "seed": 18,
+    "base_color": "#6f6a60",
+    "roughness": 0.6
+  },
+  "window_daylight": {
+    "prompt": "overcast daylight view through window glass, pale grey sky, blurred light grey rendered garden wall and soft green foliage, bright and washed out",
+    "seed": 19,
+    "base_color": "#b4bdb0",
+    "roughness": 0.2
+  },
+  "blind_olive": {
+    "prompt": "dark olive-grey woven linen roman blind fabric, horizontal soft folds",
+    "seed": 20,
+    "base_color": "#5f5c4c",
+    "roughness": 0.9
+  },
+  "radiator_white": {
+    "prompt": "white painted steel panel radiator, fine vertical convector ribs, satin finish",
+    "seed": 21,
+    "base_color": "#d2cdbb",
+    "roughness": 0.5
+  },
+  "cardboard": {
+    "prompt": "plain brown corrugated cardboard box surface, matt, faint parallel flute lines",
+    "seed": 22,
+    "base_color": "#9d7a4e",
+    "roughness": 0.9
+  },
+  "net_curtain": {
+    "prompt": "white sheer voile net curtain backlit by daylight, soft vertical folds, bright translucent",
+    "seed": 23,
+    "base_color": "#d3d2c8",
+    "roughness": 0.9
+  },
+  "curtain_olive": {
+    "prompt": "heavy olive-bronze silk taffeta curtain fabric, deep vertical pleats with soft sheen, dark brownish green",
+    "seed": 24,
+    "base_color": "#544a33",
+    "roughness": 0.6
+  },
+  "shelf_white": {
+    "prompt": "white painted built-in wooden shelving, smooth satin paint, plain",
+    "seed": 25,
+    "base_color": "#d3ccb4",
+    "roughness": 0.55
+  },
+  "paper_white": {
+    "prompt": "plain white matt card, smooth, slightly warm",
+    "seed": 26,
+    "base_color": "#dedacb",
+    "roughness": 0.8
+  },
+  "boardgame_red": {
+    "prompt": "printed cardboard board game box side, red and orange with a yellow title band, glossy print",
+    "seed": 27,
+    "base_color": "#a8402a",
+    "roughness": 0.5
+  },
+  "boardgame_blue": {
+    "prompt": "printed cardboard board game box side, blue with small white lettering band, glossy print",
+    "seed": 28,
+    "base_color": "#3d5a8a",
+    "roughness": 0.5
+  },
+  "books_mixed": {
+    "prompt": "row of upright book spines packed tightly on a shelf, many colours, mostly dark navy, black, red and cream paperbacks, thin vertical stripes",
+    "seed": 29,
+    "base_color": "#4b3d31",
+    "roughness": 0.8
+  },
+  "photo_dark": {
+    "prompt": "black and white botanical photograph print, white seed heads on a dark grey background, matt",
+    "seed": 30,
+    "base_color": "#3a3a37",
+    "roughness": 0.7
+  },
+  "photo_pink": {
+    "prompt": "photograph print of bright pink autumn leaves against dark green foliage, matt",
+    "seed": 31,
+    "base_color": "#8f4a52",
+    "roughness": 0.7
+  },
+  "photo_green": {
+    "prompt": "outdoor family snapshot print, mostly green lawn and trees with small figures in blue clothes, matt",
+    "seed": 32,
+    "base_color": "#5f7a4c",
+    "roughness": 0.7
+  },
+  "clock_orange": {
+    "prompt": "round wall clock face made of overlapping translucent orange, terracotta and sage green discs, modern, matt",
+    "seed": 33,
+    "base_color": "#b06c40",
+    "roughness": 0.6
+  },
+  "pine_bookcase": {
+    "prompt": "light natural pine wood furniture board, pale yellow, fine straight grain running vertically, satin lacquer",
+    "seed": 34,
+    "base_color": "#b98d52",
+    "roughness": 0.6
+  },
+  "globe_tan": {
+    "prompt": "antique style world globe surface, parchment tan oceans and sepia continents, fine map lines",
+    "seed": 35,
+    "base_color": "#b59a66",
+    "roughness": 0.6
+  },
+  "hearth_marble": {
+    "prompt": "polished pale grey marble slab, soft white and grey veining",
+    "seed": 36,
+    "base_color": "#a6a393",
+    "roughness": 0.3
+  },
+  "mantel_white": {
+    "prompt": "white painted fireplace surround, smooth satin paint over stone, plain",
+    "seed": 37,
+    "base_color": "#cfc8b2",
+    "roughness": 0.5
+  },
+  "rug_dark_green": {
+    "prompt": "deep bottle-green shaggy high pile rug, dense twisted wool tufts, very dark green, no pattern",
+    "seed": 38,
+    "base_color": "#1d2c28",
+    "roughness": 1.0
+  },
+  "rug_light_blue": {
+    "prompt": "pale grey-blue shaggy high pile rug, dense soft tufts, light duck-egg colour, no pattern",
+    "seed": 39,
+    "base_color": "#a2ab9e",
+    "roughness": 1.0
+  },
+  "rug_piano": {
+    "prompt": "flat woven cream rug with a dense dark navy and charcoal Persian floral medallion pattern, small ornate motifs all over, short cream fringe",
+    "seed": 40,
+    "base_color": "#9b9788",
+    "roughness": 0.95
+  },
+  "sofa_grey": {
+    "prompt": "coarse woven tweed upholstery fabric, mid grey with flecks of beige and charcoal, chunky basket weave",
+    "seed": 41,
+    "base_color": "#5f5a4b",
+    "roughness": 0.95
+  },
+  "blanket_dark": {
+    "prompt": "soft charcoal grey fleece blanket, matt, gentle rumpled folds",
+    "seed": 42,
+    "base_color": "#2c2f30",
+    "roughness": 1.0
+  },
+  "cushion_floral": {
+    "prompt": "embroidered folk-art cushion fabric, black background with dense red, white and blue stylised flowers",
+    "seed": 43,
+    "base_color": "#4a3338",
+    "roughness": 0.9
+  },
+  "jacket_red": {
+    "prompt": "crumpled deep red quilted nylon jacket fabric, soft folds, slight sheen",
+    "seed": 44,
+    "base_color": "#8e2a22",
+    "roughness": 0.6
+  },
+  "keyboard_black": {
+    "prompt": "black computer keyboard seen from above, rows of small square matt black keys with faint white legends",
+    "seed": 45,
+    "base_color": "#1b1b1a",
+    "roughness": 0.6
+  },
+  "tray_wood": {
+    "prompt": "light beech wood laminate table top, pale yellow-tan, fine straight grain",
+    "seed": 46,
+    "base_color": "#b39457",
+    "roughness": 0.5
+  },
+  "armchair_blue": {
+    "prompt": "dark slate-blue chenille upholstery fabric, soft velvety nap, deep petrol blue-grey, plain",
+    "seed": 47,
+    "base_color": "#374447",
+    "roughness": 0.95
+  },
+  "cushion_cream": {
+    "prompt": "chunky hand-knitted cream wool cushion cover with large irregular chocolate brown cow-like patches",
+    "seed": 48,
+    "base_color": "#b3a077",
+    "roughness": 1.0
+  },
+  "cushion_brown": {
+    "prompt": "chunky hand-knitted chocolate brown wool, thick loops",
+    "seed": 49,
+    "base_color": "#5a3a22",
+    "roughness": 1.0
+  },
+  "footstool_blue": {
+    "prompt": "dark teal-blue woven cotton canvas upholstery, fine horizontal slub weave, matt",
+    "seed": 50,
+    "base_color": "#2f4347",
+    "roughness": 0.95
+  },
+  "birch_frame": {
+    "prompt": "bent laminated birch plywood, pale golden yellow wood, smooth clear lacquer, fine grain along the length",
+    "seed": 51,
+    "base_color": "#c39650",
+    "roughness": 0.45
+  },
+  "table_walnut": {
+    "prompt": "reddish brown walnut wood laminate table top, straight fine grain, semi-gloss",
+    "seed": 52,
+    "base_color": "#6c4424",
+    "roughness": 0.4
+  },
+  "metal_black": {
+    "prompt": "matt black powder-coated steel, smooth, uniform",
+    "seed": 53,
+    "base_color": "#181817",
+    "roughness": 0.6
+  },
+  "metal_brass": {
+    "prompt": "polished brass metal, warm yellow, soft reflections",
+    "seed": 54,
+    "base_color": "#a88a45",
+    "roughness": 0.3
+  },
+  "steel_bowl": {
+    "prompt": "brushed stainless steel, silvery grey, fine circular brushing, soft reflections",
+    "seed": 55,
+    "base_color": "#a39f93",
+    "roughness": 0.3
+  },
+  "steel_inside": {
+    "prompt": "inside of a brushed stainless steel bowl in shadow, darker silvery grey, soft reflections",
+    "seed": 56,
+    "base_color": "#7d776a",
+    "roughness": 0.3
+  },
+  "glass_clear": {
+    "prompt": "clear colourless drinking glass, transparent with faint pale grey-green tint and bright highlights",
+    "seed": 57,
+    "base_color": "#aeb3a6",
+    "roughness": 0.1
+  },
+  "slipper_tan": {
+    "prompt": "tan camel-coloured suede slipper fabric, soft nap, embossed logo pattern",
+    "seed": 58,
+    "base_color": "#b5853f",
+    "roughness": 0.9
+  },
+  "slipper_trim": {
+    "prompt": "cream sheepskin fleece lining, short curly pile",
+    "seed": 59,
+    "base_color": "#cdbf99",
+    "roughness": 1.0
+  },
+  "speaker_black": {
+    "prompt": "matt black vinyl wrapped loudspeaker cabinet, very fine ash wood grain texture, uniform black",
+    "seed": 60,
+    "base_color": "#161615",
+    "roughness": 0.7
+  },
+  "speaker_cone": {
+    "prompt": "loudspeaker driver cone, pale grey-white woven fibre cone with a black rubber surround ring",
+    "seed": 61,
+    "base_color": "#8f8f88",
+    "roughness": 0.5
+  },
+  "stand_glass": {
+    "prompt": "thick clear toughened glass shelf seen from above, pale green tint at the edges, faint dust and reflections",
+    "seed": 62,
+    "base_color": "#6f7a70",
+    "roughness": 0.1
+  },
+  "post_wood": {
+    "prompt": "dark walnut stained wood, deep brown, smooth satin finish, straight grain",
+    "seed": 63,
+    "base_color": "#4a2f1c",
+    "roughness": 0.4
+  },
+  "tv_black": {
+    "prompt": "switched-off television screen, glossy black glass, uniform, faint soft reflections",
+    "seed": 64,
+    "base_color": "#0c0c0d",
+    "roughness": 0.1
+  },
+  "orchid_pink": {
+    "prompt": "cluster of small pink orchid blossoms, dense soft pink and magenta petals with a few green stems",
+    "seed": 65,
+    "base_color": "#b9788c",
+    "roughness": 0.8
+  },
+  "terracotta": {
+    "prompt": "unglazed terracotta clay plant pot surface, orange-brown, matt, slight white mineral bloom",
+    "seed": 66,
+    "base_color": "#9e5230",
+    "roughness": 0.9
+  },
+  "soil_dark": {
+    "prompt": "dark brown potting compost, coarse crumbly soil with small bark pieces",
+    "seed": 67,
+    "base_color": "#2a2018",
+    "roughness": 1.0
+  },
+  "plant_trunk": {
+    "prompt": "yucca cane trunk bark, grey-brown, rough fibrous rings",
+    "seed": 68,
+    "base_color": "#6a5536",
+    "roughness": 0.9
+  },
+  "plant_leaf": {
+    "prompt": "long sword-shaped yucca leaf, mid green with a faint yellow-green central stripe, smooth waxy surface, fine lengthwise veins",
+    "seed": 69,
+    "base_color": "#4f6b25",
+    "roughness": 0.6
+  },
+  "piano_black": {
+    "prompt": "polished ebony black piano lacquer, mirror gloss, uniform deep black",
+    "seed": 70,
+    "base_color": "#111112",
+    "roughness": 0.08
+  },
+  "piano_keys": {
+    "prompt": "piano keyboard seen from above, row of narrow white keys with groups of two and three black keys, keys running vertically",
+    "seed": 71,
+    "base_color": "#cfcabb",
+    "roughness": 0.3
+  },
+  "book_pale": {
+    "prompt": "stack of pale sage green and cream clothbound music books, matt covers",
+    "seed": 72,
+    "base_color": "#aeb39c",
+    "roughness": 0.8
+  },
+  "book_green": {
+    "prompt": "dark green clothbound hardback book cover with thin gold line border, matt",
+    "seed": 73,
+    "base_color": "#3d4a35",
+    "roughness": 0.8
+  },
+  "bench_leather": {
+    "prompt": "black padded leather piano stool seat, smooth fine grain, soft sheen",
+    "seed": 74,
+    "base_color": "#18181a",
+    "roughness": 0.5
+  },
+  "lamp_white": {
+    "prompt": "white rice paper lampshade, softly glowing, faint horizontal fibre texture",
+    "seed": 75,
+    "base_color": "#ddd5c0",
+    "roughness": 0.9
+  }
+}
