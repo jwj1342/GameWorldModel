@@ -57,3 +57,28 @@ def test_观测比例的口径和资产缓存一致():
 def test_没有obb时返回None():
     assert observed_edge_ratios({"obb": []}) is None
     assert observed_edge_ratios(None) is None
+
+
+def test_choose_assets_only_reranks_text_eligible_candidates():
+    from gwm.assets.annotate import choose_assets
+    from gwm.assets.library import Asset
+    catalog=[Asset('kit/cup','cup.glb','kit','kit','cup'),
+             Asset('kit/plate','plate.glb','kit','cup','plate')]
+    evidence={'objects':[{'id':'item','obb':[{'size':[1.,.1,.1]}]}]}
+    for weight in (0,.5,.9,1):
+        p={'objects':[{'id':'item','class':'cup','geom':{'kind':'asset','query':'cup','extent':[1.,.1,.1]}}]}
+        result=choose_assets(p,evidence,[],{},catalog,min_score=.45,
+            shapes={'kit/cup':[1.,1.,1.],'kit/plate':[1.,.1,.1]},shape_weight=weight)
+        assert result[0]['chosen']=='kit/cup'
+        assert p['objects'][0]['geom']['ref']=='kit/cup'
+
+
+def test_no_text_eligible_candidate_still_falls_back():
+    from gwm.assets.annotate import choose_assets
+    from gwm.assets.library import Asset
+    p={'objects':[{'id':'item','class':'cup','geom':{'kind':'asset','query':'cup','extent':[1.,.1,.1]}}]}
+    evidence={'objects':[{'id':'item','obb':[{'size':[1.,.1,.1]}]}]}
+    result=choose_assets(p,evidence,[],{},[Asset('kit/plate','plate.glb','kit','cup','plate')],
+        min_score=.45,shapes={'kit/plate':[1.,.1,.1]},shape_weight=.9)
+    assert result[0]['chosen'] is None
+    assert 'ref' not in p['objects'][0]['geom']

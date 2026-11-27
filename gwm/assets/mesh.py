@@ -75,6 +75,61 @@ def _node_matrix(node: dict) -> np.ndarray:
     return m
 
 
+def load_extent(path: str | Path) -> np.ndarray | None:
+    """Static GLB XYZ bounds, using the same local-box transform as Three Box3.
+
+    Keep axis order and every active node instance. Surface sampling and sorted
+    ratios cannot determine the rendered height. Unsupported/deformed geometry
+    returns None instead of a partial, underestimated bound.
+    """
+    try:
+        gltf, buf = _chunks(Path(path).read_bytes())
+        if gltf is None or buf is None or not gltf.get("scenes"):
+            return None
+        points = []
+
+        def walk(index: int, parent: np.ndarray, ancestors: frozenset) -> None:
+            if index in ancestors:
+                raise ValueError("cyclic GLB node")
+            node = gltf["nodes"][index]
+            matrix = parent @ _node_matrix(node)
+            if "skin" in node or node.get("weights"):
+                raise ValueError("deformed GLB is unsupported")
+            if "mesh" in node:
+                mesh = gltf["meshes"][node["mesh"]]
+                if mesh.get("weights"):
+                    raise ValueError("morph weights are unsupported")
+                for primitive in mesh["primitives"]:
+                    if primitive.get("targets") or primitive.get("extensions", {}).get("KHR_draco_mesh_compression"):
+                        raise ValueError("unsupported primitive")
+                    accessor = primitive["attributes"]["POSITION"]
+                    spec = gltf["accessors"][accessor]
+                    if spec.get("componentType") != _FLOAT32 or spec.get("normalized"):
+                        raise ValueError("quantized positions are unsupported")
+                    position = _accessor(gltf, buf, accessor)
+                    if position is None or position.ndim != 2 or position.shape[1] != 3 or not len(position):
+                        raise ValueError("missing positions")
+                    if not np.isfinite(position).all():
+                        raise ValueError("nonfinite positions")
+                    lo, hi = position.min(0), position.max(0)
+                    # Box3.setFromObject transforms the geometry's local AABB.
+                    corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+                    points.append(corners @ matrix[:3, :3].T + matrix[:3, 3])
+            for child in node.get("children", []):
+                walk(child, matrix, ancestors | {index})
+
+        scene = gltf["scenes"][gltf.get("scene", 0)]
+        for index in scene.get("nodes", []):
+            walk(index, np.eye(4), frozenset())
+        if not points:
+            return None
+        extent = np.ptp(np.vstack(points), axis=0)
+        return extent if np.isfinite(extent).all() and (extent > 1e-9).all() else None
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
 def load_points(path: str | Path, samples: int = 4000, seed: int = 0) -> np.ndarray | None:
     """在资产表面上采点，返回 (N, 3)。读不动就返回 None。
 
