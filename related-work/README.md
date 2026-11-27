@@ -1,6 +1,19 @@
 # 相关工作
 
-> 按类别整理的相关工作与本课题的关系，供写作与对比使用。条目来自 RP 原有清单与 2026-09-18 的调研（`../survey/01`、`04`、`05`）；标注"未核实"的是调研时未能从一手来源确认的信息。
+这个目录收着我们引用过的所有相关工作。这份 README 是按类别写的定位，说明每支工作和本课题差在哪里。`coding-agent-scene-programs.md` 是 2026-10-23 的专题调研（原 #82），讲 GPT-6 Astra 之后那批编码智能体写场景程序的工作，以及据此定下的叙事路线。`index.csv` 是逐篇的索引，slides、论文 bib、故事线文档、issue、`../survey/` 里出现过的工作都在里面。`pdf/` 放论文原文，只在本地，不进 git，丢了可以按索引从 arXiv 重新下载。
+
+`index.csv` 每行一篇，各列的意思：
+
+- `name`、`title`、`year`、`arxiv`、`url`：简称、标题、年份、arXiv 编号和链接。标题和年份取自 arXiv。
+- `cited_in`：在哪里引用过。`slides` 是汇报 slides，`paper` 是论文 bib，`storyline` 是故事线文档（在本地的 `../notes/storyline/`，不进 git），`issue99` 是 #99，`survey` 是 `../survey/` 里的调研报告，`agent-survey` 是本目录的 `coding-agent-scene-programs.md`，`readme` 是这份 README。
+- `readme_section`：这份 README 里的哪一节。空着的是 README 还没写进去的工作。
+- `bibkey`：在 `paper/main.bib` 里的键。
+- `match`：编号是怎么来的。`原有编号` 是来源里本来就写了编号；`标题精确匹配` 是按 bib 标题在 arXiv 上查到的；`名字自动匹配（待核）` 是只按 README 里的名字在 arXiv 上找到的，用之前要核一下是不是那篇；`未找到`、`多个候选` 是没找到或找到不止一篇，要手动补；`产品或网页`、`网页` 是本来就没有论文。
+- `pdf`：`pdf/` 里的文件名，格式是「编号-简称.pdf」。
+
+新加一篇：把 PDF 按这个格式放进 `pdf/`，在 `index.csv` 里加一行；要写进定位的，再在下面对应的节里补一句。索引最初（2026-11-27）由脚本从上面这些来源批量汇总、去 arXiv 查的标题和年份，之后手动维护。
+
+下面的定位写于 2026-09-19，条目来自 RP 原有清单与 2026-09-18 的调研（`../survey/01`、`04`、`05`）；标注"未核实"的是调研时未能从一手来源确认的信息。之后在 slides 和故事线里引用的新工作（比如 Code4Scene）只在 `index.csv` 里，还没写进这里。
 
 ## 0. 定位
 
@@ -19,7 +32,7 @@
 > 「编码智能体写显式场景程序」的工作，其中 NeoWorld-Pro 已进 NeurIPS 2026，做到了
 > 「单图 → 程序 → 关节 + 物理属性 → 仿真器验证」。**"程序化表示"这一环不再是空白**，
 > 缺口窄到只剩视频输入与时序动力学。写作时不能再说「没人做程序化场景表征」。
-> 详见 [`related-work-coding-agent-scene-programs.md`](related-work-coding-agent-scene-programs.md)。
+> 详见 [`coding-agent-scene-programs.md`](coding-agent-scene-programs.md)。
 
 ## 1. 以程序为场景表征（inverse graphics）
 
@@ -103,11 +116,11 @@
 
 ## 7. 多智能体有效性
 
-Cemri et al., Why Do Multi-Agent LLM Systems Fail（NeurIPS 2025）；How Generation Architecture Shapes Code Complexity（2026.06）；AgentCoder（2023）；Anthropic 多智能体研究系统博文；SceneConductor（2026.06）、VULCAN（2025.12）。结论与数字见 `feedback.md` 第 7 节。
+Cemri et al., Why Do Multi-Agent LLM Systems Fail（NeurIPS 2025）；How Generation Architecture Shapes Code Complexity（2026.06）；AgentCoder（2023）；Anthropic 多智能体研究系统博文；SceneConductor（2026.06）、VULCAN（2025.12）。结论与数字见 `../survey/04_agent_scaffold_visual_feedback.md`。
 
 ## 8. 视觉反馈与渲染奖励
 
-SceneCraft、BlenderAlchemy（ECCV 2024）、BlenderGym（CVPR 2025）、SEIG、Scenix、Agentic 3D Scene Generation with Spatially Contextualized VLMs（2025）、SceneWeaver（NeurIPS 2025）、SceneAssistant（2026.03）、Design2Code、UI2Code^N（2025.11）、VF-Coder（2026.04）、ChartMimic、Visual-SDPO（2026.06）、RLRF（NeurIPS 2025）、cadrille（ICLR 2026 Oral）、CAD-RL、3DCodeBench（2026.06）。机制表见 `feedback.md` 第 8 节。
+SceneCraft、BlenderAlchemy（ECCV 2024）、BlenderGym（CVPR 2025）、SEIG、Scenix、Agentic 3D Scene Generation with Spatially Contextualized VLMs（2025）、SceneWeaver（NeurIPS 2025）、SceneAssistant（2026.03）、Design2Code、UI2Code^N（2025.11）、VF-Coder（2026.04）、ChartMimic、Visual-SDPO（2026.06）、RLRF（NeurIPS 2025）、cadrille（ICLR 2026 Oral）、CAD-RL、3DCodeBench（2026.06）。机制表见 `../survey/04_agent_scaffold_visual_feedback.md`。
 
 ## 9. 感知与重建
 
@@ -120,8 +133,8 @@ SceneCraft、BlenderAlchemy（ECCV 2024）、BlenderGym（CVPR 2025）、SEIG、
 
 ## 10. 资产
 
-Objaverse / Objaverse-XL / Objaverse++；Holodeck 的 CLIP + SBERT + 几何检索；Holodeck 2.0 改为 Hunyuan3D 生成；Scenix 的 mask + 描述合成参考图再生成；OpenShape、Uni3D；TRELLIS / TRELLIS.2；Hunyuan3D 2.x / Omni / Part；TripoSG；Step1X-3D；Direct3D-S2；PartCrafter；SAM 3D Objects；AssetGen（2026.05）。细节见 `assets.md`。
+Objaverse / Objaverse-XL / Objaverse++；Holodeck 的 CLIP + SBERT + 几何检索；Holodeck 2.0 改为 Hunyuan3D 生成；Scenix 的 mask + 描述合成参考图再生成；OpenShape、Uni3D；TRELLIS / TRELLIS.2；Hunyuan3D 2.x / Omni / Part；TripoSG；Step1X-3D；Direct3D-S2；PartCrafter；SAM 3D Objects；AssetGen（2026.05）。细节见 `../survey/03_assets_and_3d_generation.md`。
 
 ## 11. 产品与内核
 
-Rosebud AI 与其开源内核 Roseblox；Bitmagic；Bezi；Astrocade；Roblox Cube 3D / 4D（Cube 3D 开源）；Unity AI；Godot MCP 插件生态；VibeGame；fly.pieter.com 等 vibe coding 游戏。用途见 `runtime.md` 第 7 节。
+Rosebud AI 与其开源内核 Roseblox；Bitmagic；Bezi；Astrocade；Roblox Cube 3D / 4D（Cube 3D 开源）；Unity AI；Godot MCP 插件生态；VibeGame；fly.pieter.com 等 vibe coding 游戏。用途见 `../survey/02_runtime_threejs_gamelayer.md`。

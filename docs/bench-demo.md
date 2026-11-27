@@ -52,6 +52,8 @@ venv/bin/python -m gwm.bench.run eval   --config configs/bench/room.yaml --cand 
 venv/bin/python -m gwm.bench.run report --config configs/bench/room.yaml
 ```
 
+**现在先别跑新的智能体运行。** 工作区在仓库里面，智能体启动时会拿到仓库的 git 状态，会读到仓库根目录的 `CLAUDE.md` 和 `AGENTS.md`，也读得到别的运行写的 `scene.js`（已经发生过一次）。要先做隔离：工作区挪到仓库外，并且禁止智能体读仓库，然后每次运行都查一遍它读过哪些文件。
+
 网页在 `out/bench/room/report/index.html`。每次 `eval` 的产物在 `out/bench/room/runs/<时间>-<label>/`，不覆盖。
 
 不想等智能体、只想确认管线没坏：`examples/bench_smoke/` 是一个手写的小场景，`--cand examples/bench_smoke --label smoke` 就能走完评测。它和 room 毫无关系，分数只是个下限。
