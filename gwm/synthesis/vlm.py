@@ -58,6 +58,18 @@ class OpenAICompatClient:
         self.use_response_format = bool(v.get("json_schema_response_format", True))
         self.max_calls = int((cfg.get("budget") or {}).get("max_vlm_calls", 0)) or None
         self.seed = v.get("seed")          # 运行级随机种子；单次调用可用 chat(seed=...) 覆盖
+        self.request_recorder = None
+        if v.get("record_requests"):
+            if self.log_path is None:
+                raise ValueError("record_requests requires log_path")
+            from .request_record import CompletionRecorder
+            self.request_recorder = CompletionRecorder(str(self.log_path) + ".requests.jsonl")
+
+    def _create_completion(self, **kwargs):
+        create = self.client.chat.completions.create
+        if self.request_recorder is not None:
+            return self.request_recorder.call(create, **kwargs)
+        return create(**kwargs)
     def chat(self, system, user_text, images=None, json_schema=None, temperature=None, max_tokens=None, seed=None) -> dict:
         if self.max_calls and self.calls >= self.max_calls:
             raise RuntimeError(f"用掉了 {self.calls} 次模型调用，超过 budget.max_vlm_calls={self.max_calls}")
@@ -87,13 +99,13 @@ class OpenAICompatClient:
             t0 = time.time()
             try:
                 try:
-                    r = self.client.chat.completions.create(**kwargs)
+                    r = self._create_completion(**kwargs)
                 except Exception as e:  # some providers reject response_format / extras: retry once without them, with the schema inlined
                     msg = str(e)
-                    if ("response_format" in kwargs or "extra_body" in kwargs) and ("400" in msg or "invalid" in msg.lower() or "not supported" in msg.lower()):
+                    if self.cfg.get("allow_parameter_fallback", True) and ("response_format" in kwargs or "extra_body" in kwargs) and ("400" in msg or "invalid" in msg.lower() or "not supported" in msg.lower()):
                         kwargs.pop("extra_body", None)
                         kwargs.pop("response_format", None)
-                        r = self.client.chat.completions.create(**kwargs)
+                        r = self._create_completion(**kwargs)
                     else: raise
                 text = r.choices[0].message.content or ""
                 usage = getattr(r, "usage", None)
