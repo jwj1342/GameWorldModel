@@ -268,7 +268,7 @@ assets:
   #
   # 只重排、不改收不收——和图像分同理，量纲不同，混进阈值会误杀。
   shape_weight: 0.0
-  shape_cache: /scratch/jwj/gwm/asset_shapes.json
+  shape_cache: /scratch/jwj/research/GameWorldModel/work/asset_shapes.json
   candidates: 3            # 清单里记几个候选，便于复核检索质量
   enabled: true
 synthesis:

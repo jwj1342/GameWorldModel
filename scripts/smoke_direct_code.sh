@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=00:25:00
-#SBATCH --output=/scratch/jwj/gwm/logs/%x_%j.out
+#SBATCH --output=/scratch/jwj/research/GameWorldModel/work/logs/%x_%j.out
 # 用手写的样例验证直接出代码这条路径的宿主能跑通，不花模型调用。
 set -u
 REPO=/scratch/jwj/research/GameWorldModel

@@ -27,3 +27,7 @@ venv
 
 # 两轴评测 demo 的数据集（体积大，可重新下载）
 data/mipnerf360/
+
+# 作业产物与作业脚本（只在 Vulcan 上用，不进 git）
+/work/
+/jobs/
