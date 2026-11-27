@@ -1,5 +1,7 @@
 # GameWorldModel
 
+> 下面写的是第一阶段的视频重建管线，现在已经冻结、只留作对照。项目现在在做什么见 [docs/status.md](docs/status.md)，跑过的实验和结论见 [experiments/index.csv](experiments/index.csv)，相关工作见 [related-work/](related-work/README.md)，怎么参与和东西放哪见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 给它一段十几秒到一分钟的普通视频，它把视频里的场景恢复成一份可执行的**场景程序**，再编译成一个能在浏览器里打开、能用鼠标直接上手摆弄的 3D 场景。中间没有人工建模。
 
 ![输入视频与重建出来的场景](docs/images/pipeline-example.jpg)
@@ -121,7 +123,7 @@ python3 -m gwm.run_clip --video data/clips/trimmed/我的视频.mp4 --clip 我�
 | 每一项指标现在是多少、怎么量的、排除过哪些假设 | [docs/design-notes.md](docs/design-notes.md) |
 | 更早的结果记录（多数停在 2026-09，数字已被后续改动推翻，看前先对一下日期） | [docs/status.md](docs/status.md) |
 | 三段视频的实际产物，报告和截图 | [docs/results/](docs/results/) |
-| 相关工作 | [docs/related-work.md](docs/related-work.md) |
+| 相关工作 | [related-work/](related-work/README.md)（定位、逐篇索引 index.csv；PDF 只在本地） |
 | 研究提案（开工前写的，与 issue 冲突处以 issue 为准） | [RP.md](RP.md) |
 | 前期调研的原始报告 | [survey/](survey/) |
 
