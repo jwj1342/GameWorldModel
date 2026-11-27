@@ -11,7 +11,7 @@
 - `question`：一句话的问题。
 - `answer`：一两句话的答案，带关键数字。数字要能在 `results` 或 `issue_pr` 里找到出处。
 - `verdict`：`成立`、`不成立`、`部分成立`、`待定`。
-- `code`：用到的脚本、模块、配置，用「; 」隔开。
+- `code`：用到的脚本、模块、配置，用「; 」隔开。只列 main 上有的；notes 里写着「在标签 geometry-pipeline-frozen 上」的，用 `git show geometry-pipeline-frozen:<路径>` 看。
 - `results`：`docs/results/` 下的结果目录。
 - `issue_pr`：对应的 issue 或 PR。
 - `notes`：比如「后来被 #NN 推翻」「这个数是循环的」。
