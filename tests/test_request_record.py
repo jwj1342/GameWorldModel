@@ -124,10 +124,11 @@ def test_baseline_links_sample_and_does_not_reuse_previous_request(tmp_path, mon
         for i in range(2)])
     monkeypatch.setattr(baseline, "read_json", lambda _: {})
     monkeypatch.setattr(baseline, "_sample_identity", lambda s: s["id"])   # #96 的身份检查要读图，这里的样本是假的
-    monkeypatch.setattr(baseline, "context_of", lambda _: {})
-    monkeypatch.setattr(baseline, "user_text", lambda *args: "input")
+    # 没写 task 的样本走 common 这个任务，prompt_baseline 经 task_of 调它的函数
+    monkeypatch.setattr("scripts.statediff.common.context_of", lambda _: {})
+    monkeypatch.setattr("scripts.statediff.common.user_text", lambda *args: "input")
+    monkeypatch.setattr("scripts.statediff.common.system_prompt", lambda: "system")
     monkeypatch.setattr(baseline, "objects_schema", lambda: {})
-    monkeypatch.setattr(baseline, "system_prompt", lambda: "system")
     monkeypatch.setattr("sys.argv", ["prompt_baseline.py", "--samples", "unused", "--sets", "test", "--out", str(path)])
     assert baseline.main() == 0
     rows = records(path)
