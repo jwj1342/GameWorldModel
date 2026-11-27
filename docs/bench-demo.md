@@ -164,7 +164,9 @@ scripts/bench_agent_run.sh kimi configs/bench/counter.yaml kimi-counter         
 
 ## 在 Vulcan 上跑
 
-环境在 `scripts/setup_bench_env.sh`（模块、venv、Chromium 和缓存的路径）。计算节点的代理不放行 npm 源，所以 npm 包和 Playwright 的 Chromium 要先在登录节点下载（`npm install --ignore-scripts`，再 `npx playwright install chromium`，`PLAYWRIGHT_BROWSERS_PATH` 指到 scratch）；Python 依赖全部能从集群轮子库装（`pip install --no-index -r requirements-bench.txt`，gsplat 也在）。
+环境在 `scripts/setup_bench_env.sh`（模块、venv、Chromium 和缓存的路径）。计算节点的代理不放行 npm 源，所以 npm 包和 Playwright 的 Chromium 要先在登录节点下载（`npm install --ignore-scripts`，再 `npx playwright install chromium`，`PLAYWRIGHT_BROWSERS_PATH` 指到下面的 `node/ms-playwright`）；Python 依赖全部能从集群轮子库装（`pip install --no-index -r requirements-bench.txt`，gsplat 也在）。
+
+评测用到的大文件都放在主仓库的 `work/bench/` 下：`out`（各次运行和基线的产物、Slurm 日志）、`venv`、`node`（`node_modules` 和 Chromium）、`models`（LPIPS 用的 VGG 权重）、`torch_extensions`（gsplat 现场编译的内核）。场景数据在主仓库的 `data/mipnerf360`。worktree 里的 `out`、`venv`、`node_modules`、`models`、`data/mipnerf360` 都是指过去的相对软链接，新开 worktree 时照样建一遍就行。HF 缓存（`/scratch/$USER/hf_cache`）和主管线共用，没挪。
 
 三维高斯基线：`python -m gwm.bench.gs_baseline --config configs/bench/room.yaml`。它用 gsplat 的光栅化和默认致密化策略按标准设置训练 30k 步，坐标系、相机（竖直视场角、主点在图像中心）和留出视角都和场景包一致，评测直接用 `fidelity.py` 和 `geometry.py`，产物在 `out/bench/<scene>/baselines/`。
 
