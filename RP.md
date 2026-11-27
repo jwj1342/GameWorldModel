@@ -277,7 +277,7 @@ three.js 不可微，精修通过执行、渲染、比对、修正的循环完�
 | `docs/architecture.md` | 模块与数据流、产物目录、接口契约、场景程序 DSL、错误处理、哪里用模型 |
 | `docs/design-notes.md` | 每一层的选型依据：感知、模型、视觉反馈、运行时、素材 |
 | `docs/status.md` | 当前结果、与设计的差异、已知问题、还没定的事 |
-| `docs/related-work.md` | 相关工作 |
+| `related-work/` | 相关工作：定位（README）、逐篇索引（index.csv）、本地 PDF |
 | `docs/results/` | 三段视频的实际产物 |
 | `survey/` | 前期调研的原始报告与集群探测记录 |
 
@@ -307,7 +307,7 @@ three.js 不可微，精修通过执行、渲染、比对、修正的循环完�
 - VGGT、MonST3R、CUT3R、MoRe (CVPR 2026)、MoSca、Shape of Motion：前馈与动态重建
 - OpenGame、GameDevBench、GameCraft-Bench：agent 游戏开发（应用章节对比）
 
-2026-09-18 调研新增的条目（HoloScene、FAE、OpenGame、Mage、Marble/Spark、HY-World 2.0、ViPE、SAM 3、GameDevBench、GameCraft-Bench 等）已按类别整理到 `docs/related-work.md`。
+2026-09-18 调研新增的条目（HoloScene、FAE、OpenGame、Mage、Marble/Spark、HY-World 2.0、ViPE、SAM 3、GameDevBench、GameCraft-Bench 等）已按类别整理到 `related-work/README.md`。
 
 ---
 
